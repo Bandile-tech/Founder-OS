@@ -8,9 +8,14 @@ import models
 import schemas
 from database import engine, get_db
 from database import SessionLocal
-from typing import List
+from typing import List, Optional, Dict 
+from models import AIMemory
+from memory_service import get_recent_memories
+from fastapi import Query
 from apscheduler.schedulers.background import BackgroundScheduler
 from openai_client import get_chat_response
+from openai_client import get_chat_response_with_memory
+
 
 models.Base.metadata.create_all(bind=engine)
 
@@ -41,6 +46,13 @@ conn.commit()
 class ChatRequest(BaseModel):
     message: str
     session_id: str
+    context: Optional[ExecutionContext] = None
+
+
+class ExecutionContext(BaseModel):
+    weekly_targets: Optional[List[Dict]] = None
+    daily_logs: Optional[List[Dict]] = None
+    kpis: Optional[Dict] = None
 
 
 @app.post("/chat")
@@ -57,7 +69,12 @@ def chat_endpoint(request: ChatRequest):
     conn.commit()
 
     # Get bot response
-    bot_reply = get_chat_response(messages)
+    bot_reply = get_chat_response_with_memory(
+    messages,
+    db=SessionLocal(),
+    context_type="chat"
+)
+
 
     # Save bot reply to DB
     c.execute("INSERT INTO chats (session_id, role, content) VALUES (?, ?, ?)",
@@ -416,4 +433,162 @@ def weekly_score(week: date, db: Session = Depends(get_db)):
             "Execution failure"
         )
     }
+
+@app.get("/weekly-analytics")
+def weekly_analytics(week: date, db: Session = Depends(get_db)):
+    """
+    Core execution intelligence.
+    This endpoint explains WHAT happened and WHY.
+    """
+
+    snapshots = db.query(models.WeeklyTargetSnapshot).filter(
+        models.WeeklyTargetSnapshot.week_start <= week,
+        models.WeeklyTargetSnapshot.week_end >= week
+    ).all()
+
+    if not snapshots:
+        raise HTTPException(status_code=404, detail="No data for this week")
+
+    # --- Aggregates ---
+    planned_total = sum(s.target_value for s in snapshots)
+    actual_total = sum(s.current_value for s in snapshots)
+
+    efficiency = (
+        round(actual_total / planned_total, 2)
+        if planned_total > 0 else 0
+    )
+
+    # --- Target contribution ranking ---
+    target_analysis = []
+    total_contribution = sum(s.current_value for s in snapshots)
+
+    for s in snapshots:
+        contribution_share = (
+            round((s.current_value / total_contribution) * 100, 1)
+            if total_contribution > 0 else 0
+        )
+
+        target_analysis.append({
+            "weekly_target_id": s.weekly_target_id,
+            "planned": s.target_value,
+            "actual": s.current_value,
+            "progress_percent": s.progress_percent,
+            "contribution_percent": contribution_share,
+            "status": s.status
+        })
+
+    target_analysis.sort(
+        key=lambda x: x["contribution_percent"],
+        reverse=True
+    )
+
+    # --- Focus score (Pareto check) ---
+    top_2_contribution = sum(
+        t["contribution_percent"] for t in target_analysis[:2]
+    )
+
+    focus_score = min(int(top_2_contribution), 100)
+
+    # --- Verdict logic ---
+    if efficiency >= 1 and focus_score >= 60:
+        verdict = "Elite, focused execution"
+    elif efficiency >= 0.8:
+        verdict = "Strong but unfocused execution"
+    elif efficiency >= 0.5:
+        verdict = "Busy but ineffective"
+    else:
+        verdict = "Execution breakdown"
+
+    return {
+        "week": str(week),
+        "overview": {
+            "planned_total": planned_total,
+            "actual_total": actual_total,
+            "efficiency_ratio": efficiency,
+            "focus_score": focus_score
+        },
+        "target_rankings": target_analysis,
+        "verdict": verdict
+    }
+
+@app.get("/weekly-ai-review")
+def weekly_ai_review(
+    week: date,
+    db: Session = Depends(get_db),
+    temp_instruction: str | None = Query(None, description="Optional temporary instruction for AI")
+):
+    """
+    AI executive interpretation layer.
+    Converts analytics into judgement and direction.
+    """
+
+    analytics = weekly_analytics(week, db)
+
+    prompt = f"""
+You are an elite execution analyst advising a high-performance founder.
+
+Here is the weekly execution data:
+{analytics}
+
+Respond in the following exact structure:
+
+SUMMARY:
+<2–3 sentences>
+
+LEVERAGE POINT:
+<1 sentence>
+
+UNCOMFORTABLE TRUTH:
+<1 sentence>
+
+NEXT ACTIONS:
+1. ...
+2. ...
+3. ...
+
+LEADERSHIP PRINCIPLE:
+<1 sentence>
+
+Rules:
+- Do not use markdown
+- Do not add extra sections
+- Be precise, unsentimental, and strategic
+"""
+
+    # Add temp_instruction at the start of the messages if provided
+    messages = []
+    if temp_instruction:
+        messages.append({"role": "system", "content": temp_instruction})
+    messages.append({"role": "user", "content": prompt})
+
+    ai_response = get_chat_response_with_memory(
+        messages,
+        db=db,
+        context_type="weekly_ai_review"
+    )
+
+    return {
+        "week": str(week),
+        "analytics_snapshot": analytics["overview"],
+        "ai_review": ai_response
+    }
+
+
+@app.get("/memory/recent")
+def read_recent_memory(
+    limit: int = Query(5, le=20),
+    context_type: str | None = None
+):
+    db = SessionLocal()
+    memories = get_recent_memories(db, limit, context_type)
+
+    return [
+        {
+            "id": m.id,
+            "context_type": m.context_type,
+            "response": m.response,
+            "created_at": m.created_at
+        }
+        for m in memories
+    ]
 

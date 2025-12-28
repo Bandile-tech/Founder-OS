@@ -1,20 +1,75 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Personal GPT Chatbot</title>
-    <link rel="stylesheet" href="style.css">
+<!DOCTYPE html> 
+<html> 
+    <head> 
+        <title>Founder OS — Daily Execution</title> 
+        <link rel="stylesheet" href="style.css"> 
 </head>
 <body>
-    <h1>Personal Chatbot</h1>
 
-    <div id="chat-box"></div>
+<h1>Founder OS — Daily Execution</h1>
 
-    <!-- Wrap input and button in a form -->
-    <form id="chat-form">
-        <input type="text" id="user-input" placeholder="Type your message..." autocomplete="off" />
-        <button type="submit">Send</button>
+<div id="weekly-objectives-panel">
+    <h3>Build Weekly Objectives</h3>
+    <form id="weekly-objective-form">
+        <input type="text" id="objective-title" placeholder="Objective Title" required />
+        <input type="number" id="objective-target" placeholder="Target Count" min="1" required />
+        <button type="submit">Add Objective</button>
+    </form>
+    <ul id="weekly-objectives-list"></ul>
+</div>
+
+<section id="kpi-summary">
+    <h2>Weekly KPI Summary</h2>
+<!-- Replace the weekly-kpi-summary div with radial bars -->
+<div id="weekly-kpi-summary" style="display:flex; gap:20px; justify-content:center; flex-wrap:wrap;"></div>
+
+
+    <ul>
+        <li>Total Executions: <strong id="kpi-total">0</strong></li>
+        <li>Executions This Week: <strong id="kpi-week">0</strong></li>
+        <li>Average Contribution: <strong id="kpi-avg">0</strong></li>
+        <li>Top Focus Target: <strong id="kpi-top">—</strong></li>
+    </ul>
+    <p><strong>Status:</strong> <span id="kpi-status">—</span></p>
+
+</section>
+
+<section>
+    <h2>What did you execute today?</h2>
+
+    <form id="daily-form">
+        <label>Execution Log</label><br>
+        <textarea id="entry" rows="5" placeholder="What did you actually do today?" required></textarea>
+
+        <br><br>
+
+        <label>Weekly Target</label><br>
+        <select id="weekly-target" required></select>
+
+        <br><br>
+
+        <label>Contribution Level (1–5)</label><br>
+        <input type="number" id="contribution" min="1" max="5" value="3" required>
+
+        <br><br>
+
+        <button type="submit">Submit Execution</button>
     </form>
 
-    <script src="script.js"></script>
+    <p id="status"></p>
+</section>
+
+<!-- NEW CHAT INTERFACE -->
+<section id="chat-section">
+    <h2>Founder OS Chat</h2>
+    <div id="chat-box" style="height: 300px; overflow-y: auto; border: 1px solid #999; padding: 10px;"></div>
+
+    <form id="chat-form">
+        <input type="text" id="user-input" placeholder="Type a message..." required style="width: 80%;">
+        <button type="submit">Send</button>
+    </form>
+</section>
+
+
+<script src="script.js"></script>
 </body>
-</html>
