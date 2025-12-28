@@ -1,6 +1,9 @@
 from sqlalchemy import Column, Integer, String, Date, Float, Text, DateTime, ForeignKey,Boolean
 from datetime import datetime
 from database import Base
+from sqlalchemy.ext.declarative import declarative_base
+
+Base = declarative_base()
 
 class WeeklyTarget(Base):
     __tablename__ = "weekly_targets"
@@ -60,4 +63,15 @@ class WeeklyTargetSnapshot(Base):
     progress_percent = Column(Integer)
     status = Column(String)
     frozen = Column(Boolean, default=False)  # new column
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class AIMemory(Base):
+    __tablename__ = "ai_memory"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user = Column(String, default="Bandile")  # can extend later for multi-user
+    project = Column(String, default="founder_os")
+    context_type = Column(String)  # e.g., "weekly_ai_review", "chat"
+    context_data = Column(Text)  # store JSON string of snapshot/analytics/prompt
+    response = Column(Text)  # store AI output
     created_at = Column(DateTime, default=datetime.utcnow)
