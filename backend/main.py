@@ -9,7 +9,7 @@ from datetime import date, timedelta, datetime
 from typing import List, Optional, Dict, Any
 import json
 import os
-
+import database
 import models
 import schemas
 from database import engine, get_db, SessionLocal
@@ -188,9 +188,9 @@ def _seed_roadmap_tasks_if_empty(db: Session):
 # ════════════════════════════════════════════════════════════
 
 # ── HEALTH ───────────────────────────────────────────────────
-@app.get("/")
-def root():
-    return {"status": "Founder OS API v2 running", "date": str(date.today())}
+#@app.get("/")
+#def root():
+#    return {"status": "Founder OS API v2 running", "date": str(date.today())}
 
 @app.get("/health")
 def health():
@@ -354,6 +354,10 @@ def update_roadmap_tasks(payload: schemas.RoadmapBulkUpdate, db: Session = Depen
     db.commit()
     return {"updated": updated}
 
+@app.get("/todos")
+async def get_todos(db: Session = Depends(database.get_db)):
+    # This fetches all tasks from your SQLite database
+    return database.get_all_todos(db)
 
 # ── RADAR ────────────────────────────────────────────────────
 @app.get("/radar")
@@ -448,8 +452,22 @@ def parse_brain_dump(payload: schemas.ParseRequest, db: Session = Depends(get_db
                 target.updated_at = datetime.utcnow()
         db.commit()
 
+    if parsed.get("todos_add"):
+        for t in parsed["todos_add"]:
+            new_todo = models.Todo(
+                text=t["text"],
+                priority=t.get("priority", 5),
+                category=t.get("category", "personal"),
+                due=t.get("due", str(date.today())),
+                source="ai",
+                roadmap_id=t.get("roadmapId")
+            )
+            db.add(new_todo)
+        db.commit()
+        
     return {
-        "parsed": parsed,
+        "summary": parsed.get("summary") or "Brain dump processed.",
+        "advisory": parsed.get("advisory") or "Character Before Status. Maintain discipline.",
         "kpi_updates_applied": kpi_updates_applied,
         "status": "ok"
     }
@@ -771,3 +789,12 @@ def _at_progress_pct(t: AnnualTarget) -> float:
         d = t.current_value - t.target_value
         return max(0, min(100, ((gap - d) / gap) * 100))
     return min(100, (t.current_value / max(t.target_value, 1)) * 100)
+
+
+# 1. Get the path to your frontend folder
+# This logic looks one folder up from 'backend' to find 'frontend'
+current_dir = os.path.dirname(os.path.realpath(__file__))
+frontend_path = os.path.join(current_dir, "..", "frontend")
+
+# 2. Serve your index.html at the main address
+app.mount("/", StaticFiles(directory=frontend_path, html=True), name="frontend")

@@ -6,6 +6,7 @@
 <title>Founder OS v2 — Bandile Masocha</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,700;1,400&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+<link rel="icon" href="data:,">
 <style>
 /* ═══════════════════════════════════════════════════
    ROOT — LUNA PALETTE
@@ -1504,86 +1505,46 @@ document.getElementById("dump-ta").addEventListener("keydown",e=>{
   if((e.ctrlKey||e.metaKey)&&e.key==="Enter")parseDump();
 });
 
-async function parseDump(){
-  const text=document.getElementById("dump-ta").value.trim();
-  if(!text)return;
-  const btn=document.getElementById("parse-btn");
-  const res=document.getElementById("parse-result");
-  const err=document.getElementById("parse-err");
-  btn.disabled=true;btn.textContent="Parsing…";
-  res.style.display="none";err.style.display="none";
+async function parseDump() {
+  const ta = document.getElementById("dump-ta");
+  const text = ta.value.trim();
+  if (!text) return;
 
-  const roadmapIds=[
-    ...S.sprintRoadmap.flatMap(p=>p.tasks.map(t=>t.id)),
-    ...S.academicRoadmap.flatMap(s=>s.topics.map(t=>t.id)),
-  ].join(", ");
+  const btn = document.getElementById("parse-btn");
+  const resEl = document.getElementById("parse-result");
+  const errEl = document.getElementById("parse-err");
 
-  const sys=`You are the Founder OS parsing engine for Bandile Masocha — Year 12, Trident College, Zambia. A-levels: Maths 9709, Further Maths 9231, Business 9609, Economics 9708. Competitive sprinter (100m/200m/400m). Building AI services business (Aether). ISAZ Regionals ~17 May 2026. CIE exams Oct–Nov 2026.
+  btn.disabled = true;
+  btn.textContent = "SYNCHRONIZING...";
+  resEl.style.display = "none";
+  errEl.style.display = "none";
 
-Parse the brain dump and return ONLY valid JSON — no markdown, no explanation.
+  try {
+    // Calling YOUR local backend /parse route
+const r = await fetch(`${API_BASE}/parse`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ text: text }) // Must be 'text' to match schemas.py
+});
 
-Known roadmap task IDs (use these to link todos): ${roadmapIds}
-
-JSON schema:
-{
-  "summary": "one-line summary",
-  "kpi_updates": [{"key":"sprint_100m|sprint_200m|sprint_400m|maths_syllabus|further_maths|business|economics","value":number}],
-  "todos_add": [{"text":"string","priority":1,"category":"athletics|academics|business|personal","due":"YYYY-MM-DD|null","roadmapId":"roadmap-id-or-null"}],
-  "todos_complete": ["text fragment"],
-  "roadmap_complete": ["roadmap-task-id"],
-  "habits_done": ["scripture_prayer|ironing|python_session|sprint_training|academics"],
-  "annual_updates": [{"id":"at-id-or-guess","current":number}],
-  "log_entry": "short log message",
-  "advisory": "1-2 sentence strategic insight or null"
-}
-
-Today is ${todayStr()}. Always return valid JSON only.`;
-
-  try{
-    const r=await fetch("https://api.anthropic.com/v1/messages",{
-      method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({
-        model:"claude-sonnet-4-20250514",max_tokens:1200,
-        system:sys,
-        messages:[{role:"user",content:text}]
-      })
-    });
-    if(!r.ok)throw new Error(`API ${r.status}`);
-    const data=await r.json();
-    const raw=data.content?.[0]?.text||"{}";
-    const p=JSON.parse(raw.replace(/```json|```/g,"").trim());
-
-    // Apply
-    if(p.kpi_updates?.length)p.kpi_updates.forEach(u=>{if(S.kpis[u.key])S.kpis[u.key].value=u.value});
-    if(p.todos_add?.length)p.todos_add.forEach(t=>{
-      S.todos.push({id:uid(),text:t.text,priority:t.priority||5,done:false,category:t.category||"personal",due:t.due||todayStr(),source:"ai",roadmapId:t.roadmapId||null,urgent:false});
-    });
-    if(p.todos_complete?.length)p.todos_complete.forEach(f=>{
-      S.todos.forEach(t=>{if(t.text.toLowerCase().includes(f.toLowerCase()))t.done=true});
-    });
-    if(p.roadmap_complete?.length)p.roadmap_complete.forEach(id=>syncRoadmapTask(id,true));
-    if(p.habits_done?.length)p.habits_done.forEach(k=>{if(S.habits[k])S.habits[k].done=true});
-    if(p.log_entry)addLog(p.log_entry,"ai");
-
-    saveState();
-    if(document.getElementById("p-dashboard").classList.contains("active"))renderDash();
-    else renderHeader();
-
-    let html=`<div style="color:var(--success);margin-bottom:5px">✓ ${p.summary||"Parsed"}</div>`;
-    if(p.kpi_updates?.length)html+=`<div>→ KPIs: ${p.kpi_updates.map(u=>u.key.replace("_"," ")+": "+u.value).join(", ")}</div>`;
-    if(p.todos_add?.length)html+=`<div>→ ${p.todos_add.length} task${p.todos_add.length>1?"s":""} added</div>`;
-    if(p.todos_complete?.length)html+=`<div>→ Completed: ${p.todos_complete.join(", ")}</div>`;
-    if(p.roadmap_complete?.length)html+=`<div>→ Roadmap: ${p.roadmap_complete.join(", ")}</div>`;
-    if(p.habits_done?.length)html+=`<div>→ Habits: ${p.habits_done.join(", ")}</div>`;
-    if(p.advisory)html+=`<div class="advisory-inner">🧠 ${p.advisory}</div>`;
-    res.innerHTML=html;res.style.display="block";
-    document.getElementById("dump-ta").value="";
-    addChatMsg("⚡ Brain dump parsed: "+p.summary,"system");
-    renderAgentAlerts();
-  }catch(e){
-    err.textContent="Error: "+e.message;err.style.display="block";
-  }finally{btn.disabled=false;btn.textContent="⚡ Parse →"}
+    if (!r.ok) throw new Error(`Backend Error: ${r.status}`);
+    
+    const result = await r.json();
+    
+    ta.value = "";
+    await syncFromBackend(); // Refresh the whole dashboard with real DB data
+    
+    // Display the advisory insight from the backend
+    resEl.innerHTML = `<div class="advisory-inner">🧠 ${result.advisory}</div>`;
+    resEl.style.display = "block";
+    addChatMsg(`Parsed: ${result.summary}`, "bot");
+  } catch (e) {
+    errEl.textContent = "Connection Failed: Check terminal logs.";
+    errEl.style.display = "block";
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "⚡ Parse →";
+  }
 }
 
 /* ═══════════════════════════════════════════════════
