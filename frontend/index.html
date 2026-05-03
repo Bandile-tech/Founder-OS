@@ -1,75 +1,1778 @@
-<!DOCTYPE html> 
-<html> 
-    <head> 
-        <title>Founder OS — Daily Execution</title> 
-        <link rel="stylesheet" href="style.css"> 
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Founder OS v2 — Bandile Masocha</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,500;0,700;1,400&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+<style>
+/* ═══════════════════════════════════════════════════
+   ROOT — LUNA PALETTE
+═══════════════════════════════════════════════════ */
+:root {
+  --bg:          #011C40;
+  --surface:     #023859;
+  --surface-hi:  #032f4a;
+  --interactive: #26658C;
+  --border:      #54ACBF;
+  --glow:        #A7EBF2;
+  --danger:      #FF6B6B;
+  --success:     #4ECDC4;
+  --warn:        #FFD166;
+  --text:        #E8F4F8;
+  --muted:       #7BAFC0;
+  --purple:      #A78BFA;
+  --nav-w:       220px;
+  --header-h:    48px;
+}
+
+*{box-sizing:border-box;margin:0;padding:0}
+
+body{
+  background:var(--bg);
+  color:var(--text);
+  font-family:'IBM Plex Mono',monospace;
+  height:100vh;
+  overflow:hidden;
+  display:flex;
+  flex-direction:column;
+}
+
+::-webkit-scrollbar{width:3px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:#54ACBF33;border-radius:2px}
+
+/* ═══════════════════════════════════════════════════
+   HEADER
+═══════════════════════════════════════════════════ */
+#header{
+  height:var(--header-h);
+  background:var(--surface);
+  border-bottom:1px solid #54ACBF14;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  padding:0 20px;
+  flex-shrink:0;
+  z-index:100;
+}
+.h-logo{font-family:'Syne',sans-serif;font-size:15px;font-weight:800;letter-spacing:0.2em;color:var(--glow);text-transform:uppercase}
+.h-sub{font-size:9px;color:var(--muted);letter-spacing:0.1em;margin-left:14px}
+.h-right{display:flex;align-items:center;gap:16px}
+.h-date{font-size:10px;color:var(--muted);letter-spacing:0.06em}
+.h-drift{font-size:9px;color:var(--glow);letter-spacing:0.14em;animation:pulse 2s infinite;display:none}
+.online{width:7px;height:7px;border-radius:50%;background:var(--success);box-shadow:0 0 6px var(--success);animation:glowPulse 3s infinite}
+
+/* ═══════════════════════════════════════════════════
+   LAYOUT
+═══════════════════════════════════════════════════ */
+#app{display:flex;flex:1;overflow:hidden;height:calc(100vh - var(--header-h))}
+
+/* ═══════════════════════════════════════════════════
+   LEFT NAV
+═══════════════════════════════════════════════════ */
+#nav{
+  width:var(--nav-w);
+  background:var(--surface);
+  border-right:1px solid #54ACBF14;
+  display:flex;
+  flex-direction:column;
+  padding:14px 0;
+  overflow-y:auto;
+  flex-shrink:0;
+}
+.nav-group{margin-bottom:20px}
+.nav-group-label{font-size:8px;letter-spacing:0.28em;color:var(--muted);padding:0 16px;margin-bottom:4px;text-transform:uppercase}
+.nav-item{
+  display:flex;align-items:center;gap:9px;
+  padding:8px 16px;cursor:pointer;
+  font-size:10px;letter-spacing:0.05em;
+  color:var(--muted);
+  border-left:2px solid transparent;
+  transition:all 0.15s;user-select:none;
+}
+.nav-item:hover{color:var(--text);background:#A7EBF208}
+.nav-item.active{color:var(--glow);background:#A7EBF20D;border-left-color:var(--glow)}
+.nav-item .ni{font-size:12px;width:15px;text-align:center}
+.nav-item .nb{
+  font-size:8px;margin-left:auto;padding:1px 5px;
+  border-radius:2px;background:#FF6B6B22;color:var(--danger);
+  border:1px solid #FF6B6B44;display:none;
+}
+.nav-item .nb.show{display:block}
+
+.nav-phase{
+  margin:10px 12px 0;padding:12px;
+  background:#26658C18;border:1px solid #26658C33;border-radius:5px;
+  margin-top:auto;
+}
+.np-label{font-size:8px;letter-spacing:0.15em;color:var(--muted);text-transform:uppercase;margin-bottom:5px}
+.np-name{font-size:11px;color:var(--glow)}
+.np-sub{font-size:9px;color:var(--muted);margin-top:2px}
+.np-next{font-size:8px;color:var(--muted);margin-top:8px}
+.np-time{font-size:10px;color:var(--warn);margin-top:2px}
+
+/* ═══════════════════════════════════════════════════
+   MAIN CONTENT AREA
+═══════════════════════════════════════════════════ */
+#content{flex:1;overflow:hidden;position:relative}
+.page{display:none;height:100%;overflow-y:auto;padding:20px 24px}
+.page.active{display:block}
+
+/* ═══════════════════════════════════════════════════
+   CARDS & COMPONENTS
+═══════════════════════════════════════════════════ */
+.card{
+  background:var(--surface);border:1px solid #54ACBF14;
+  border-radius:6px;padding:14px;margin-bottom:14px;
+}
+.card-title{
+  font-size:9px;letter-spacing:0.22em;color:var(--muted);
+  text-transform:uppercase;margin-bottom:12px;
+  display:flex;align-items:center;justify-content:space-between;
+}
+.sec-head{
+  font-size:8px;letter-spacing:0.2em;color:var(--border);
+  text-transform:uppercase;margin-bottom:8px;padding-bottom:5px;
+  border-bottom:1px solid #54ACBF18;
+}
+.badge{font-size:8px;letter-spacing:0.08em;padding:2px 7px;border-radius:3px;text-transform:uppercase}
+.b-glow{background:#A7EBF218;color:var(--glow);border:1px solid #A7EBF233}
+.b-warn{background:#FFD16618;color:var(--warn);border:1px solid #FFD16633}
+.b-suc{background:#4ECDC418;color:var(--success);border:1px solid #4ECDC433}
+.b-muted{background:#54ACBF18;color:var(--border);border:1px solid #54ACBF33}
+.b-danger{background:#FF6B6B18;color:var(--danger);border:1px solid #FF6B6B33}
+.b-urg{background:#FF6B6B22;color:var(--danger);border:1px solid #FF6B6B55;animation:pulse 1.5s infinite}
+
+/* PROGRESS */
+.pbar{height:4px;background:#54ACBF14;border-radius:2px;overflow:hidden}
+.pfill{height:100%;border-radius:2px;transition:width 0.5s ease}
+.pg{background:var(--success);box-shadow:0 0 5px #4ECDC466}
+.pm{background:var(--glow);box-shadow:0 0 4px #A7EBF233}
+.pl{background:var(--interactive)}
+.pd{background:var(--danger);animation:pulse 2s infinite}
+
+/* ═══════════════════════════════════════════════════
+   DASHBOARD PAGE — 2 COLUMN
+═══════════════════════════════════════════════════ */
+.dash-grid{display:grid;grid-template-columns:1fr 320px;gap:16px;height:100%}
+.dash-left{overflow-y:auto;padding-right:4px}
+.dash-right{overflow-y:auto}
+
+/* COUNTDOWN STRIP */
+.countdown-strip{
+  display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:14px;
+}
+.cd-box{
+  background:var(--surface);border:1px solid #54ACBF14;border-radius:6px;
+  padding:10px 12px;text-align:center;
+}
+.cd-val{font-family:'Syne',sans-serif;font-size:22px;font-weight:800;color:var(--glow);line-height:1}
+.cd-label{font-size:8px;letter-spacing:0.18em;color:var(--muted);text-transform:uppercase;margin-top:3px}
+.cd-pct{font-size:8px;color:var(--border);margin-top:2px}
+
+/* ANNUAL TARGETS */
+.at-row{
+  display:flex;align-items:center;gap:10px;
+  padding:9px 0;border-bottom:1px solid #54ACBF0C;
+}
+.at-name{font-size:10px;flex:1;min-width:0}
+.at-vals{font-size:9px;color:var(--muted);white-space:nowrap}
+.at-bar-wrap{width:80px;flex-shrink:0}
+.at-schedule{font-size:8px;margin-left:6px;white-space:nowrap}
+
+/* NON-NEGOTIABLES */
+.nn-row{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:8px 0;border-bottom:1px solid #54ACBF0C;
+  cursor:pointer;user-select:none;
+}
+.nn-left{display:flex;align-items:center;gap:8px}
+.nn-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;transition:all 0.2s}
+.dot-done{background:var(--success);box-shadow:0 0 5px #4ECDC466}
+.dot-undone{background:var(--danger);box-shadow:0 0 5px #FF6B6B44}
+.nn-label{font-size:10px}
+.nn-label.done{color:var(--muted);text-decoration:line-through}
+.nn-status{font-size:8px;letter-spacing:0.08em}
+.nns-done{color:var(--success)}
+.nns-undone{color:var(--danger)}
+
+.drift-box{
+  background:#A7EBF20A;border:1px solid #A7EBF233;border-radius:4px;
+  padding:8px 10px;margin-bottom:10px;font-size:10px;color:var(--glow);
+  display:flex;align-items:center;gap:7px;animation:pulse 2s infinite;
+}
+
+/* TODO */
+.todo-item{display:flex;align-items:flex-start;gap:8px;padding:9px 0;border-bottom:1px solid #54ACBF0C;transition:opacity 0.2s}
+.todo-item.done-item{opacity:0.38}
+.cb{
+  width:14px;height:14px;border:1px solid var(--border);border-radius:2px;
+  cursor:pointer;flex-shrink:0;margin-top:2px;
+  display:flex;align-items:center;justify-content:center;
+  font-size:9px;color:var(--success);transition:all 0.15s;
+}
+.cb.checked{background:#4ECDC422;border-color:var(--success)}
+.cat-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;margin-top:4px}
+.cat-athletics{background:var(--success)}
+.cat-academics{background:var(--purple)}
+.cat-business{background:var(--interactive)}
+.cat-personal{background:var(--warn)}
+.todo-text{font-size:11px;line-height:1.4}
+.todo-text.strike{text-decoration:line-through;color:var(--muted)}
+.todo-meta{display:flex;gap:5px;margin-top:3px;flex-wrap:wrap;align-items:center}
+.tag{font-size:8px;padding:1px 5px;border-radius:2px}
+.tag-athletics{background:#4ECDC418;color:var(--success)}
+.tag-academics{background:#A78BFA18;color:var(--purple)}
+.tag-business{background:#26658C33;color:#7BAFC0}
+.tag-personal{background:#FFD16618;color:var(--warn)}
+.tag-urgent{background:#FF6B6B22;color:var(--danger);animation:pulse 1.5s infinite}
+.todo-due{font-size:8px;color:var(--muted)}
+.ai-src{font-size:8px;color:var(--interactive)}
+.todo-rank{font-size:9px;color:var(--muted);margin-right:3px}
+
+.quick-add{
+  width:100%;background:transparent;
+  border:1px solid #54ACBF22;border-radius:4px;
+  color:var(--text);font-family:'IBM Plex Mono',monospace;
+  font-size:11px;padding:7px 10px;outline:none;margin-bottom:8px;
+  transition:border-color 0.15s;
+}
+.quick-add:focus{border-color:#54ACBF55}
+.quick-add::placeholder{color:var(--muted)}
+
+/* KPI ROWS */
+.kpi-row{margin-bottom:9px}
+.kpi-head{display:flex;justify-content:space-between;font-size:9px;margin-bottom:4px}
+.kpi-v{font-weight:700}
+.kpi-t{color:var(--muted);font-weight:400}
+
+/* ═══════════════════════════════════════════════════
+   BRAIN DUMP / CHAT PAGE
+═══════════════════════════════════════════════════ */
+.chat-layout{display:grid;grid-template-columns:1fr 280px;gap:16px;height:100%;min-height:0}
+.chat-main{display:flex;flex-direction:column;min-height:0}
+.chat-msgs{
+  flex:1;overflow-y:auto;padding:12px;
+  background:var(--surface-hi);border:1px solid #54ACBF14;
+  border-radius:6px;margin-bottom:10px;min-height:0;
+}
+.msg{margin-bottom:10px;display:flex;flex-direction:column;max-width:85%}
+.msg.user{align-items:flex-end;margin-left:auto}
+.msg.bot{align-items:flex-start}
+.msg-bubble{
+  padding:9px 13px;border-radius:6px;font-size:11px;line-height:1.6;
+}
+.msg.user .msg-bubble{background:var(--interactive);color:var(--glow)}
+.msg.bot  .msg-bubble{background:var(--surface);color:var(--text);border:1px solid #54ACBF14}
+.msg.system .msg-bubble{background:#A7EBF20A;color:var(--glow);border:1px solid #A7EBF222;font-size:10px;font-style:italic}
+.msg-time{font-size:8px;color:var(--muted);margin-top:3px}
+
+.dump-area{
+  background:var(--surface-hi);border:1px solid #54ACBF44;
+  border-radius:6px;padding:12px;margin-bottom:8px;
+}
+.dump-label-top{font-size:8px;letter-spacing:0.2em;color:var(--border);text-transform:uppercase;margin-bottom:8px}
+#dump-ta{
+  width:100%;background:transparent;border:none;outline:none;
+  color:var(--text);font-family:'IBM Plex Mono',monospace;
+  font-size:11px;resize:none;line-height:1.6;min-height:56px;
+}
+#dump-ta::placeholder{color:var(--muted)}
+.dump-footer{display:flex;justify-content:space-between;align-items:center;margin-top:8px;padding-top:8px;border-top:1px solid #54ACBF14}
+.dump-hint{font-size:8px;color:var(--muted)}
+
+.btn-parse,.btn-send{
+  background:var(--interactive);border:1px solid var(--border);
+  color:var(--glow);font-family:'IBM Plex Mono',monospace;
+  font-size:9px;letter-spacing:0.14em;padding:6px 16px;
+  border-radius:4px;cursor:pointer;text-transform:uppercase;
+  transition:all 0.15s;
+}
+.btn-parse:hover,.btn-send:hover{background:#2f7aab}
+.btn-parse:disabled,.btn-send:disabled{opacity:0.45;cursor:not-allowed}
+
+#chat-input-row{display:flex;gap:8px}
+#chat-inp{
+  flex:1;background:var(--surface-hi);border:1px solid #54ACBF33;
+  border-radius:4px;color:var(--text);font-family:'IBM Plex Mono',monospace;
+  font-size:11px;padding:7px 10px;outline:none;
+}
+#chat-inp::placeholder{color:var(--muted)}
+
+/* AGENT PANEL */
+.agent-panel{overflow-y:auto}
+.agent-alert{
+  background:#FF6B6B0A;border:1px solid #FF6B6B33;border-radius:5px;
+  padding:10px 12px;margin-bottom:8px;font-size:10px;color:var(--danger);
+  line-height:1.5;animation:pulse 2s infinite;
+}
+.agent-alert.glow-alert{background:#A7EBF20A;border-color:#A7EBF233;color:var(--glow);animation:none}
+.agent-alert .aa-head{font-size:8px;letter-spacing:0.12em;text-transform:uppercase;margin-bottom:4px;opacity:0.7}
+
+/* PARSE RESULT */
+.parse-result{
+  background:#26658C14;border:1px solid #26658C33;
+  border-radius:4px;padding:9px 11px;margin-top:8px;
+  font-size:9px;color:var(--glow);line-height:1.7;display:none;
+}
+.advisory-inner{
+  margin-top:7px;padding:7px 9px;
+  background:#A7EBF20A;border:1px solid #A7EBF218;border-radius:3px;
+}
+
+/* ═══════════════════════════════════════════════════
+   ECOSYSTEM / ROADMAP PAGES
+═══════════════════════════════════════════════════ */
+.eco-header{
+  display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;
+}
+.eco-title{font-family:'Syne',sans-serif;font-size:16px;font-weight:800;color:var(--glow)}
+.eco-sub{font-size:9px;color:var(--muted);margin-top:2px}
+
+.roadmap-phase{
+  background:var(--surface);border:1px solid #54ACBF14;
+  border-radius:6px;padding:14px;margin-bottom:10px;
+}
+.rp-head{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.rp-num{
+  width:24px;height:24px;border-radius:50%;
+  background:var(--interactive);color:var(--glow);
+  display:flex;align-items:center;justify-content:center;
+  font-size:10px;font-weight:700;flex-shrink:0;
+}
+.rp-num.done{background:var(--success);color:#011C40}
+.rp-num.active{background:var(--glow);color:#011C40;box-shadow:0 0 8px #A7EBF244}
+.rp-name{font-size:11px;color:var(--text)}
+.rp-date{font-size:9px;color:var(--muted);margin-left:auto}
+
+.roadmap-task{
+  display:flex;align-items:flex-start;gap:8px;
+  padding:7px 0;border-bottom:1px solid #54ACBF0A;
+}
+.roadmap-task:last-child{border-bottom:none}
+.rt-cb{
+  width:13px;height:13px;border:1px solid var(--border);border-radius:2px;
+  cursor:pointer;flex-shrink:0;margin-top:2px;
+  display:flex;align-items:center;justify-content:center;
+  font-size:8px;color:var(--success);transition:all 0.15s;
+}
+.rt-cb.checked{background:#4ECDC422;border-color:var(--success)}
+.rt-text{font-size:10px;line-height:1.4}
+.rt-text.done{color:var(--muted);text-decoration:line-through}
+.rt-pushed{font-size:8px;color:var(--warn);margin-left:auto;flex-shrink:0}
+
+/* BIBLE / BOOKS / TIMETABLE */
+.eco-row{
+  display:flex;align-items:center;gap:10px;
+  padding:8px 0;border-bottom:1px solid #54ACBF0A;font-size:10px;
+}
+.eco-row:last-child{border-bottom:none}
+.eco-date{font-size:8px;color:var(--muted);min-width:70px;flex-shrink:0}
+.eco-pushed{font-size:8px;color:var(--warn)}
+
+.book-row{
+  display:flex;justify-content:space-between;align-items:center;
+  padding:10px 0;border-bottom:1px solid #54ACBF0A;
+}
+.bk-title{font-size:11px;color:var(--text)}
+.bk-author{font-size:9px;color:var(--muted);margin-top:2px}
+.bk-status{font-size:8px;text-transform:uppercase;letter-spacing:0.1em}
+.bs-reading{color:var(--glow)}
+.bs-queue{color:var(--muted)}
+.bs-done{color:var(--success)}
+
+.sched-row{
+  display:flex;align-items:center;gap:12px;
+  padding:8px 0;border-bottom:1px solid #54ACBF0A;
+  border-left:2px solid transparent;transition:all 0.2s;
+}
+.sched-row.now{
+  background:#A7EBF207;border-left-color:var(--glow);
+  padding-left:8px;color:var(--glow);
+}
+.sched-time{font-size:8px;color:var(--muted);min-width:85px;flex-shrink:0}
+.sched-label{font-size:10px}
+.now-tag{font-size:7px;color:var(--glow);margin-left:auto;letter-spacing:0.1em}
+
+/* SPRINT PAGE */
+.sprint-big{
+  background:var(--surface);border:1px solid #54ACBF14;
+  border-radius:6px;padding:16px;margin-bottom:10px;
+}
+.sprint-top{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:10px}
+.sprint-name{font-size:12px;color:var(--text)}
+.sprint-val{font-family:'Syne',sans-serif;font-size:28px;font-weight:800;color:var(--glow);line-height:1}
+.sprint-target{font-size:9px;color:var(--muted);margin-top:2px}
+.sprint-gap{font-size:8px;color:var(--muted);margin-top:5px}
+
+/* LOG PAGE */
+.log-entry{
+  font-size:9px;color:var(--muted);padding:5px 0;
+  border-bottom:1px solid #54ACBF08;line-height:1.5;
+}
+.lt{color:var(--border);margin-right:8px}
+.la{color:var(--glow)}
+.ls{color:var(--success)}
+.lw{color:var(--warn)}
+
+/* SETTINGS */
+.settings-row{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:12px 0;border-bottom:1px solid #54ACBF0A;
+}
+.sr-label{font-size:11px;color:var(--text)}
+.sr-sub{font-size:9px;color:var(--muted);margin-top:2px}
+.sr-input{
+  background:var(--surface-hi);border:1px solid #54ACBF33;
+  border-radius:4px;color:var(--text);font-family:'IBM Plex Mono',monospace;
+  font-size:11px;padding:6px 9px;outline:none;width:180px;
+}
+.sr-btn{
+  background:var(--interactive);border:1px solid var(--border);
+  color:var(--glow);font-family:'IBM Plex Mono',monospace;
+  font-size:9px;padding:5px 12px;border-radius:3px;cursor:pointer;
+  text-transform:uppercase;letter-spacing:0.1em;
+}
+
+/* ANNUAL TARGETS PAGE */
+.at-form{
+  display:grid;grid-template-columns:1fr 120px 120px auto;gap:8px;
+  margin-bottom:12px;align-items:center;
+}
+.at-input{
+  background:var(--surface-hi);border:1px solid #54ACBF22;
+  border-radius:4px;color:var(--text);font-family:'IBM Plex Mono',monospace;
+  font-size:10px;padding:6px 8px;outline:none;width:100%;
+}
+.at-add-btn{
+  background:var(--interactive);border:1px solid var(--border);
+  color:var(--glow);font-family:'IBM Plex Mono',monospace;
+  font-size:9px;padding:6px 10px;border-radius:3px;cursor:pointer;
+  text-transform:uppercase;white-space:nowrap;letter-spacing:0.08em;
+}
+
+/* MISSION FOOTER CARD */
+.mission-card{
+  background:#A7EBF207;border:1px solid #A7EBF218;border-radius:6px;padding:12px;
+}
+.mc-label{font-size:8px;letter-spacing:0.15em;color:var(--border);text-transform:uppercase;margin-bottom:6px}
+.mc-text{font-size:11px;color:var(--glow);line-height:1.6;font-style:italic}
+.mc-sub{font-size:9px;color:var(--muted);margin-top:7px;line-height:1.5}
+
+/* ═══════════════════════════════════════════════════
+   ANIMATIONS
+═══════════════════════════════════════════════════ */
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}
+@keyframes glowPulse{0%,100%{box-shadow:0 0 4px #4ECDC466}50%{box-shadow:0 0 10px #4ECDC4aa}}
+@keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.fade-up{animation:fadeUp 0.25s ease}
+</style>
 </head>
 <body>
 
-<h1>Founder OS — Daily Execution</h1>
-
-<div id="weekly-objectives-panel">
-    <h3>Build Weekly Objectives</h3>
-    <form id="weekly-objective-form">
-        <input type="text" id="objective-title" placeholder="Objective Title" required />
-        <input type="number" id="objective-target" placeholder="Target Count" min="1" required />
-        <button type="submit">Add Objective</button>
-    </form>
-    <ul id="weekly-objectives-list"></ul>
+<!-- ═══ HEADER ═══ -->
+<div id="header">
+  <div style="display:flex;align-items:center">
+    <div class="h-logo">Founder OS</div>
+    <div class="h-sub">v2 · Bandile Masocha · Trident College</div>
+  </div>
+  <div class="h-right">
+    <div id="h-drift" class="h-drift">⚡ HABITS DRIFTING</div>
+    <div id="h-date" class="h-date"></div>
+    <div class="online"></div>
+  </div>
 </div>
 
-<section id="kpi-summary">
-    <h2>Weekly KPI Summary</h2>
-<!-- Replace the weekly-kpi-summary div with radial bars -->
-<div id="weekly-kpi-summary" style="display:flex; gap:20px; justify-content:center; flex-wrap:wrap;"></div>
+<!-- ═══ APP ═══ -->
+<div id="app">
 
+  <!-- ═══ NAV ═══ -->
+  <div id="nav">
+    <div class="nav-group">
+      <div class="nav-group-label">Command</div>
+      <div class="nav-item active" onclick="nav('dashboard',this)" id="ni-dashboard">
+        <span class="ni">▣</span> Dashboard
+      </div>
+      <div class="nav-item" onclick="nav('brain',this)" id="ni-brain">
+        <span class="ni">⚡</span> Brain Dump / AI
+        <span class="nb" id="nb-brain"></span>
+      </div>
+      <div class="nav-item" onclick="nav('log',this)" id="ni-log">
+        <span class="ni">◈</span> Activity Log
+      </div>
+    </div>
+    <div class="nav-group">
+      <div class="nav-group-label">Ecosystem</div>
+      <div class="nav-item" onclick="nav('timetable',this)">
+        <span class="ni">◷</span> Timetable
+      </div>
+      <div class="nav-item" onclick="nav('bible',this)">
+        <span class="ni">✦</span> Bible Plan
+      </div>
+      <div class="nav-item" onclick="nav('books',this)">
+        <span class="ni">▤</span> Reading Queue
+      </div>
+      <div class="nav-item" onclick="nav('sprint',this)">
+        <span class="ni">⚡</span> Sprint Roadmap
+      </div>
+      <div class="nav-item" onclick="nav('academic',this)">
+        <span class="ni">◉</span> Academic Roadmap
+      </div>
+    </div>
+    <div class="nav-group">
+      <div class="nav-group-label">System</div>
+      <div class="nav-item" onclick="nav('annual',this)">
+        <span class="ni">◎</span> Annual Targets
+      </div>
+      <div class="nav-item" onclick="nav('settings',this)">
+        <span class="ni">⊙</span> Settings
+      </div>
+    </div>
+    <div class="nav-phase">
+      <div class="np-label">Current Phase</div>
+      <div class="np-name">Phase 3</div>
+      <div class="np-sub">Athletics Peak · Consolidate</div>
+      <div class="np-next">Next: ISAZ Regionals</div>
+      <div class="np-time" id="regionals-countdown"></div>
+    </div>
+  </div>
 
-    <ul>
-        <li>Total Executions: <strong id="kpi-total">0</strong></li>
-        <li>Executions This Week: <strong id="kpi-week">0</strong></li>
-        <li>Average Contribution: <strong id="kpi-avg">0</strong></li>
-        <li>Top Focus Target: <strong id="kpi-top">—</strong></li>
-    </ul>
-    <p><strong>Status:</strong> <span id="kpi-status">—</span></p>
+  <!-- ═══ CONTENT ═══ -->
+  <div id="content">
 
-</section>
+    <!-- ── DASHBOARD ── -->
+    <div class="page active fade-up" id="p-dashboard">
+      <div class="dash-grid">
+        <div class="dash-left">
 
-<section>
-    <h2>What did you execute today?</h2>
+          <!-- COUNTDOWN STRIP -->
+          <div class="countdown-strip" id="countdown-strip"></div>
 
-    <form id="daily-form">
-        <label>Execution Log</label><br>
-        <textarea id="entry" rows="5" placeholder="What did you actually do today?" required></textarea>
+          <!-- TODAY'S TASKS -->
+          <div class="card">
+            <div class="card-title">
+              <span>Today's Execution Stack</span>
+              <span class="badge b-muted" id="active-badge">— active</span>
+            </div>
+            <div id="drift-box-dash"></div>
+            <input class="quick-add" id="quick-add" placeholder="+ Quick add (Enter to save)…" onkeydown="quickAdd(event)">
+            <div id="todo-list"></div>
+          </div>
 
-        <br><br>
+          <!-- ANNUAL TARGETS SUMMARY -->
+          <div class="card">
+            <div class="card-title">
+              <span>Annual Targets — Progress</span>
+              <span class="badge b-glow" id="at-year-label">2026</span>
+            </div>
+            <div id="at-dash"></div>
+          </div>
 
-        <label>Weekly Target</label><br>
-        <select id="weekly-target" required></select>
+        </div>
+        <div class="dash-right">
 
-        <br><br>
+          <!-- PERFORMANCE KPIs -->
+          <div class="card">
+            <div class="card-title"><span>Performance KPIs</span><span class="badge b-glow">Live</span></div>
+            <div class="sec-head">Athletics</div>
+            <div id="kpi-ath"></div>
+            <div class="sec-head" style="margin-top:10px">Academics</div>
+            <div id="kpi-acad"></div>
+          </div>
 
-        <label>Contribution Level (1–5)</label><br>
-        <input type="number" id="contribution" min="1" max="5" value="3" required>
+          <!-- DAILY NON-NEGOTIABLES -->
+          <div class="card">
+            <div class="card-title">
+              <span>Non-Negotiables</span>
+              <span class="badge b-warn" id="nn-badge">0/5</span>
+            </div>
+            <div id="nn-drift"></div>
+            <div id="nn-list"></div>
+          </div>
 
-        <br><br>
+          <!-- MISSION -->
+          <div class="mission-card">
+            <div class="mc-label">Governing Principle</div>
+            <div class="mc-text">"Character Before Status"</div>
+            <div class="mc-sub">CIE Oct–Nov 2026 · Wharton long-term<br>Aether Phase 4 post-Regionals</div>
+          </div>
 
-        <button type="submit">Submit Execution</button>
-    </form>
+        </div>
+      </div>
+    </div>
 
-    <p id="status"></p>
-</section>
+    <!-- ── BRAIN DUMP / AI CHAT ── -->
+    <div class="page" id="p-brain" style="height:100%">
+      <div class="chat-layout">
+        <div class="chat-main">
+          <div class="dump-area">
+            <div class="dump-label-top">⚡ Brain Dump Engine — AI parses everything simultaneously</div>
+            <textarea id="dump-ta" placeholder='Drop anything unstructured here. Examples:&#10;"Ran 200m in 22.8s, economics essay due Thursday, CS50P done, need to email the insurance CEO"&#10;&#10;Ctrl+Enter to parse.'></textarea>
+            <div class="dump-footer">
+              <span class="dump-hint">Routes to KPIs · Tasks · Habits · Roadmaps · Log</span>
+              <button class="btn-parse" id="parse-btn" onclick="parseDump()">⚡ Parse →</button>
+            </div>
+            <div id="parse-err" style="font-size:9px;color:var(--danger);margin-top:6px;display:none"></div>
+            <div class="parse-result" id="parse-result"></div>
+          </div>
 
-<!-- NEW CHAT INTERFACE -->
-<section id="chat-section">
-    <h2>Founder OS Chat</h2>
-    <div id="chat-box" style="height: 300px; overflow-y: auto; border: 1px solid #999; padding: 10px;"></div>
+          <div class="chat-msgs" id="chat-msgs"></div>
 
-    <form id="chat-form">
-        <input type="text" id="user-input" placeholder="Type a message..." required style="width: 80%;">
-        <button type="submit">Send</button>
-    </form>
-</section>
+          <div id="chat-input-row">
+            <input id="chat-inp" placeholder="Ask your second brain anything…" onkeydown="chatKey(event)">
+            <button class="btn-send" onclick="sendChat()">Send</button>
+          </div>
+        </div>
 
+        <!-- PROACTIVE AGENT PANEL -->
+        <div class="agent-panel">
+          <div class="card-title" style="margin-bottom:10px"><span>Agent Alerts</span><span class="badge b-danger" id="alert-count">0</span></div>
+          <div id="agent-alerts">
+            <div style="font-size:9px;color:var(--muted)">Running analysis…</div>
+          </div>
+          <div style="margin-top:12px" class="card-title"><span>Proactive Brief</span></div>
+          <div class="agent-alert glow-alert" id="proactive-brief" style="animation:none">
+            <div class="aa-head">AI Second Brain</div>
+            <div id="brief-text" style="font-size:9px;color:var(--muted)">Click "Generate Brief" for unprompted intelligence.</div>
+          </div>
+          <button class="btn-parse" style="width:100%;margin-top:8px;justify-content:center" onclick="generateBrief()">Generate Brief</button>
+        </div>
+      </div>
+    </div>
 
-<script src="script.js"></script>
+    <!-- ── ACTIVITY LOG ── -->
+    <div class="page" id="p-log">
+      <div class="card">
+        <div class="card-title"><span>System Activity Log</span><span class="badge b-muted" id="log-count">0 entries</span></div>
+        <div id="log-list"><div class="log-entry" style="color:var(--muted)">No activity yet.</div></div>
+      </div>
+    </div>
+
+    <!-- ── TIMETABLE ── -->
+    <div class="page" id="p-timetable">
+      <div class="eco-header">
+        <div><div class="eco-title">Daily Timetable</div><div class="eco-sub">Current slot highlighted · Auto-advances</div></div>
+      </div>
+      <div class="card" id="timetable-card"></div>
+    </div>
+
+    <!-- ── BIBLE PLAN ── -->
+    <div class="page" id="p-bible">
+      <div class="eco-header">
+        <div><div class="eco-title">Bible Reading Plan</div><div class="eco-sub">Missed days roll forward · Streak tracked</div></div>
+        <div style="text-align:right">
+          <div class="cd-val" id="bible-streak" style="font-family:'Syne',sans-serif;font-size:24px;color:var(--glow)">0</div>
+          <div style="font-size:8px;color:var(--muted);letter-spacing:0.15em">DAY STREAK</div>
+        </div>
+      </div>
+      <div class="card" id="bible-card"></div>
+    </div>
+
+    <!-- ── BOOKS ── -->
+    <div class="page" id="p-books">
+      <div class="eco-header">
+        <div><div class="eco-title">Reading Queue</div><div class="eco-sub">Knowledge compounds</div></div>
+      </div>
+      <div class="card" id="books-card"></div>
+    </div>
+
+    <!-- ── SPRINT ROADMAP ── -->
+    <div class="page" id="p-sprint">
+      <div class="eco-header">
+        <div><div class="eco-title">Sprint Roadmap</div><div class="eco-sub">Phase-based · Linked to KPIs · ISAZ Regionals target</div></div>
+        <div id="regionals-box" style="text-align:right">
+          <div class="cd-val" style="font-family:'Syne',sans-serif;font-size:24px;color:var(--warn)">—</div>
+          <div style="font-size:8px;color:var(--muted);letter-spacing:0.15em">DAYS TO REGIONALS</div>
+        </div>
+      </div>
+      <div id="sprint-roadmap"></div>
+      <div class="card" style="margin-top:10px">
+        <div class="card-title"><span>Sprint KPIs</span></div>
+        <div id="sprint-kpis"></div>
+      </div>
+    </div>
+
+    <!-- ── ACADEMIC ROADMAP ── -->
+    <div class="page" id="p-academic">
+      <div class="eco-header">
+        <div><div class="eco-title">Academic Roadmap</div><div class="eco-sub">CIE Oct–Nov 2026 · Per-subject syllabus tracker</div></div>
+        <div id="exam-countdown-box" style="text-align:right">
+          <div class="cd-val" id="exam-days" style="font-family:'Syne',sans-serif;font-size:24px;color:var(--danger)">—</div>
+          <div style="font-size:8px;color:var(--muted);letter-spacing:0.15em">DAYS TO EXAMS</div>
+        </div>
+      </div>
+      <div id="academic-roadmap"></div>
+    </div>
+
+    <!-- ── ANNUAL TARGETS ── -->
+    <div class="page" id="p-annual">
+      <div class="eco-header">
+        <div><div class="eco-title">Annual Targets</div><div class="eco-sub">2026 goals · Auto-prioritised if behind schedule</div></div>
+      </div>
+      <div class="card">
+        <div class="card-title"><span>Add Target</span></div>
+        <div class="at-form">
+          <input class="at-input" id="at-name" placeholder="Target name (e.g. Public brand: 1,000 followers)">
+          <input class="at-input" id="at-current" placeholder="Current" type="number" min="0">
+          <input class="at-input" id="at-target" placeholder="Target" type="number" min="1">
+          <button class="at-add-btn" onclick="addAnnualTarget()">+ Add</button>
+        </div>
+      </div>
+      <div id="at-list"></div>
+    </div>
+
+    <!-- ── SETTINGS ── -->
+    <div class="page" id="p-settings">
+      <div class="eco-header">
+        <div><div class="eco-title">Settings</div><div class="eco-sub">System configuration</div></div>
+      </div>
+      <div class="card">
+        <div class="card-title"><span>Notifications</span></div>
+        <div class="settings-row">
+          <div><div class="sr-label">Browser Reminders</div><div class="sr-sub">Agent sends reminders if you're drifting</div></div>
+          <button class="sr-btn" onclick="requestNotifPermission()">Enable</button>
+        </div>
+        <div class="settings-row">
+          <div><div class="sr-label">Morning Brief Time</div><div class="sr-sub">AI brief delivered at this time daily</div></div>
+          <input class="sr-input" type="time" id="brief-time" value="06:00">
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title"><span>Data</span></div>
+        <div class="settings-row">
+          <div><div class="sr-label">Export All Data</div><div class="sr-sub">Download JSON snapshot</div></div>
+          <button class="sr-btn" onclick="exportData()">Export</button>
+        </div>
+        <div class="settings-row">
+          <div><div class="sr-label">Reset System</div><div class="sr-sub" style="color:var(--danger)">Wipes all local data</div></div>
+          <button class="sr-btn" style="background:var(--danger);border-color:var(--danger)" onclick="resetSystem()">Reset</button>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /content -->
+</div><!-- /app -->
+
+<script>
+/* ═══════════════════════════════════════════════════
+   STATE
+═══════════════════════════════════════════════════ */
+const DEFAULT_STATE = {
+  kpis:{
+    sprint_100m:{label:"100m PB",value:11.2,unit:"s",target:10.8,lowerBetter:true},
+    sprint_200m:{label:"200m PB",value:23.1,unit:"s",target:22.5,lowerBetter:true},
+    sprint_400m:{label:"400m PB",value:55.99,unit:"s",target:53.0,lowerBetter:true},
+    maths_syllabus:{label:"Maths 9709",value:62,unit:"%",target:100,lowerBetter:false},
+    further_maths:{label:"Further Maths 9231",value:48,unit:"%",target:100,lowerBetter:false},
+    business:{label:"Business 9609",value:71,unit:"%",target:100,lowerBetter:false},
+    economics:{label:"Economics 9708",value:55,unit:"%",target:100,lowerBetter:false},
+  },
+  todos:[
+    {id:1,text:"CS50P: Complete Problem Set 3",priority:1,done:false,category:"business",due:"2026-04-29",source:"manual",roadmapId:null,urgent:false},
+    {id:2,text:"Further Maths: Matrices revision",priority:2,done:false,category:"academics",due:"2026-04-28",source:"manual",roadmapId:"fm-matrices",urgent:false},
+    {id:3,text:"Sprint drills – acceleration phase",priority:3,done:false,category:"athletics",due:"2026-04-27",source:"manual",roadmapId:"sprint-acc",urgent:false},
+    {id:4,text:"Economics: Chapter 7 – Market Structures",priority:4,done:false,category:"academics",due:"2026-04-30",source:"manual",roadmapId:null,urgent:false},
+    {id:5,text:"Draft friend's website homepage copy",priority:5,done:false,category:"business",due:"2026-05-01",source:"manual",roadmapId:null,urgent:false},
+  ],
+  habits:{
+    scripture_prayer:{label:"Scripture & Prayer (pre-5:20am)",done:false},
+    ironing:{label:"Clothes ironed night before",done:false},
+    python_session:{label:"Python / Aether (20:30–21:30)",done:false},
+    sprint_training:{label:"Sprint training",done:false},
+    academics:{label:"Academic study block (18:00–20:00)",done:false},
+  },
+  bible:[
+    {ref:"Proverbs 27",done:true,date:"2026-04-25"},
+    {ref:"Acts 3–4",done:true,date:"2026-04-26"},
+    {ref:"Proverbs 28",done:false,date:"2026-04-27",pushed:0},
+    {ref:"Romans 8",done:false,date:"2026-04-28",pushed:0},
+    {ref:"Proverbs 29",done:false,date:"2026-04-29",pushed:0},
+    {ref:"Acts 5–6",done:false,date:"2026-04-30",pushed:0},
+  ],
+  books:[
+    {title:"The Almanack of Naval Ravikant",author:"Nivi & Naval",status:"reading",page:67,total:240},
+    {title:"Zero to One",author:"Peter Thiel",status:"queue",page:0,total:195},
+    {title:"The Hard Thing About Hard Things",author:"Ben Horowitz",status:"queue",page:0,total:304},
+    {title:"Atomic Habits",author:"James Clear",status:"done",page:320,total:320},
+  ],
+  timetable:[
+    {time:"05:00–05:20",label:"Scripture & Prayer"},
+    {time:"05:20–07:00",label:"Morning prep + travel"},
+    {time:"07:30–15:00",label:"School — Trident College"},
+    {time:"15:30–17:30",label:"Sprint Training"},
+    {time:"18:00–20:00",label:"Academics"},
+    {time:"20:30–21:30",label:"Python / Aether / Founder OS"},
+    {time:"21:45–22:00",label:"Iron clothes + wind down"},
+  ],
+  sprintRoadmap:[
+    {id:"sprint-p1",phase:1,name:"Foundation + Rugby Season",dates:"Jan–Mar 2026",status:"done",tasks:[
+      {id:"sprint-base",text:"Build aerobic base — 3×/week easy runs",done:true,pushed:0},
+      {id:"sprint-form",text:"Sprint form drills — A/B skips daily",done:true,pushed:0},
+    ]},
+    {id:"sprint-p2",phase:2,name:"Post-Rugby — Speed Development",dates:"29 Mar–17 Apr",status:"done",tasks:[
+      {id:"sprint-acc",text:"Acceleration phase drills (Mon sessions)",done:false,pushed:0},
+      {id:"sprint-max",text:"Max speed work — flying 30m (Wed)",done:false,pushed:0},
+      {id:"sprint-plyo",text:"Plyometrics — box jumps, bounds",done:true,pushed:0},
+    ]},
+    {id:"sprint-p3",phase:3,name:"Athletics Peak — Regionals Prep",dates:"18 Apr–Regionals",status:"active",tasks:[
+      {id:"sprint-200se",text:"200m speed endurance (3×150m @ 85%)",done:false,pushed:0},
+      {id:"sprint-fly30",text:"Flying 30m benchmark — target 2.7s",done:false,pushed:0},
+      {id:"sprint-400sub48",text:"400m time trial — target sub-48s",done:false,pushed:0},
+      {id:"sprint-taper",text:"Race-week taper protocol",done:false,pushed:0},
+    ]},
+  ],
+  academicRoadmap:[
+    {id:"acad-maths",subject:"Maths 9709",color:"var(--glow)",topics:[
+      {id:"m-functions",text:"Functions",done:true,pushed:0},
+      {id:"m-coords",text:"Coordinate Geometry",done:true,pushed:0},
+      {id:"m-trigonometry",text:"Trigonometry",done:true,pushed:0},
+      {id:"m-calc",text:"Calculus (P1)",done:false,pushed:0},
+      {id:"m-stats",text:"Statistics S1",done:false,pushed:0},
+    ]},
+    {id:"acad-fm",subject:"Further Maths 9231",color:"var(--purple)",topics:[
+      {id:"fm-polys",text:"Polynomials & Roots",done:true,pushed:0},
+      {id:"fm-matrices",text:"Matrices",done:false,pushed:0},
+      {id:"fm-vectors",text:"Vectors & 3D Geometry",done:false,pushed:0},
+      {id:"fm-crv",text:"Continuous Random Variables",done:false,pushed:0},
+    ]},
+    {id:"acad-biz",subject:"Business 9609",color:"var(--interactive)",topics:[
+      {id:"biz-people",text:"Human Resource Management",done:false,pushed:0},
+      {id:"biz-ops",text:"Operations Management",done:false,pushed:0},
+      {id:"biz-finance",text:"Finance & Accounting",done:false,pushed:0},
+    ]},
+    {id:"acad-econ",subject:"Economics 9708",color:"var(--warn)",topics:[
+      {id:"econ-micro",text:"Microeconomics — Markets",done:false,pushed:0},
+      {id:"econ-macro",text:"Macroeconomics",done:false,pushed:0},
+      {id:"econ-market",text:"Market Structures (Ch.7)",done:false,pushed:0},
+    ]},
+  ],
+  annualTargets:[
+    {id:"at-brand",name:"Public brand followers",current:0,target:1000,unit:"followers",category:"business"},
+    {id:"at-revenue",name:"AI services revenue",current:0,target:2000,unit:"USD",category:"business"},
+    {id:"at-400m",name:"400m personal best",current:55.99,target:48.0,unit:"s",lowerBetter:true,category:"athletics"},
+    {id:"at-python",name:"CS50P completion",current:15,target:100,unit:"%",category:"business"},
+  ],
+  log:[],
+  chatHistory:[],
+  lastResetDate:"",
+};
+
+function loadState(){
+  try{
+    const s=JSON.parse(localStorage.getItem("founderOSv2"));
+    return s ? deepMerge(DEFAULT_STATE,s) : JSON.parse(JSON.stringify(DEFAULT_STATE));
+  }catch{return JSON.parse(JSON.stringify(DEFAULT_STATE))}
+}
+function deepMerge(def,saved){
+  const out={...def};
+  for(const k in saved){
+    if(saved[k]!==null && typeof saved[k]==="object" && !Array.isArray(saved[k]) && typeof def[k]==="object" && !Array.isArray(def[k])){
+      out[k]=deepMerge(def[k],saved[k]);
+    }else{
+      out[k]=saved[k];
+    }
+  }
+  return out;
+}
+function saveState(){localStorage.setItem("founderOSv2",JSON.stringify(S))}
+
+let S=loadState();
+/* ═══════════════════════════════════════════════════
+   SURGICAL BRIDGE: API MAPPING
+═══════════════════════════════════════════════════ */
+const API_BASE = "http://127.0.0.1:8000";
+
+async function syncFromBackend() {
+  try {
+    const [kpis, habits, todos, annual, sprint, acad] = await Promise.all([
+      fetch(`${API_BASE}/kpis`).then(r => r.json()),
+      fetch(`${API_BASE}/habits`).then(r => r.json()),
+      fetch(`${API_BASE}/todos`).then(r => r.json()),
+      fetch(`${API_BASE}/annual-targets`).then(r => r.json()),
+      fetch(`${API_BASE}/roadmap/sprint`).then(r => r.json()),
+      fetch(`${API_BASE}/roadmap/academic`).then(r => r.json())
+    ]);
+
+    // Map Backend KPIs back to your frontend S.kpis structure
+    kpis.forEach(k => {
+      if (S.kpis[k.key]) {
+        S.kpis[k.key].value = k.current_value;
+        S.kpis[k.key].target = k.target_value;
+      }
+    });
+
+    // Map Backend Habits back to your S.habits
+    habits.forEach(h => {
+      if (S.habits[h.key]) S.habits[h.key].done = h.done;
+    });
+
+    // Update the rest of the objects directly
+    S.todos = todos;
+    S.annualTargets = annual;
+    S.sprintRoadmap = sprint;
+    S.academicRoadmap = acad;
+
+    // Refresh your UI using your original 1,000 lines of logic
+    renderHeader();
+    renderPage(getActivePageName());
+    console.log("OS: Successfully Synced with Terminal");
+  } catch (e) {
+    console.warn("Backend offline. Using local cache.");
+  }
+}
+
+function getActivePageName() {
+  const active = document.querySelector(".page.active");
+  return active ? active.id.replace("p-", "") : "dashboard";
+}
+let nextId=500;
+function uid(){return"t"+(++nextId)}
+function nowTime(){return new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"})}
+function todayStr(){return new Date().toISOString().slice(0,10)}
+function daysUntil(dateStr){return Math.ceil((new Date(dateStr)-new Date().setHours(0,0,0,0))/(864e5))}
+function kpiPct(k){
+  if(k.lowerBetter){const g=k.value*0.15;const d=k.value-k.target;return Math.max(0,Math.min(100,((g-d)/g)*100));}
+  return Math.min(100,(k.value/k.target)*100);
+}
+function pfClass(p){return p>80?"pg":p>50?"pm":p>20?"pl":"pd"}
+
+/* ═══════════════════════════════════════════════════
+   LOGGING
+═══════════════════════════════════════════════════ */
+function addLog(msg,type="system"){
+  S.log.push({time:nowTime(),date:todayStr(),message:msg,type});
+  saveState();
+  if(document.getElementById("p-log").classList.contains("active"))renderLog();
+}
+
+/* ═══════════════════════════════════════════════════
+   MIDNIGHT RESET — push undone todos/bible
+═══════════════════════════════════════════════════ */
+function dailyReset(){
+  const today=todayStr();
+  if(S.lastResetDate===today)return;
+  S.lastResetDate=today;
+
+  // Push undone todos to today
+  S.todos=S.todos.map(t=>{
+    if(!t.done && t.due && t.due < today){
+      addLog(`Task pushed to today: ${t.text.slice(0,40)}`,"warn");
+      return{...t,due:today};
+    }
+    return t;
+  });
+
+  // Reset daily habits
+  Object.keys(S.habits).forEach(k=>{S.habits[k].done=false});
+
+  // Push undone bible readings
+  S.bible=S.bible.map(b=>{
+    if(!b.done && b.date < today){
+      addLog(`Bible reading pushed: ${b.ref}`,"warn");
+      return{...b,date:today,pushed:(b.pushed||0)+1};
+    }
+    return b;
+  });
+
+  saveState();
+}
+
+/* ═══════════════════════════════════════════════════
+   NAV
+═══════════════════════════════════════════════════ */
+function nav(page,el){
+  document.querySelectorAll(".nav-item").forEach(n=>n.classList.remove("active"));
+  el.classList.add("active");
+  document.querySelectorAll(".page").forEach(p=>p.classList.remove("active"));
+  const pg=document.getElementById("p-"+page);
+  if(pg){pg.classList.add("active");pg.classList.add("fade-up");setTimeout(()=>pg.classList.remove("fade-up"),300)}
+  renderPage(page);
+}
+
+function renderPage(page){
+  if(page==="dashboard"){renderDash()}
+  else if(page==="brain"){renderAgentAlerts()}
+  else if(page==="log"){renderLog()}
+  else if(page==="timetable"){renderTimetable()}
+  else if(page==="bible"){renderBible()}
+  else if(page==="books"){renderBooks()}
+  else if(page==="sprint"){renderSprintRoadmap()}
+  else if(page==="academic"){renderAcademicRoadmap()}
+  else if(page==="annual"){renderAnnualTargets()}
+}
+
+/* ═══════════════════════════════════════════════════
+   HEADER
+═══════════════════════════════════════════════════ */
+function renderHeader(){
+  document.getElementById("h-date").textContent=
+    new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric"});
+  const drifting=Object.values(S.habits).filter(h=>!h.done).length;
+  const hd=document.getElementById("h-drift");
+  hd.style.display=drifting>0?"block":"none";
+  hd.textContent=`⚡ ${drifting} HABIT${drifting>1?"S":""} DRIFTING`;
+
+  // Regionals countdown
+  const regDate="2026-05-17";
+  const d=daysUntil(regDate);
+  document.getElementById("regionals-countdown").textContent=d>0?`${d} days`:"Race week!";
+  const rb=document.getElementById("regionals-box");
+  if(rb)rb.querySelector(".cd-val").textContent=d>0?d:"!";
+}
+
+/* ═══════════════════════════════════════════════════
+   DASHBOARD
+═══════════════════════════════════════════════════ */
+function renderDash(){
+  renderCountdown();
+  renderKPIs();
+  renderTodos();
+  renderNonNeg();
+  renderAnnualDash();
+}
+
+function renderCountdown(){
+  const now=new Date();
+  const y=now.getFullYear();
+  const m=now.getMonth();
+
+  const endMonth=new Date(y,m+1,0);
+  const endQ=new Date(y,Math.ceil((m+1)/3)*3,0);
+  const endYear=new Date(y,11,31);
+
+  const dMonth=Math.ceil((endMonth-now)/864e5);
+  const dQ=Math.ceil((endQ-now)/864e5);
+  const dSem=Math.ceil((new Date(y,10,30)-now)/864e5);
+  const dYear=Math.ceil((endYear-now)/864e5);
+
+  const pctMonth=Math.round(((new Date(y,m+1,0).getDate()-dMonth)/new Date(y,m+1,0).getDate())*100);
+  const pctYear=Math.round(((365-dYear)/365)*100);
+
+  document.getElementById("countdown-strip").innerHTML=`
+    ${cdBox(dMonth,"Days in Month",pctMonth+"%")}
+    ${cdBox(dQ,"Days in Quarter","Q"+Math.ceil((m+1)/3))}
+    ${cdBox(dSem,"Days to Exams","Oct 2026")}
+    ${cdBox(dYear,"Days in Year",pctYear+"%")}
+  `;
+}
+
+function cdBox(val,label,sub){
+  return`<div class="cd-box"><div class="cd-val">${val}</div><div class="cd-label">${label}</div><div class="cd-pct">${sub}</div></div>`;
+}
+
+function renderKPIs(){
+  const ath=["sprint_100m","sprint_200m","sprint_400m"];
+  const acad=["maths_syllabus","further_maths","business","economics"];
+  document.getElementById("kpi-ath").innerHTML=ath.map(k=>kpiRow(k)).join("");
+  document.getElementById("kpi-acad").innerHTML=acad.map(k=>kpiRow(k)).join("");
+}
+
+function kpiRow(k){
+  const kpi=S.kpis[k];
+  const pct=kpiPct(kpi);
+  const vc=pct>75?"var(--success)":"var(--glow)";
+  return`<div class="kpi-row">
+    <div class="kpi-head">
+      <span>${kpi.label}</span>
+      <span class="kpi-v" style="color:${vc}">${kpi.value}${kpi.unit}<span class="kpi-t"> / ${kpi.target}${kpi.unit}</span></span>
+    </div>
+    <div class="pbar"><div class="pfill ${pfClass(pct)}" style="width:${pct}%"></div></div>
+  </div>`;
+}
+
+function renderTodos(){
+  // Auto-prioritise urgent annual targets
+  S.todos.forEach(t=>{
+    if(!t.done){
+      const linked=S.annualTargets.find(a=>t.text.toLowerCase().includes(a.name.toLowerCase().split(" ")[0]));
+      if(linked){
+        const pct=linked.lowerBetter?kpiPct(linked):(linked.current/linked.target*100);
+        const expectedPct=getYearPct()*100;
+        if(pct<expectedPct-20)t.urgent=true;
+      }
+    }
+  });
+
+  const sorted=[...S.todos].sort((a,b)=>{
+    if(a.done!==b.done)return a.done?1:-1;
+    if(a.urgent!==b.urgent)return a.urgent?-1:1;
+    return a.priority-b.priority;
+  });
+  const active=sorted.filter(t=>!t.done);
+  document.getElementById("active-badge").textContent=`${active.length} active`;
+
+  const drifting=S.todos.filter(t=>!t.done&&t.due&&t.due<todayStr()).length;
+  const db=document.getElementById("drift-box-dash");
+  db.innerHTML=drifting>0?`<div class="drift-box"><span>⚡</span>${drifting} task${drifting>1?"s":""} overdue — pushed to today</div>`:"";
+
+  document.getElementById("todo-list").innerHTML=sorted.map((t,i)=>{
+    const rank=!t.done?`<span class="todo-rank">#${active.indexOf(t)+1}</span>`:"";
+    const urgBadge=t.urgent&&!t.done?`<span class="tag tag-urgent">URGENT</span>`:"";
+    return`<div class="todo-item ${t.done?"done-item":""}">
+      <div class="cb ${t.done?"checked":""}" onclick="toggleTodo('${t.id}')">${t.done?"✓":""}</div>
+      <div class="cat-dot cat-${t.category}"></div>
+      <div style="flex:1;min-width:0">
+        <div class="todo-text ${t.done?"strike":""}">${rank}${t.text}</div>
+        <div class="todo-meta">
+          <span class="tag tag-${t.category}">${t.category}</span>
+          ${urgBadge}
+          ${t.due?`<span class="todo-due">${t.due}</span>`:""}
+          ${t.source==="ai"?`<span class="ai-src">⚡ AI</span>`:""}
+        </div>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+async function toggleTodo(id){
+  const t=S.todos.find(x=>String(x.id)===String(id));
+  if(!t)return;
+  t.done=!t.done;
+  
+  // Roadmap sync (Preserving your original logic)
+  if(t.roadmapId&&t.done){
+    syncRoadmapTask(t.roadmapId,true);
+    addLog(`Roadmap updated: ${t.roadmapId}`,"system");
+  }
+  
+  addLog(`Task ${t.done?"completed":"reopened"}: ${t.text.slice(0,40)}`);
+  
+  // 1. Save locally first for speed
+  saveState();
+  renderTodos();
+  checkUrgentAlerts();
+
+  // 2. Persistent update to Backend
+  try {
+    await fetch(`${API_BASE}/todos/${id}/toggle`, { method: "POST" });
+    // Optional: syncFromBackend(); // Uncomment if you want AI to re-evaluate state immediately
+  } catch(e) {
+    console.error("Backend todo sync failed");
+  }
+}
+
+function syncRoadmapTask(roadmapId,done){
+  S.sprintRoadmap.forEach(phase=>{
+    phase.tasks.forEach(t=>{if(t.id===roadmapId)t.done=done});
+  });
+  S.academicRoadmap.forEach(sub=>{
+    sub.topics.forEach(t=>{if(t.id===roadmapId)t.done=done});
+  });
+  saveState();
+}
+
+function quickAdd(e){
+  if(e.key!=="Enter")return;
+  const v=e.target.value.trim();
+  if(!v)return;
+  S.todos.push({id:uid(),text:v,priority:9,done:false,category:"personal",due:todayStr(),source:"manual",roadmapId:null,urgent:false});
+  addLog(`Task added: ${v.slice(0,40)}`);
+  e.target.value="";
+  saveState();
+  renderTodos();
+}
+
+function renderNonNeg(){
+  const entries=Object.entries(S.habits);
+  const done=entries.filter(([,h])=>h.done).length;
+  const total=entries.length;
+  const drifting=total-done;
+  document.getElementById("nn-badge").textContent=`${done}/${total}`;
+  document.getElementById("nn-badge").className=`badge ${done===total?"b-suc":"b-warn"}`;
+  document.getElementById("nn-drift").innerHTML=drifting>0
+    ?`<div class="drift-box"><span>⚡</span>${drifting} habit${drifting>1?"s":""} pending today</div>`:"";
+  document.getElementById("nn-list").innerHTML=entries.map(([k,h])=>`
+    <div class="nn-row" onclick="toggleHabit('${k}')">
+      <div class="nn-left">
+        <div class="nn-dot ${h.done?"dot-done":"dot-undone"}"></div>
+        <span class="nn-label ${h.done?"done":""}">${h.label}</span>
+      </div>
+      <span class="nn-status ${h.done?"nns-done":"nns-undone"}">${h.done?"✓ DONE":"PENDING"}</span>
+    </div>`).join("");
+}
+
+async function toggleHabit(k){
+  // Update UI immediately (Preserving your original logic)
+  S.habits[k].done=!S.habits[k].done;
+  addLog(`Habit ${S.habits[k].done?"done":"undone"}: ${S.habits[k].label}`);
+  
+  saveState();
+  renderNonNeg();
+  renderHeader();
+
+  // Sync to Backend database
+  try {
+    await fetch(`${API_BASE}/habits/toggle`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ habit_key: k })
+    });
+  } catch(e) {
+    console.error("Backend habit sync failed");
+  }
+}
+
+/* ═══════════════════════════════════════════════════
+   ANNUAL TARGETS
+═══════════════════════════════════════════════════ */
+function getYearPct(){
+  const start=new Date(new Date().getFullYear(),0,1);
+  const end=new Date(new Date().getFullYear()+1,0,1);
+  return(new Date()-start)/(end-start);
+}
+
+function atScheduleStatus(at){
+  const pct=at.lowerBetter
+    ?Math.max(0,Math.min(100,((at.value||at.current)*0.15-(at.current-at.target))/((at.value||at.current)*0.15)*100))
+    :(at.current/at.target*100);
+  const expected=getYearPct()*100;
+  const gap=pct-expected;
+  if(gap>10)return{label:"Ahead",cls:"b-suc"};
+  if(gap>-10)return{label:"On Track",cls:"b-glow"};
+  if(gap>-25)return{label:"Behind",cls:"b-warn"};
+  return{label:"Critical",cls:"b-danger"};
+}
+
+function renderAnnualDash(){
+  const el=document.getElementById("at-dash");
+  if(!S.annualTargets.length){el.innerHTML=`<div style="font-size:9px;color:var(--muted)">No annual targets set. Go to Annual Targets page.</div>`;return}
+  el.innerHTML=S.annualTargets.map(at=>{
+    const pct=at.lowerBetter?kpiPct(at):Math.min(100,(at.current/at.target*100));
+    const st=atScheduleStatus(at);
+    return`<div class="at-row">
+      <div style="flex:1;min-width:0">
+        <div class="at-name">${at.name}</div>
+        <div style="margin-top:4px"><div class="pbar"><div class="pfill ${pfClass(pct)}" style="width:${pct}%"></div></div></div>
+      </div>
+      <div class="at-vals">${at.current} / ${at.target} ${at.unit||""}</div>
+      <span class="badge ${st.cls} at-schedule">${st.label}</span>
+    </div>`;
+  }).join("");
+}
+
+function renderAnnualTargets(){
+  const el=document.getElementById("at-list");
+  if(!S.annualTargets.length){el.innerHTML=`<div class="card" style="font-size:9px;color:var(--muted)">No targets yet.</div>`;return}
+  el.innerHTML=S.annualTargets.map(at=>{
+    const pct=at.lowerBetter?kpiPct(at):Math.min(100,(at.current/at.target*100));
+    const st=atScheduleStatus(at);
+    const expected=Math.round(getYearPct()*100);
+    return`<div class="card">
+      <div class="card-title">
+        <span>${at.name}</span>
+        <div style="display:flex;gap:6px">
+          <span class="badge ${st.cls}">${st.label}</span>
+          <span class="badge b-muted">${Math.round(pct)}% done</span>
+        </div>
+      </div>
+      <div style="margin-bottom:8px">
+        <div class="pbar" style="height:6px">
+          <div class="pfill ${pfClass(pct)}" style="width:${pct}%"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;margin-top:4px;font-size:8px;color:var(--muted)">
+          <span>${at.current} / ${at.target} ${at.unit||""}</span>
+          <span>Year ${expected}% elapsed · Need ${Math.round(expected)}% progress</span>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <input class="at-input" id="up-${at.id}" placeholder="Update current value" type="number" style="max-width:180px">
+        <button class="at-add-btn" onclick="updateAT('${at.id}')">Update</button>
+        <button class="at-add-btn" style="background:var(--danger);border-color:var(--danger);margin-left:auto" onclick="deleteAT('${at.id}')">Delete</button>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+function addAnnualTarget(){
+  const name=document.getElementById("at-name").value.trim();
+  const cur=parseFloat(document.getElementById("at-current").value)||0;
+  const tgt=parseFloat(document.getElementById("at-target").value);
+  if(!name||!tgt){alert("Fill name and target.");return}
+  S.annualTargets.push({id:"at-"+uid(),name,current:cur,target:tgt,unit:"",category:"personal",lowerBetter:false});
+  document.getElementById("at-name").value="";
+  document.getElementById("at-current").value="";
+  document.getElementById("at-target").value="";
+  addLog(`Annual target added: ${name}`);
+  saveState();
+  renderAnnualTargets();
+}
+
+function updateAT(id){
+  const inp=document.getElementById("up-"+id);
+  const val=parseFloat(inp.value);
+  if(isNaN(val))return;
+  const at=S.annualTargets.find(a=>a.id===id);
+  if(!at)return;
+  at.current=val;
+  addLog(`Annual target updated: ${at.name} → ${val}`);
+  saveState();
+  renderAnnualTargets();
+  checkUrgentAlerts();
+}
+
+function deleteAT(id){
+  if(!confirm("Delete this target?"))return;
+  S.annualTargets=S.annualTargets.filter(a=>a.id!==id);
+  saveState();
+  renderAnnualTargets();
+}
+
+/* ═══════════════════════════════════════════════════
+   ECOSYSTEM
+═══════════════════════════════════════════════════ */
+function renderTimetable(){
+  const h=new Date().getHours();
+  document.getElementById("timetable-card").innerHTML=`
+    <div class="card-title"><span>Daily Schedule</span><span class="badge b-glow">Today</span></div>
+    `+S.timetable.map(slot=>{
+    const start=parseInt(slot.time.split(":")[0]);
+    const isNow=h>=start&&h<start+2;
+    return`<div class="sched-row ${isNow?"now":""}">
+      <span class="sched-time">${slot.time}</span>
+      <span class="sched-label">${slot.label}</span>
+      ${isNow?`<span class="now-tag">▶ NOW</span>`:""}
+    </div>`;
+  }).join("");
+}
+
+function renderBible(){
+  const streak=S.bible.filter(b=>b.done).reduce((s,b,i,a)=>{
+    if(i===0||a[i-1].done)return s+1;return s;
+  },0);
+  document.getElementById("bible-streak").textContent=streak;
+
+  document.getElementById("bible-card").innerHTML=`
+    <div class="card-title"><span>Reading Plan</span><span class="badge b-glow">${S.bible.filter(b=>b.done).length}/${S.bible.length} read</span></div>
+    `+S.bible.map((b,i)=>`
+    <div class="eco-row">
+      <div class="nn-dot ${b.done?"dot-done":"dot-undone"}" style="flex-shrink:0;cursor:pointer" onclick="toggleBible(${i})"></div>
+      <span style="${b.done?"text-decoration:line-through;color:var(--muted)":""}">${b.ref}</span>
+      <span class="eco-date" style="margin-left:auto">${b.date}</span>
+      ${b.pushed>0?`<span class="eco-pushed">+${b.pushed}d</span>`:""}
+    </div>`).join("");
+}
+
+function toggleBible(i){
+  S.bible[i].done=!S.bible[i].done;
+  if(S.bible[i].done)addLog(`Bible: ${S.bible[i].ref} ✓`,"system");
+  saveState();
+  renderBible();
+}
+
+function renderBooks(){
+  const cls={reading:"bs-reading",queue:"bs-queue",done:"bs-done"};
+  document.getElementById("books-card").innerHTML=`
+    <div class="card-title"><span>Reading Queue</span><span class="badge b-glow">${S.books.filter(b=>b.status==="reading").length} active</span></div>
+    `+S.books.map(b=>`
+    <div class="book-row">
+      <div>
+        <div class="bk-title">${b.title}</div>
+        <div class="bk-author">${b.author}</div>
+        ${b.total>0?`<div style="margin-top:6px;width:120px"><div class="pbar"><div class="pfill ${pfClass(b.page/b.total*100)}" style="width:${Math.round(b.page/b.total*100)}%"></div></div></div>`:""}
+      </div>
+      <span class="bk-status ${cls[b.status]}">${b.status}</span>
+    </div>`).join("");
+}
+
+/* ═══════════════════════════════════════════════════
+   SPRINT ROADMAP
+═══════════════════════════════════════════════════ */
+function renderSprintRoadmap(){
+  const regDate="2026-05-17";
+  const d=daysUntil(regDate);
+  const rb=document.getElementById("regionals-box");
+  if(rb)rb.querySelector(".cd-val").textContent=d>0?d:"Race week!";
+
+  document.getElementById("sprint-roadmap").innerHTML=S.sprintRoadmap.map(phase=>{
+    const doneTasks=phase.tasks.filter(t=>t.done).length;
+    const pct=Math.round(doneTasks/phase.tasks.length*100);
+    const stClass=phase.status==="done"?"done":phase.status==="active"?"active":"";
+    return`<div class="roadmap-phase">
+      <div class="rp-head">
+        <div class="rp-num ${stClass}">${phase.phase}</div>
+        <div>
+          <div class="rp-name">${phase.name}</div>
+          <div style="font-size:8px;color:var(--muted);margin-top:1px">${phase.dates}</div>
+        </div>
+        <div style="margin-left:auto;text-align:right">
+          <div class="badge ${phase.status==="done"?"b-suc":phase.status==="active"?"b-glow":"b-muted"}">${phase.status.toUpperCase()}</div>
+          <div style="font-size:8px;color:var(--muted);margin-top:4px">${pct}% tasks done</div>
+        </div>
+      </div>
+      <div style="margin-bottom:8px"><div class="pbar"><div class="pfill ${pfClass(pct)}" style="width:${pct}%"></div></div></div>
+      ${phase.tasks.map(t=>`
+        <div class="roadmap-task">
+          <div class="rt-cb ${t.done?"checked":""}" onclick="toggleSprintTask('${phase.id}','${t.id}')">${t.done?"✓":""}</div>
+          <span class="rt-text ${t.done?"done":""}">${t.text}</span>
+          ${t.pushed>0?`<span class="rt-pushed">+${t.pushed}d</span>`:""}
+        </div>`).join("")}
+    </div>`;
+  }).join("");
+
+  // Sprint KPIs
+  document.getElementById("sprint-kpis").innerHTML=
+    ["sprint_100m","sprint_200m","sprint_400m"].map(k=>kpiRow(k)).join("");
+}
+
+function toggleSprintTask(phaseId,taskId){
+  const phase=S.sprintRoadmap.find(p=>p.id===phaseId);
+  if(!phase)return;
+  const task=phase.tasks.find(t=>t.id===taskId);
+  if(!task)return;
+  task.done=!task.done;
+  // Sync to any linked todo
+  S.todos.forEach(t=>{if(t.roadmapId===taskId)t.done=task.done});
+  addLog(`Sprint task ${task.done?"done":"undone"}: ${task.text.slice(0,35)}`);
+  saveState();
+  renderSprintRoadmap();
+}
+
+/* ═══════════════════════════════════════════════════
+   ACADEMIC ROADMAP
+═══════════════════════════════════════════════════ */
+function renderAcademicRoadmap(){
+  const examDate="2026-10-01";
+  const d=daysUntil(examDate);
+  document.getElementById("exam-days").textContent=d>0?d:"!";
+
+  document.getElementById("academic-roadmap").innerHTML=S.academicRoadmap.map(sub=>{
+    const done=sub.topics.filter(t=>t.done).length;
+    const pct=Math.round(done/sub.topics.length*100);
+    return`<div class="roadmap-phase">
+      <div class="rp-head">
+        <div class="rp-num active" style="background:${sub.color};color:#011C40">${pct}%</div>
+        <div>
+          <div class="rp-name">${sub.subject}</div>
+          <div style="font-size:8px;color:var(--muted);margin-top:1px">${done}/${sub.topics.length} topics complete</div>
+        </div>
+        <span class="badge b-muted" style="margin-left:auto">${pct}%</span>
+      </div>
+      <div style="margin-bottom:10px"><div class="pbar"><div class="pfill ${pfClass(pct)}" style="width:${pct}%;background:${sub.color}"></div></div></div>
+      ${sub.topics.map(t=>`
+        <div class="roadmap-task">
+          <div class="rt-cb ${t.done?"checked":""}" onclick="toggleAcadTask('${sub.id}','${t.id}')">${t.done?"✓":""}</div>
+          <span class="rt-text ${t.done?"done":""}">${t.text}</span>
+          ${t.pushed>0?`<span class="rt-pushed">+${t.pushed}d</span>`:""}
+        </div>`).join("")}
+    </div>`;
+  }).join("");
+}
+
+function toggleAcadTask(subId,taskId){
+  const sub=S.academicRoadmap.find(s=>s.id===subId);
+  if(!sub)return;
+  const task=sub.topics.find(t=>t.id===taskId);
+  if(!task)return;
+  task.done=!task.done;
+  S.todos.forEach(t=>{if(t.roadmapId===taskId)t.done=task.done});
+  // Update KPI
+  const kpiMap={
+    "acad-maths":"maths_syllabus","acad-fm":"further_maths",
+    "acad-biz":"business","acad-econ":"economics"
+  };
+  const kpiKey=kpiMap[subId];
+  if(kpiKey){
+    const sub2=S.academicRoadmap.find(s=>s.id===subId);
+    const donePct=Math.round(sub2.topics.filter(t=>t.done).length/sub2.topics.length*100);
+    S.kpis[kpiKey].value=donePct;
+  }
+  addLog(`Academic task ${task.done?"done":"undone"}: ${task.text.slice(0,35)}`);
+  saveState();
+  renderAcademicRoadmap();
+  if(document.getElementById("p-dashboard").classList.contains("active"))renderKPIs();
+}
+
+/* ═══════════════════════════════════════════════════
+   ACTIVITY LOG
+═══════════════════════════════════════════════════ */
+function renderLog(){
+  const el=document.getElementById("log-list");
+  document.getElementById("log-count").textContent=`${S.log.length} entries`;
+  if(!S.log.length){el.innerHTML=`<div class="log-entry" style="color:var(--muted)">No activity yet.</div>`;return}
+  const typeClass={system:"",ai:"la",warn:"lw",success:"ls"};
+  el.innerHTML=[...S.log].reverse().slice(0,50).map(e=>
+    `<div class="log-entry"><span class="lt">${e.time}</span><span class="${typeClass[e.type]||""}">${e.message}</span></div>`
+  ).join("");
+}
+
+/* ═══════════════════════════════════════════════════
+   BRAIN DUMP — AI PARSE
+═══════════════════════════════════════════════════ */
+document.getElementById("dump-ta").addEventListener("keydown",e=>{
+  if((e.ctrlKey||e.metaKey)&&e.key==="Enter")parseDump();
+});
+
+async function parseDump(){
+  const text=document.getElementById("dump-ta").value.trim();
+  if(!text)return;
+  const btn=document.getElementById("parse-btn");
+  const res=document.getElementById("parse-result");
+  const err=document.getElementById("parse-err");
+  btn.disabled=true;btn.textContent="Parsing…";
+  res.style.display="none";err.style.display="none";
+
+  const roadmapIds=[
+    ...S.sprintRoadmap.flatMap(p=>p.tasks.map(t=>t.id)),
+    ...S.academicRoadmap.flatMap(s=>s.topics.map(t=>t.id)),
+  ].join(", ");
+
+  const sys=`You are the Founder OS parsing engine for Bandile Masocha — Year 12, Trident College, Zambia. A-levels: Maths 9709, Further Maths 9231, Business 9609, Economics 9708. Competitive sprinter (100m/200m/400m). Building AI services business (Aether). ISAZ Regionals ~17 May 2026. CIE exams Oct–Nov 2026.
+
+Parse the brain dump and return ONLY valid JSON — no markdown, no explanation.
+
+Known roadmap task IDs (use these to link todos): ${roadmapIds}
+
+JSON schema:
+{
+  "summary": "one-line summary",
+  "kpi_updates": [{"key":"sprint_100m|sprint_200m|sprint_400m|maths_syllabus|further_maths|business|economics","value":number}],
+  "todos_add": [{"text":"string","priority":1,"category":"athletics|academics|business|personal","due":"YYYY-MM-DD|null","roadmapId":"roadmap-id-or-null"}],
+  "todos_complete": ["text fragment"],
+  "roadmap_complete": ["roadmap-task-id"],
+  "habits_done": ["scripture_prayer|ironing|python_session|sprint_training|academics"],
+  "annual_updates": [{"id":"at-id-or-guess","current":number}],
+  "log_entry": "short log message",
+  "advisory": "1-2 sentence strategic insight or null"
+}
+
+Today is ${todayStr()}. Always return valid JSON only.`;
+
+  try{
+    const r=await fetch("https://api.anthropic.com/v1/messages",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({
+        model:"claude-sonnet-4-20250514",max_tokens:1200,
+        system:sys,
+        messages:[{role:"user",content:text}]
+      })
+    });
+    if(!r.ok)throw new Error(`API ${r.status}`);
+    const data=await r.json();
+    const raw=data.content?.[0]?.text||"{}";
+    const p=JSON.parse(raw.replace(/```json|```/g,"").trim());
+
+    // Apply
+    if(p.kpi_updates?.length)p.kpi_updates.forEach(u=>{if(S.kpis[u.key])S.kpis[u.key].value=u.value});
+    if(p.todos_add?.length)p.todos_add.forEach(t=>{
+      S.todos.push({id:uid(),text:t.text,priority:t.priority||5,done:false,category:t.category||"personal",due:t.due||todayStr(),source:"ai",roadmapId:t.roadmapId||null,urgent:false});
+    });
+    if(p.todos_complete?.length)p.todos_complete.forEach(f=>{
+      S.todos.forEach(t=>{if(t.text.toLowerCase().includes(f.toLowerCase()))t.done=true});
+    });
+    if(p.roadmap_complete?.length)p.roadmap_complete.forEach(id=>syncRoadmapTask(id,true));
+    if(p.habits_done?.length)p.habits_done.forEach(k=>{if(S.habits[k])S.habits[k].done=true});
+    if(p.log_entry)addLog(p.log_entry,"ai");
+
+    saveState();
+    if(document.getElementById("p-dashboard").classList.contains("active"))renderDash();
+    else renderHeader();
+
+    let html=`<div style="color:var(--success);margin-bottom:5px">✓ ${p.summary||"Parsed"}</div>`;
+    if(p.kpi_updates?.length)html+=`<div>→ KPIs: ${p.kpi_updates.map(u=>u.key.replace("_"," ")+": "+u.value).join(", ")}</div>`;
+    if(p.todos_add?.length)html+=`<div>→ ${p.todos_add.length} task${p.todos_add.length>1?"s":""} added</div>`;
+    if(p.todos_complete?.length)html+=`<div>→ Completed: ${p.todos_complete.join(", ")}</div>`;
+    if(p.roadmap_complete?.length)html+=`<div>→ Roadmap: ${p.roadmap_complete.join(", ")}</div>`;
+    if(p.habits_done?.length)html+=`<div>→ Habits: ${p.habits_done.join(", ")}</div>`;
+    if(p.advisory)html+=`<div class="advisory-inner">🧠 ${p.advisory}</div>`;
+    res.innerHTML=html;res.style.display="block";
+    document.getElementById("dump-ta").value="";
+    addChatMsg("⚡ Brain dump parsed: "+p.summary,"system");
+    renderAgentAlerts();
+  }catch(e){
+    err.textContent="Error: "+e.message;err.style.display="block";
+  }finally{btn.disabled=false;btn.textContent="⚡ Parse →"}
+}
+
+/* ═══════════════════════════════════════════════════
+   AI CHAT
+═══════════════════════════════════════════════════ */
+function addChatMsg(text,role){
+  S.chatHistory.push({text,role,time:nowTime()});
+  if(S.chatHistory.length>80)S.chatHistory=S.chatHistory.slice(-80);
+  saveState();
+  appendChatDOM({text,role,time:nowTime()});
+}
+
+function appendChatDOM(msg){
+  const el=document.getElementById("chat-msgs");
+  const d=document.createElement("div");
+  d.className=`msg ${msg.role} fade-up`;
+  d.innerHTML=`<div class="msg-bubble">${msg.text.replace(/\n/g,"<br>")}</div><div class="msg-time">${msg.time}</div>`;
+  el.appendChild(d);
+  el.scrollTop=el.scrollHeight;
+}
+
+function renderChatHistory(){
+  const el=document.getElementById("chat-msgs");
+  el.innerHTML="";
+  S.chatHistory.slice(-30).forEach(m=>appendChatDOM(m));
+}
+
+function chatKey(e){if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();sendChat()}}
+
+async function sendChat(){
+  const inp=document.getElementById("chat-inp");
+  const text=inp.value.trim();
+  if(!text)return;
+  inp.value="";inp.disabled=true;
+  addChatMsg(text,"user");
+
+  // Build context snapshot
+  const ctx={
+    kpis:S.kpis,
+    habits:Object.fromEntries(Object.entries(S.habits).map(([k,h])=>[k,h.done])),
+    todosActive:S.todos.filter(t=>!t.done).length,
+    annualTargets:S.annualTargets.map(a=>({name:a.name,current:a.current,target:a.target,status:atScheduleStatus(a).label})),
+    log:S.log.slice(-10).map(l=>l.message),
+  };
+
+  const sys=`You are Founder OS — Bandile Masocha's CEO-level AI second brain. Year 12, Trident College, Zambia. A-levels: Maths 9709, Further Maths 9231, Business 9609, Economics 9708. Competitive sprinter. Building Aether AI services. ISAZ Regionals ~17 May 2026. CIE exams Oct–Nov 2026. Governing principle: "Character Before Status." Mission: Student → Founder → Group CEO → Bandile Group Holdings. Christian stewardship. Revenue target: first AI services client = CEO of insurance firm.
+
+Current system state: ${JSON.stringify(ctx)}
+
+Be direct, strategic, unsentimental. No fluff. No emojis. Plain text only. Challenge weak thinking. Surface blind spots. Think in leverage and compounding.`;
+
+  const msgs=S.chatHistory.slice(-10).filter(m=>m.role!=="system").map(m=>({role:m.role==="bot"?"assistant":"user",content:m.text}));
+  msgs.push({role:"user",content:text});
+
+  try{
+    const r=await fetch("https://api.anthropic.com/v1/messages",{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:800,system:sys,messages:msgs})
+    });
+    if(!r.ok)throw new Error("API "+r.status);
+    const data=await r.json();
+    const reply=data.content?.[0]?.text||"No response.";
+    addChatMsg(reply,"bot");
+  }catch(e){addChatMsg("Error: "+e.message,"bot")}
+  finally{inp.disabled=false;inp.focus()}
+}
+
+/* ═══════════════════════════════════════════════════
+   AGENT ALERTS + PROACTIVE BRIEF
+═══════════════════════════════════════════════════ */
+function checkUrgentAlerts(){
+  // Auto-flag todos linked to behind-schedule annual targets
+  S.annualTargets.forEach(at=>{
+    const st=atScheduleStatus(at);
+    if(st.label==="Critical"||st.label==="Behind"){
+      S.todos.filter(t=>!t.done&&t.text.toLowerCase().includes(at.name.toLowerCase().split(" ")[0]))
+        .forEach(t=>{t.urgent=true});
+    }
+  });
+  saveState();
+}
+
+function renderAgentAlerts(){
+  const alerts=[];
+  const drifting=Object.entries(S.habits).filter(([,h])=>!h.done).map(([k,h])=>h.label);
+  if(drifting.length)alerts.push({type:"danger",head:"Habit Drift",text:`${drifting.length} non-negotiable${drifting.length>1?"s":""} pending: ${drifting.slice(0,2).join(", ")}${drifting.length>2?"…":""}`});
+
+  S.annualTargets.forEach(at=>{
+    const st=atScheduleStatus(at);
+    if(st.label==="Critical")alerts.push({type:"danger",head:"Critical",text:`"${at.name}" is critically behind. ${at.current}/${at.target} — requires immediate escalation.`});
+    else if(st.label==="Behind")alerts.push({type:"warn",head:"Behind Schedule",text:`"${at.name}" is behind pace. ${at.current}/${at.target} ${at.unit}.`});
+  });
+
+  const overdue=S.todos.filter(t=>!t.done&&t.due&&t.due<todayStr());
+  if(overdue.length)alerts.push({type:"warn",head:"Overdue Tasks",text:`${overdue.length} task${overdue.length>1?"s":""} past due — pushed to today.`});
+
+  const daysToReg=daysUntil("2026-05-17");
+  if(daysToReg<=14)alerts.push({type:"glow",head:"Regionals Approaching",text:`${daysToReg} days to ISAZ Regionals. Review taper protocol.`});
+
+  document.getElementById("alert-count").textContent=alerts.length;
+  document.getElementById("agent-alerts").innerHTML=alerts.length
+    ?alerts.map(a=>`<div class="agent-alert ${a.type==="glow"?"glow-alert":""}">
+        <div class="aa-head">${a.head}</div>${a.text}
+      </div>`).join("")
+    :`<div style="font-size:9px;color:var(--muted)">✓ No critical alerts.</div>`;
+
+  // Notify if critical
+  alerts.filter(a=>a.type==="danger").forEach(a=>{
+    if(Notification.permission==="granted")new Notification("Founder OS Alert",{body:a.text,icon:""});
+  });
+}
+
+async function generateBrief(){
+  document.getElementById("brief-text").textContent="Generating…";
+  const ctx={
+    kpis:Object.fromEntries(Object.entries(S.kpis).map(([k,v])=>[k,v.value])),
+    habits:Object.fromEntries(Object.entries(S.habits).map(([k,h])=>[k,h.done])),
+    todos:S.todos.filter(t=>!t.done).slice(0,5).map(t=>t.text),
+    annualTargets:S.annualTargets.map(a=>({name:a.name,current:a.current,target:a.target,status:atScheduleStatus(a).label})),
+    daysToRegionals:daysUntil("2026-05-17"),
+    daysToExams:daysUntil("2026-10-01"),
+  };
+
+  try{
+    const r=await fetch("https://api.anthropic.com/v1/messages",{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({
+        model:"claude-sonnet-4-20250514",max_tokens:400,
+        system:"You are Founder OS proactive agent. Analyse the state and give a 3-4 sentence unprompted brief: what's drifting, what's the single highest-leverage action, what's the uncomfortable truth. Plain text. No markdown. No flattery. Direct and surgical.",
+        messages:[{role:"user",content:`System state: ${JSON.stringify(ctx)}`}]
+      })
+    });
+    const data=await r.json();
+    document.getElementById("brief-text").textContent=data.content?.[0]?.text||"No brief generated.";
+    addLog("Proactive brief generated","ai");
+  }catch(e){document.getElementById("brief-text").textContent="Error: "+e.message}
+}
+
+/* ═══════════════════════════════════════════════════
+   NOTIFICATIONS
+═══════════════════════════════════════════════════ */
+function requestNotifPermission(){
+  Notification.requestPermission().then(p=>{
+    alert(p==="granted"?"Notifications enabled. Agent will alert you when drifting.":"Permission denied. Enable in browser settings.");
+  });
+}
+
+// Drift check every 30 minutes
+setInterval(()=>{
+  const drifting=Object.values(S.habits).filter(h=>!h.done).length;
+  if(drifting>0&&Notification.permission==="granted"){
+    new Notification("Founder OS — Drift Alert",{body:`${drifting} habit${drifting>1?"s":""} still pending. Character Before Status.`});
+  }
+},30*60*1000);
+
+/* ═══════════════════════════════════════════════════
+   DATA
+═══════════════════════════════════════════════════ */
+function exportData(){
+  const blob=new Blob([JSON.stringify(S,null,2)],{type:"application/json"});
+  const a=document.createElement("a");a.href=URL.createObjectURL(blob);
+  a.download=`founder-os-${todayStr()}.json`;a.click();
+  addLog("Data exported");
+}
+
+function resetSystem(){
+  if(!confirm("Reset ALL data? This cannot be undone."))return;
+  localStorage.removeItem("founderOSv2");
+  location.reload();
+}
+
+/* ═══════════════════════════════════════════════════
+   INIT
+═══════════════════════════════════════════════════ */
+dailyReset();
+renderHeader();
+renderDash();
+renderChatHistory();
+checkUrgentAlerts();
+renderAgentAlerts();
+// Start the live connection
+syncFromBackend();
+setInterval(syncFromBackend, 30000); // Check for AI updates every 30s
+
+// Update header every minute
+setInterval(()=>{renderHeader();},60000);
+
+// Update countdown every hour
+setInterval(()=>{if(document.getElementById("p-dashboard").classList.contains("active"))renderCountdown();},3600000);
+</script>
 </body>
+</html>
