@@ -122,3 +122,14 @@ class RoadmapTask(Base):
     done = Column(Boolean, default=False)
     pushed_count = Column(Integer, default=0)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+class Todo(Base):
+    __tablename__ = "todos"
+    id = Column(Integer, primary_key=True, index=True)
+    text = Column(String)
+    priority = Column(Integer, default=5)
+    done = Column(Boolean, default=False)
+    category = Column(String)
+    due = Column(String)
+    source = Column(String)
+    roadmap_id = Column(String, nullable=True)

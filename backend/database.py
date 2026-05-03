@@ -23,3 +23,7 @@ def get_db():
         yield db
     finally:
         db.close()
+
+def get_all_todos(db):
+    import models
+    return db.query(models.Todo).all()
