@@ -354,10 +354,35 @@ def update_roadmap_tasks(payload: schemas.RoadmapBulkUpdate, db: Session = Depen
     db.commit()
     return {"updated": updated}
 
+# ── TODOS ────────────────────────────────────────────────────
 @app.get("/todos")
-async def get_todos(db: Session = Depends(database.get_db)):
-    # This fetches all tasks from your SQLite database
-    return database.get_all_todos(db)
+def get_todos(db: Session = Depends(get_db)):
+    return db.query(models.Todo).all()
+
+@app.post("/todos")
+def create_todo(todo: dict, db: Session = Depends(get_db)):
+    new_todo = models.Todo(
+        text=todo.get("text"),
+        priority=todo.get("priority", 5),
+        done=False,
+        category=todo.get("category", "personal"),
+        due=todo.get("due", str(date.today())),
+        source=todo.get("source", "manual"),
+        roadmap_id=todo.get("roadmapId")
+    )
+    db.add(new_todo)
+    db.commit()
+    db.refresh(new_todo)
+    return new_todo
+
+@app.post("/todos/{todo_id}/toggle")
+def toggle_todo(todo_id: int, db: Session = Depends(get_db)):
+    todo = db.query(models.Todo).filter(models.Todo.id == todo_id).first()
+    if not todo:
+        raise HTTPException(404, "Todo not found")
+    todo.done = not todo.done
+    db.commit()
+    return {"id": todo.id, "done": todo.done}
 
 # ── RADAR ────────────────────────────────────────────────────
 @app.get("/radar")

@@ -1590,26 +1590,32 @@ async function sendChat(){
     log:S.log.slice(-10).map(l=>l.message),
   };
 
-  const sys=`You are Founder OS — Bandile Masocha's CEO-level AI second brain. Year 12, Trident College, Zambia. A-levels: Maths 9709, Further Maths 9231, Business 9609, Economics 9708. Competitive sprinter. Building Aether AI services. ISAZ Regionals ~17 May 2026. CIE exams Oct–Nov 2026. Governing principle: "Character Before Status." Mission: Student → Founder → Group CEO → Bandile Group Holdings. Christian stewardship. Revenue target: first AI services client = CEO of insurance firm.
-
-Current system state: ${JSON.stringify(ctx)}
-
-Be direct, strategic, unsentimental. No fluff. No emojis. Plain text only. Challenge weak thinking. Surface blind spots. Think in leverage and compounding.`;
-
-  const msgs=S.chatHistory.slice(-10).filter(m=>m.role!=="system").map(m=>({role:m.role==="bot"?"assistant":"user",content:m.text}));
-  msgs.push({role:"user",content:text});
+  // Session ID — persist in localStorage
+  let sessionId = localStorage.getItem("founderOS_session");
+  if(!sessionId){
+    sessionId = Date.now().toString(36) + Math.random().toString(36).slice(2);
+    localStorage.setItem("founderOS_session", sessionId);
+  }
 
   try{
-    const r=await fetch("https://api.anthropic.com/v1/messages",{
-      method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:800,system:sys,messages:msgs})
+    const r = await fetch(`${API_BASE}/chat`, {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({
+        message: text,
+        session_id: sessionId,
+        context: ctx
+      })
     });
-    if(!r.ok)throw new Error("API "+r.status);
-    const data=await r.json();
-    const reply=data.content?.[0]?.text||"No response.";
-    addChatMsg(reply,"bot");
-  }catch(e){addChatMsg("Error: "+e.message,"bot")}
-  finally{inp.disabled=false;inp.focus()}
+    if(!r.ok) throw new Error("Backend "+r.status);
+    const data = await r.json();
+    addChatMsg(data.reply, "bot");
+  }catch(e){
+    addChatMsg("Backend offline. Start the server: py -m uvicorn main:app --reload", "bot");
+  }finally{
+    inp.disabled=false;
+    inp.focus();
+  }
 }
 
 /* ═══════════════════════════════════════════════════
@@ -1656,9 +1662,9 @@ function renderAgentAlerts(){
     if(Notification.permission==="granted")new Notification("Founder OS Alert",{body:a.text,icon:""});
   });
 }
-
 async function generateBrief(){
   document.getElementById("brief-text").textContent="Generating…";
+
   const ctx={
     kpis:Object.fromEntries(Object.entries(S.kpis).map(([k,v])=>[k,v.value])),
     habits:Object.fromEntries(Object.entries(S.habits).map(([k,h])=>[k,h.done])),
@@ -1669,18 +1675,18 @@ async function generateBrief(){
   };
 
   try{
-    const r=await fetch("https://api.anthropic.com/v1/messages",{
-      method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({
-        model:"claude-sonnet-4-20250514",max_tokens:400,
-        system:"You are Founder OS proactive agent. Analyse the state and give a 3-4 sentence unprompted brief: what's drifting, what's the single highest-leverage action, what's the uncomfortable truth. Plain text. No markdown. No flattery. Direct and surgical.",
-        messages:[{role:"user",content:`System state: ${JSON.stringify(ctx)}`}]
-      })
+    const r = await fetch(`${API_BASE}/proactive-brief`, {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      body: JSON.stringify({ context: ctx })
     });
-    const data=await r.json();
-    document.getElementById("brief-text").textContent=data.content?.[0]?.text||"No brief generated.";
+    if(!r.ok) throw new Error("Backend "+r.status);
+    const data = await r.json();
+    document.getElementById("brief-text").textContent = data.brief || "No brief generated.";
     addLog("Proactive brief generated","ai");
-  }catch(e){document.getElementById("brief-text").textContent="Error: "+e.message}
+  }catch(e){
+    document.getElementById("brief-text").textContent="Backend offline. Start the server.";
+  }
 }
 
 /* ═══════════════════════════════════════════════════
