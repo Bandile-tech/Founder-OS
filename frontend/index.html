@@ -297,6 +297,19 @@ body{
 .msg.bot  .msg-bubble{background:var(--surface);color:var(--text);border:1px solid #54ACBF14}
 .msg.system .msg-bubble{background:#A7EBF20A;color:var(--glow);border:1px solid #A7EBF222;font-size:10px;font-style:italic}
 .msg-time{font-size:8px;color:var(--muted);margin-top:3px}
+/* ── Markdown rendering ── */
+.md-body p{margin:0 0 6px}
+.md-body p:last-child{margin-bottom:0}
+.md-body ul,.md-body ol{margin:4px 0 6px 16px;padding:0}
+.md-body li{margin-bottom:2px}
+.md-body strong{color:var(--glow);font-weight:600}
+.md-body em{color:var(--accent);font-style:italic}
+.md-body code{background:var(--surface);color:var(--glow);padding:1px 5px;border-radius:3px;font-family:'IBM Plex Mono',monospace;font-size:0.9em}
+.md-body pre{background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:8px;overflow-x:auto;margin:6px 0}
+.md-body pre code{background:none;padding:0}
+.md-body h1,.md-body h2,.md-body h3{font-family:'Syne',sans-serif;color:var(--glow);margin:8px 0 4px}
+.md-body h1{font-size:13px}.md-body h2{font-size:12px}.md-body h3{font-size:11px}
+.md-body blockquote{border-left:2px solid var(--glow);margin:4px 0;padding-left:8px;color:var(--muted)}
 
 .dump-area{
   background:var(--surface-hi);border:1px solid #54ACBF44;
@@ -499,6 +512,7 @@ body{
 .fade-up{animation:fadeUp 0.25s ease}
 </style>
 </head>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <body>
 
 <!-- ═══ HEADER ═══ -->
@@ -1878,7 +1892,7 @@ function appendChatDOM(msg){
   const el=document.getElementById("chat-msgs");
   const d=document.createElement("div");
   d.className=`msg ${msg.role} fade-up`;
-  d.innerHTML=`<div class="msg-bubble">${msg.text.replace(/\n/g,"<br>")}</div><div class="msg-time">${msg.time}</div>`;
+  d.innerHTML=`<div class="msg-bubble ${msg.role==="bot"?"md-body":""}">${msg.role==="bot"?mdHtml(msg.text):escHtml(msg.text)}</div><div class="msg-time">${msg.time}</div>`;
   el.appendChild(d);
   el.scrollTop=el.scrollHeight;
 }
@@ -1944,7 +1958,7 @@ async function submitUnifiedInput(){
       S.chatHistory.push({text:data.reply,role:"bot",time:nowTime()});
       if(S.chatHistory.length>80)S.chatHistory=S.chatHistory.slice(-80);
       saveState();
-      result.innerHTML=`<div style="color:var(--glow);margin-bottom:4px">⚡ ${escHtml(text)}</div><div style="color:var(--text)">${escHtml(data.reply).replace(/\n/g,"<br>")}</div>`;
+      result.innerHTML=`<div style="color:var(--glow);margin-bottom:4px">⚡ ${escHtml(text)}</div><div class="md-body" style="color:var(--text)">${mdHtml(data.reply)}</div>`;
       result.style.display="block";
       badge.textContent="Reply";
       badge.className="badge b-glow";
@@ -1962,6 +1976,14 @@ async function submitUnifiedInput(){
 }
 
 function escHtml(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;")}
+
+/** Render markdown to safe HTML — strips <script> tags before injection. */
+function mdHtml(text){
+  if(typeof marked==="undefined")return escHtml(text).replace(/\n/g,"<br>");
+  const raw=marked.parse(String(text));
+  // Strip <script> blocks as a safety measure (split closing tag to avoid HTML parser confusion)
+  return raw.replace(/<script[\s\S]*?<\/scr"+"ipt>/gi,"");
+}
 
 /* ═══════════════════════════════════════════════════
    RECENT ACTIVITY PANEL (Dashboard)
@@ -2038,7 +2060,7 @@ function renderConversationHistory(){
   if(!hist.length){el.innerHTML=`<div style="font-size:9px;color:var(--muted);padding:4px 0">No conversation yet.</div>`;return;}
   el.innerHTML=hist.map(m=>`<div style="padding:5px 0;border-bottom:1px solid var(--border)">
     <span style="color:${m.role==="user"?"var(--glow)":"var(--muted)"};font-size:8px;letter-spacing:0.1em">${m.role==="user"?"YOU":"AI"}</span>
-    <span style="color:var(--text);font-size:9px;margin-left:6px">${escHtml(m.text).replace(/\n/g,"<br>")}</span>
+    <span class="${m.role==="bot"?"md-body":""}" style="color:var(--text);font-size:9px;margin-left:6px">${m.role==="bot"?mdHtml(m.text):escHtml(m.text)}</span>
     <span style="float:right;font-size:8px;color:var(--muted)">${m.time||""}</span>
   </div>`).join("");
   el.scrollTop=el.scrollHeight;
