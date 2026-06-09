@@ -17,8 +17,8 @@ class WeeklyTargetCreate(BaseModel):
 class DailyLogCreate(BaseModel):
     date: date
     entry: str
-    weekly_target_id: int
-    contribution_level: int
+    weekly_target_id: Optional[int] = None
+    contribution_level: int = 0
 
 
 class LogImpactCreate(BaseModel):

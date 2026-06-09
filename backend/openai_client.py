@@ -141,6 +141,7 @@ Schema:
   "roadmap_complete": ["roadmap-task-id"],
   "habits_done": ["scripture_prayer|ironing|python_session|sprint_training|academics"],
   "annual_updates": [{{"name_fragment": "string", "current": number}}],
+  "revenue_updates": [{{"amount": number, "source": "string", "client": "name-or-null"}}],
   "log_entry": "short log message",
   "advisory": "1-2 sentence strategic insight or null"
 }}
@@ -167,6 +168,7 @@ Today is {today}. Return valid JSON only."""
             "roadmap_complete": [],
             "habits_done": [],
             "annual_updates": [],
+            "revenue_updates": [],
             "log_entry": "Brain dump parse failed",
             "advisory": None
         }

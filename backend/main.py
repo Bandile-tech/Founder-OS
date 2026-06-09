@@ -518,11 +518,50 @@ def parse_brain_dump(payload: schemas.ParseRequest, db: Session = Depends(get_db
             )
             db.add(new_todo)
         db.commit()
-        
+
+    # Apply revenue updates
+    revenue_logged = []
+    if parsed.get("revenue_updates"):
+        for ru in parsed["revenue_updates"]:
+            amount = ru.get("amount")
+            if not amount or float(amount) <= 0:
+                continue
+            source = ru.get("source") or ""
+            client_name = ru.get("client") or ""
+            # Optionally link to an existing client by name
+            client_id = None
+            if client_name:
+                matched = db.query(Client).filter(
+                    func.lower(Client.name).contains(client_name.lower())
+                ).first()
+                if matched:
+                    client_id = matched.id
+            db.add(Revenue(
+                amount=float(amount),
+                source=source,
+                client_id=client_id,
+                date=date.today(),
+                notes=f"auto-logged via brain dump",
+            ))
+            revenue_logged.append({"amount": float(amount), "source": source})
+        if revenue_logged:
+            db.commit()
+
+    # Persist brain dump as a standalone DailyLog entry
+    if parsed.get("log_entry"):
+        db.add(models.DailyLog(
+            date=date.today(),
+            entry=parsed["log_entry"],
+            weekly_target_id=None,
+            impact_score=0,
+        ))
+        db.commit()
+
     return {
         "summary": parsed.get("summary") or "Brain dump processed.",
         "advisory": parsed.get("advisory") or "Character Before Status. Maintain discipline.",
         "kpi_updates_applied": kpi_updates_applied,
+        "revenue_logged": revenue_logged,
         "status": "ok"
     }
 
@@ -549,10 +588,22 @@ def chat_endpoint(request: schemas.ChatRequest, db: Session = Depends(get_db)):
     db.add(models.ChatMessage(session_id=session, role="user", content=request.message))
     db.commit()
 
-    context_note = ""
+    # Build context suffix: today's log entries + optional client-supplied context
+    context_parts: list[str] = []
+
+    today_logs = db.query(models.DailyLog).filter(
+        models.DailyLog.date == date.today()
+    ).order_by(models.DailyLog.id.asc()).all()
+    if today_logs:
+        log_lines = "\n".join(f"- {l.entry}" for l in today_logs if l.entry)
+        if log_lines:
+            context_parts.append(f"[Today's activity log]\n{log_lines}")
+
     if request.context:
-        context_note = f"\n\n[Live system context]: {json.dumps(request.context)}"
-        messages[-1]["content"] += context_note
+        context_parts.append(f"[Live system context]\n{json.dumps(request.context)}")
+
+    if context_parts:
+        messages[-1]["content"] += "\n\n" + "\n\n".join(context_parts)
 
     bot_reply = get_chat_response_with_memory(messages, db=db, context_type="chat")
 
@@ -768,11 +819,13 @@ def get_targets(db: Session = Depends(get_db)):
 
 @app.post("/logs")
 def create_log(log: schemas.DailyLogCreate, db: Session = Depends(get_db)):
-    target = db.query(models.WeeklyTarget).filter(
-        models.WeeklyTarget.id == log.weekly_target_id
-    ).first()
-    if not target:
-        raise HTTPException(status_code=404, detail="Target not found")
+    # weekly_target_id is optional — omit it for standalone/brain-dump entries
+    if log.weekly_target_id is not None:
+        target = db.query(models.WeeklyTarget).filter(
+            models.WeeklyTarget.id == log.weekly_target_id
+        ).first()
+        if not target:
+            raise HTTPException(status_code=404, detail="Target not found")
     new_log = models.DailyLog(
         date=log.date,
         entry=log.entry,
@@ -783,6 +836,16 @@ def create_log(log: schemas.DailyLogCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(new_log)
     return {"log_id": new_log.id, "impact_score": new_log.impact_score}
+
+
+@app.get("/logs/today")
+def get_today_logs(db: Session = Depends(get_db)):
+    """Return all DailyLog entries for today, newest first."""
+    logs = db.query(models.DailyLog).filter(
+        models.DailyLog.date == date.today()
+    ).order_by(models.DailyLog.id.desc()).all()
+    return [{"id": l.id, "entry": l.entry, "weekly_target_id": l.weekly_target_id,
+             "impact_score": l.impact_score, "date": str(l.date)} for l in logs]
 
 
 @app.post("/log-impact")

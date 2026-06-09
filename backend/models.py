@@ -28,7 +28,7 @@ class DailyLog(Base):
     id = Column(Integer, primary_key=True, index=True)
     date = Column(Date)
     entry = Column(String)
-    weekly_target_id = Column(Integer, ForeignKey("weekly_targets.id"))
+    weekly_target_id = Column(Integer, ForeignKey("weekly_targets.id"), nullable=True)
     impact_score = Column(Integer, default=0)
 
 
