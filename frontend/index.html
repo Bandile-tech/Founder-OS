@@ -250,6 +250,34 @@ body{
 .kpi-t{color:var(--muted);font-weight:400}
 
 /* ═══════════════════════════════════════════════════
+   RADAR CHART — PHASE 3
+═══════════════════════════════════════════════════ */
+.radar-card{
+  background:var(--surface);border:1px solid #54ACBF14;
+  border-radius:6px;padding:14px;margin-bottom:14px;
+}
+.radar-title{
+  font-size:9px;letter-spacing:0.22em;color:var(--muted);
+  text-transform:uppercase;margin-bottom:10px;
+  display:flex;align-items:center;justify-content:space-between;
+}
+.radar-wrap{display:flex;justify-content:center;position:relative}
+.radar-composite{
+  position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  text-align:center;pointer-events:none;
+}
+.radar-composite-val{
+  font-family:'Syne',sans-serif;font-size:20px;font-weight:800;
+  color:var(--glow);line-height:1;
+}
+.radar-composite-lbl{font-size:7px;letter-spacing:0.18em;color:var(--muted);text-transform:uppercase;margin-top:2px}
+.radar-domain-labels{display:grid;grid-template-columns:1fr 1fr;gap:4px 10px;margin-top:10px}
+.rdl-item{display:flex;align-items:center;gap:5px;font-size:9px;color:var(--muted)}
+.rdl-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+.rdl-score{margin-left:auto;color:var(--text);font-weight:700}
+.radar-loading{font-size:9px;color:var(--muted);text-align:center;padding:20px 0}
+
+/* ═══════════════════════════════════════════════════
    BRAIN DUMP / CHAT PAGE
 ═══════════════════════════════════════════════════ */
 .chat-layout{display:grid;grid-template-columns:1fr 280px;gap:16px;height:100%;min-height:0}
@@ -523,6 +551,12 @@ body{
       </div>
     </div>
     <div class="nav-group">
+      <div class="nav-group-label">Business</div>
+      <div class="nav-item" onclick="nav('business',this)">
+        <span class="ni">◈</span> Aether Command
+      </div>
+    </div>
+    <div class="nav-group">
       <div class="nav-group-label">System</div>
       <div class="nav-item" onclick="nav('annual',this)">
         <span class="ni">◎</span> Annual Targets
@@ -591,6 +625,25 @@ body{
             </div>
             <div id="nn-drift"></div>
             <div id="nn-list"></div>
+          </div>
+
+          <!-- ── DOMAIN RADAR — PHASE 3 ── -->
+          <div class="radar-card">
+            <div class="radar-title">
+              <span>Domain Radar</span>
+              <span class="badge b-glow" id="radar-composite-badge">—</span>
+            </div>
+            <div class="radar-loading" id="radar-loading">Computing scores…</div>
+            <div id="radar-chart-wrap" style="display:none">
+              <div class="radar-wrap" id="radar-svg-wrap">
+                <!-- SVG injected by JS -->
+                <div class="radar-composite" id="radar-center">
+                  <div class="radar-composite-val" id="radar-center-val">—</div>
+                  <div class="radar-composite-lbl">composite</div>
+                </div>
+              </div>
+              <div class="radar-domain-labels" id="radar-legend"></div>
+            </div>
           </div>
 
           <!-- MISSION -->
@@ -724,30 +777,84 @@ body{
       <div id="at-list"></div>
     </div>
 
+    <!-- ── BUSINESS ── -->
+    <div class="page" id="p-business">
+      <div class="eco-header">
+        <div><div class="eco-title">Aether Command</div><div class="eco-sub">AI Services · Phase 1 — First Revenue</div></div>
+        <div style="text-align:right">
+          <div class="cd-val" id="biz-revenue-total" style="font-family:'Syne',sans-serif;font-size:24px;color:var(--success)">$0</div>
+          <div style="font-size:8px;color:var(--muted);letter-spacing:0.15em">TOTAL REVENUE USD</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title"><span>Revenue Overview</span><span class="badge b-glow">2026</span></div>
+        <div id="biz-revenue-kpis"></div>
+      </div>
+      <div class="card">
+        <div class="card-title"><span>Add Client / Prospect</span></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr 100px auto;gap:8px">
+          <input class="at-input" id="biz-client-name" placeholder="Name">
+          <input class="at-input" id="biz-client-company" placeholder="Company">
+          <input class="at-input" id="biz-client-service" placeholder="Service">
+          <input class="at-input" id="biz-client-value" placeholder="Value $" type="number" min="0">
+          <button class="at-add-btn" onclick="addClient()">+ Add</button>
+        </div>
+      </div>
+      <div id="biz-clients-list"></div>
+      <div class="card">
+        <div class="card-title"><span>Log Revenue</span></div>
+        <div style="display:grid;grid-template-columns:120px 1fr auto;gap:8px">
+          <input class="at-input" id="biz-rev-amount" placeholder="Amount $" type="number" min="0">
+          <input class="at-input" id="biz-rev-source" placeholder="Source / description">
+          <button class="at-add-btn" onclick="addRevenue()">+ Log</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title"><span>Revenue History</span></div>
+        <div id="biz-revenue-list"><div style="font-size:9px;color:var(--muted)">No revenue logged yet.</div></div>
+      </div>
+    </div>
+
     <!-- ── SETTINGS ── -->
     <div class="page" id="p-settings">
       <div class="eco-header">
         <div><div class="eco-title">Settings</div><div class="eco-sub">System configuration</div></div>
       </div>
       <div class="card">
+        <div class="card-title"><span>Social Score</span><span class="badge b-glow">Feeds Radar</span></div>
+        <div class="settings-row">
+          <div>
+            <div class="sr-label">Network &amp; Social Capital</div>
+            <div class="sr-sub">Relationships, community, outreach quality (0–100)</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px">
+            <input type="range" id="social-score-slider" min="0" max="100" value="50"
+              style="width:120px;appearance:none;height:3px;background:#54ACBF33;border-radius:2px;outline:none;cursor:pointer"
+              oninput="document.getElementById('social-score-val').textContent=this.value">
+            <span id="social-score-val" style="color:var(--glow);font-size:14px;font-weight:700;min-width:28px">50</span>
+            <button class="sr-btn" onclick="saveSocialScore()">Save</button>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title"><span>KPI Targets</span><span class="badge b-muted">Edit targets</span></div>
+        <div id="kpi-target-settings"></div>
+      </div>
+      <div class="card">
         <div class="card-title"><span>Notifications</span></div>
         <div class="settings-row">
-          <div><div class="sr-label">Browser Reminders</div><div class="sr-sub">Agent sends reminders if you're drifting</div></div>
+          <div><div class="sr-label">Browser Reminders</div><div class="sr-sub">Agent alerts when habits are drifting</div></div>
           <button class="sr-btn" onclick="requestNotifPermission()">Enable</button>
-        </div>
-        <div class="settings-row">
-          <div><div class="sr-label">Morning Brief Time</div><div class="sr-sub">AI brief delivered at this time daily</div></div>
-          <input class="sr-input" type="time" id="brief-time" value="06:00">
         </div>
       </div>
       <div class="card">
         <div class="card-title"><span>Data</span></div>
         <div class="settings-row">
-          <div><div class="sr-label">Export All Data</div><div class="sr-sub">Download JSON snapshot</div></div>
+          <div><div class="sr-label">Export All Data</div><div class="sr-sub">Download JSON snapshot of local state</div></div>
           <button class="sr-btn" onclick="exportData()">Export</button>
         </div>
         <div class="settings-row">
-          <div><div class="sr-label">Reset System</div><div class="sr-sub" style="color:var(--danger)">Wipes all local data</div></div>
+          <div><div class="sr-label">Reset Local Cache</div><div class="sr-sub" style="color:var(--danger)">Clears localStorage — backend data is preserved</div></div>
           <button class="sr-btn" style="background:var(--danger);border-color:var(--danger)" onclick="resetSystem()">Reset</button>
         </div>
       </div>
@@ -858,6 +965,8 @@ const DEFAULT_STATE = {
   log:[],
   chatHistory:[],
   lastResetDate:"",
+  social:50,
+  business:{clients:[],revenue:[]},
 };
 
 function loadState(){
@@ -880,6 +989,7 @@ function deepMerge(def,saved){
 function saveState(){localStorage.setItem("founderOSv2",JSON.stringify(S))}
 
 let S=loadState();
+
 /* ═══════════════════════════════════════════════════
    SURGICAL BRIDGE: API MAPPING
 ═══════════════════════════════════════════════════ */
@@ -887,40 +997,67 @@ const API_BASE = "http://127.0.0.1:8000";
 
 async function syncFromBackend() {
   try {
-    const [kpis, habits, todos, annual, sprint, acad] = await Promise.all([
+    const [kpisRaw, habits, todos, annual, sprint, acad, bible, books, socialRaw] = await Promise.all([
       fetch(`${API_BASE}/kpis`).then(r => r.json()),
       fetch(`${API_BASE}/habits`).then(r => r.json()),
       fetch(`${API_BASE}/todos`).then(r => r.json()),
       fetch(`${API_BASE}/annual-targets`).then(r => r.json()),
       fetch(`${API_BASE}/roadmap/sprint`).then(r => r.json()),
-      fetch(`${API_BASE}/roadmap/academic`).then(r => r.json())
+      fetch(`${API_BASE}/roadmap/academic`).then(r => r.json()),
+      fetch(`${API_BASE}/bible`).then(r => r.json()),
+      fetch(`${API_BASE}/books`).then(r => r.json()),
+      fetch(`${API_BASE}/social-score`).then(r => r.json()),
     ]);
 
-    // Map Backend KPIs back to your frontend S.kpis structure
-    kpis.forEach(k => {
-      if (S.kpis[k.key]) {
-        S.kpis[k.key].value = k.current_value;
-        S.kpis[k.key].target = k.target_value;
+    // kpisRaw is a dict keyed by kpi key
+    Object.entries(kpisRaw).forEach(([key, kpi]) => {
+      if (S.kpis[key]) {
+        S.kpis[key].value = kpi.value;
+        S.kpis[key].target = kpi.target;
       }
     });
 
-    // Map Backend Habits back to your S.habits
     habits.forEach(h => {
       if (S.habits[h.key]) S.habits[h.key].done = h.done;
     });
 
-    // Update the rest of the objects directly
-    S.todos = todos;
-    S.annualTargets = annual;
-    S.sprintRoadmap = sprint;
-    S.academicRoadmap = acad;
+    S.todos = todos.map(t => ({...t, urgent: false}));
 
-    // Refresh your UI using your original 1,000 lines of logic
+    // Map backend field names to frontend conventions
+    S.annualTargets = annual.map(a => ({
+      id: a.id,
+      name: a.name,
+      current: a.current_value,
+      target: a.target_value,
+      unit: a.unit || "",
+      category: a.category,
+      lowerBetter: a.lower_is_better,
+    }));
+
+    // Only update done/pushed state — keep structure from DEFAULT_STATE
+    sprint.forEach(t => {
+      S.sprintRoadmap.forEach(phase => {
+        const task = phase.tasks.find(x => x.id === t.task_id);
+        if (task) { task.done = t.done; task.pushed = t.pushed_count || 0; }
+      });
+    });
+    acad.forEach(t => {
+      S.academicRoadmap.forEach(sub => {
+        const topic = sub.topics.find(x => x.id === t.task_id);
+        if (topic) { topic.done = t.done; topic.pushed = t.pushed_count || 0; }
+      });
+    });
+
+    S.bible = bible;
+    S.books = books;
+    S.social = socialRaw.value || 50;
+
+    saveState();
     renderHeader();
     renderPage(getActivePageName());
-    console.log("OS: Successfully Synced with Terminal");
+    console.log("OS: Synced with backend");
   } catch (e) {
-    console.warn("Backend offline. Using local cache.");
+    console.warn("Backend offline. Using local cache.", e);
   }
 }
 
@@ -928,6 +1065,7 @@ function getActivePageName() {
   const active = document.querySelector(".page.active");
   return active ? active.id.replace("p-", "") : "dashboard";
 }
+
 let nextId=500;
 function uid(){return"t"+(++nextId)}
 function nowTime(){return new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"})}
@@ -949,14 +1087,13 @@ function addLog(msg,type="system"){
 }
 
 /* ═══════════════════════════════════════════════════
-   MIDNIGHT RESET — push undone todos/bible
+   MIDNIGHT RESET
 ═══════════════════════════════════════════════════ */
 function dailyReset(){
   const today=todayStr();
   if(S.lastResetDate===today)return;
   S.lastResetDate=today;
 
-  // Push undone todos to today
   S.todos=S.todos.map(t=>{
     if(!t.done && t.due && t.due < today){
       addLog(`Task pushed to today: ${t.text.slice(0,40)}`,"warn");
@@ -965,10 +1102,8 @@ function dailyReset(){
     return t;
   });
 
-  // Reset daily habits
   Object.keys(S.habits).forEach(k=>{S.habits[k].done=false});
 
-  // Push undone bible readings
   S.bible=S.bible.map(b=>{
     if(!b.done && b.date < today){
       addLog(`Bible reading pushed: ${b.ref}`,"warn");
@@ -993,7 +1128,7 @@ function nav(page,el){
 }
 
 function renderPage(page){
-  if(page==="dashboard"){renderDash()}
+  if(page==="dashboard"){renderDash();fetchAndRenderRadar()}
   else if(page==="brain"){renderAgentAlerts()}
   else if(page==="log"){renderLog()}
   else if(page==="timetable"){renderTimetable()}
@@ -1002,6 +1137,8 @@ function renderPage(page){
   else if(page==="sprint"){renderSprintRoadmap()}
   else if(page==="academic"){renderAcademicRoadmap()}
   else if(page==="annual"){renderAnnualTargets()}
+  else if(page==="settings"){renderSettings()}
+  else if(page==="business"){renderBusiness()}
 }
 
 /* ═══════════════════════════════════════════════════
@@ -1015,7 +1152,6 @@ function renderHeader(){
   hd.style.display=drifting>0?"block":"none";
   hd.textContent=`⚡ ${drifting} HABIT${drifting>1?"S":""} DRIFTING`;
 
-  // Regionals countdown
   const regDate="2026-05-17";
   const d=daysUntil(regDate);
   document.getElementById("regionals-countdown").textContent=d>0?`${d} days`:"Race week!";
@@ -1084,7 +1220,6 @@ function kpiRow(k){
 }
 
 function renderTodos(){
-  // Auto-prioritise urgent annual targets
   S.todos.forEach(t=>{
     if(!t.done){
       const linked=S.annualTargets.find(a=>t.text.toLowerCase().includes(a.name.toLowerCase().split(" ")[0]));
@@ -1131,24 +1266,20 @@ async function toggleTodo(id){
   const t=S.todos.find(x=>String(x.id)===String(id));
   if(!t)return;
   t.done=!t.done;
-  
-  // Roadmap sync (Preserving your original logic)
+
   if(t.roadmapId&&t.done){
     syncRoadmapTask(t.roadmapId,true);
     addLog(`Roadmap updated: ${t.roadmapId}`,"system");
   }
-  
+
   addLog(`Task ${t.done?"completed":"reopened"}: ${t.text.slice(0,40)}`);
-  
-  // 1. Save locally first for speed
+
   saveState();
   renderTodos();
   checkUrgentAlerts();
 
-  // 2. Persistent update to Backend
   try {
     await fetch(`${API_BASE}/todos/${id}/toggle`, { method: "POST" });
-    // Optional: syncFromBackend(); // Uncomment if you want AI to re-evaluate state immediately
   } catch(e) {
     console.error("Backend todo sync failed");
   }
@@ -1164,15 +1295,21 @@ function syncRoadmapTask(roadmapId,done){
   saveState();
 }
 
-function quickAdd(e){
+async function quickAdd(e){
   if(e.key!=="Enter")return;
   const v=e.target.value.trim();
   if(!v)return;
-  S.todos.push({id:uid(),text:v,priority:9,done:false,category:"personal",due:todayStr(),source:"manual",roadmapId:null,urgent:false});
-  addLog(`Task added: ${v.slice(0,40)}`);
   e.target.value="";
-  saveState();
-  renderTodos();
+  try{
+    const r=await fetch(`${API_BASE}/todos`,{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({text:v,priority:9,category:"personal",due:todayStr(),source:"manual"})});
+    if(r.ok){const t=await r.json();S.todos.push({...t,urgent:false});}
+    else throw new Error();
+  }catch{
+    S.todos.push({id:uid(),text:v,priority:9,done:false,category:"personal",due:todayStr(),source:"manual",roadmapId:null,urgent:false});
+  }
+  addLog(`Task added: ${v.slice(0,40)}`);
+  saveState();renderTodos();
 }
 
 function renderNonNeg(){
@@ -1195,20 +1332,18 @@ function renderNonNeg(){
 }
 
 async function toggleHabit(k){
-  // Update UI immediately (Preserving your original logic)
   S.habits[k].done=!S.habits[k].done;
   addLog(`Habit ${S.habits[k].done?"done":"undone"}: ${S.habits[k].label}`);
-  
+
   saveState();
   renderNonNeg();
   renderHeader();
 
-  // Sync to Backend database
   try {
     await fetch(`${API_BASE}/habits/toggle`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ habit_key: k })
+      body: JSON.stringify({ key: k, label: S.habits[k].label, done: S.habits[k].done, date: todayStr() })
     });
   } catch(e) {
     console.error("Backend habit sync failed");
@@ -1286,95 +1421,230 @@ function renderAnnualTargets(){
   }).join("");
 }
 
-function addAnnualTarget(){
+async function addAnnualTarget(){
   const name=document.getElementById("at-name").value.trim();
   const cur=parseFloat(document.getElementById("at-current").value)||0;
   const tgt=parseFloat(document.getElementById("at-target").value);
   if(!name||!tgt){alert("Fill name and target.");return}
-  S.annualTargets.push({id:"at-"+uid(),name,current:cur,target:tgt,unit:"",category:"personal",lowerBetter:false});
+  try{
+    const r=await fetch(`${API_BASE}/annual-targets`,{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({name,current_value:cur,target_value:tgt,unit:"",category:"personal",lower_is_better:false,year:2026})});
+    if(r.ok){const d=await r.json();S.annualTargets.push({id:d.id,name,current:cur,target:tgt,unit:"",category:"personal",lowerBetter:false});}
+    else throw new Error();
+  }catch{
+    S.annualTargets.push({id:"at-"+uid(),name,current:cur,target:tgt,unit:"",category:"personal",lowerBetter:false});
+  }
   document.getElementById("at-name").value="";
   document.getElementById("at-current").value="";
   document.getElementById("at-target").value="";
   addLog(`Annual target added: ${name}`);
-  saveState();
-  renderAnnualTargets();
+  saveState();renderAnnualTargets();
 }
 
-function updateAT(id){
+async function updateAT(id){
   const inp=document.getElementById("up-"+id);
   const val=parseFloat(inp.value);
   if(isNaN(val))return;
-  const at=S.annualTargets.find(a=>a.id===id);
+  const at=S.annualTargets.find(a=>String(a.id)===String(id));
   if(!at)return;
   at.current=val;
+  try{await fetch(`${API_BASE}/annual-targets/${id}`,{method:"PATCH",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({current_value:val})});}catch{}
   addLog(`Annual target updated: ${at.name} → ${val}`);
-  saveState();
-  renderAnnualTargets();
-  checkUrgentAlerts();
+  saveState();renderAnnualTargets();checkUrgentAlerts();
 }
 
-function deleteAT(id){
+async function deleteAT(id){
   if(!confirm("Delete this target?"))return;
-  S.annualTargets=S.annualTargets.filter(a=>a.id!==id);
-  saveState();
-  renderAnnualTargets();
+  try{await fetch(`${API_BASE}/annual-targets/${id}`,{method:"DELETE"});}catch{}
+  S.annualTargets=S.annualTargets.filter(a=>String(a.id)!==String(id));
+  saveState();renderAnnualTargets();
 }
 
 /* ═══════════════════════════════════════════════════
    ECOSYSTEM
 ═══════════════════════════════════════════════════ */
+function parseTimeToMins(t){
+  const [h,m]=t.split(":").map(Number);
+  return h*60+(m||0);
+}
+function currentSlotIndex(){
+  const now=new Date();
+  const nowMins=now.getHours()*60+now.getMinutes();
+  for(let i=0;i<S.timetable.length;i++){
+    const slot=S.timetable[i];
+    const parts=slot.time.split("–");
+    if(parts.length<2)continue;
+    const start=parseTimeToMins(parts[0].trim());
+    const end=parseTimeToMins(parts[1].trim());
+    if(nowMins>=start&&nowMins<end)return i;
+  }
+  return -1;
+}
 function renderTimetable(){
-  const h=new Date().getHours();
+  const nowIdx=currentSlotIndex();
+  const now=new Date();
+  const timeStr=now.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"});
   document.getElementById("timetable-card").innerHTML=`
-    <div class="card-title"><span>Daily Schedule</span><span class="badge b-glow">Today</span></div>
-    `+S.timetable.map(slot=>{
-    const start=parseInt(slot.time.split(":")[0]);
-    const isNow=h>=start&&h<start+2;
-    return`<div class="sched-row ${isNow?"now":""}">
+    <div class="card-title"><span>Daily Schedule</span><span class="badge b-glow">${timeStr} now</span></div>
+    `+S.timetable.map((slot,i)=>`
+    <div class="sched-row ${i===nowIdx?"now":""}">
       <span class="sched-time">${slot.time}</span>
       <span class="sched-label">${slot.label}</span>
-      ${isNow?`<span class="now-tag">▶ NOW</span>`:""}
+      ${i===nowIdx?`<span class="now-tag">▶ NOW</span>`:""}
+    </div>`).join("")+`
+    <div style="margin-top:14px;border-top:1px solid #54ACBF14;padding-top:12px">
+      <div class="card-title" style="margin-bottom:8px"><span>Add Slot</span></div>
+      <div style="display:flex;gap:8px">
+        <input class="at-input" id="tt-time" placeholder="05:00–06:00" style="max-width:120px">
+        <input class="at-input" id="tt-label" placeholder="Activity label">
+        <button class="at-add-btn" onclick="addTimetableSlot()">+ Add</button>
+      </div>
     </div>`;
-  }).join("");
+}
+function addTimetableSlot(){
+  const time=document.getElementById("tt-time").value.trim();
+  const label=document.getElementById("tt-label").value.trim();
+  if(!time||!label)return;
+  S.timetable.push({time,label});
+  S.timetable.sort((a,b)=>parseTimeToMins(a.time.split("–")[0])-parseTimeToMins(b.time.split("–")[0]));
+  document.getElementById("tt-time").value="";
+  document.getElementById("tt-label").value="";
+  saveState();renderTimetable();
 }
 
 function renderBible(){
-  const streak=S.bible.filter(b=>b.done).reduce((s,b,i,a)=>{
-    if(i===0||a[i-1].done)return s+1;return s;
-  },0);
+  // Compute streak from sorted done entries
+  const sorted=[...S.bible].filter(b=>b.done).map(b=>b.date).sort().reverse();
+  let streak=0,check=todayStr();
+  for(const d of sorted){if(d===check){streak++;const dt=new Date(check);dt.setDate(dt.getDate()-1);check=dt.toISOString().slice(0,10);}else break;}
   document.getElementById("bible-streak").textContent=streak;
 
+  const doneCount=S.bible.filter(b=>b.done).length;
   document.getElementById("bible-card").innerHTML=`
-    <div class="card-title"><span>Reading Plan</span><span class="badge b-glow">${S.bible.filter(b=>b.done).length}/${S.bible.length} read</span></div>
-    `+S.bible.map((b,i)=>`
+    <div class="card-title"><span>Reading Plan</span><span class="badge b-glow">${doneCount}/${S.bible.length} read</span></div>
+    `+S.bible.map(b=>`
     <div class="eco-row">
-      <div class="nn-dot ${b.done?"dot-done":"dot-undone"}" style="flex-shrink:0;cursor:pointer" onclick="toggleBible(${i})"></div>
+      <div class="nn-dot ${b.done?"dot-done":"dot-undone"}" style="flex-shrink:0;cursor:pointer" onclick="toggleBibleEntry(${b.id})"></div>
       <span style="${b.done?"text-decoration:line-through;color:var(--muted)":""}">${b.ref}</span>
       <span class="eco-date" style="margin-left:auto">${b.date}</span>
       ${b.pushed>0?`<span class="eco-pushed">+${b.pushed}d</span>`:""}
-    </div>`).join("");
+    </div>`).join("")+`
+    <div style="margin-top:14px;border-top:1px solid #54ACBF14;padding-top:12px">
+      <div class="card-title" style="margin-bottom:8px"><span>Add Reading</span></div>
+      <div style="display:flex;gap:8px">
+        <input class="at-input" id="bible-ref" placeholder="e.g. Proverbs 8" style="flex:1">
+        <input class="at-input" id="bible-date" type="date" value="${todayStr()}" style="max-width:140px">
+        <button class="at-add-btn" onclick="addBibleEntry()">+ Add</button>
+      </div>
+    </div>`;
 }
 
-function toggleBible(i){
-  S.bible[i].done=!S.bible[i].done;
-  if(S.bible[i].done)addLog(`Bible: ${S.bible[i].ref} ✓`,"system");
-  saveState();
-  renderBible();
+async function toggleBibleEntry(id){
+  const entry=S.bible.find(b=>b.id===id);
+  if(!entry)return;
+  entry.done=!entry.done;
+  if(entry.done)addLog(`Bible: ${entry.ref} ✓`,"system");
+  saveState();renderBible();
+  try{await fetch(`${API_BASE}/bible/${id}/toggle`,{method:"PATCH"});}catch{}
+}
+
+async function addBibleEntry(){
+  const ref=document.getElementById("bible-ref").value.trim();
+  const dt=document.getElementById("bible-date").value;
+  if(!ref||!dt)return;
+  try{
+    const r=await fetch(`${API_BASE}/bible`,{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({ref,date:dt})});
+    if(r.ok){const e=await r.json();S.bible.push({id:e.id,ref,date:dt,done:false,pushed:0});}
+    else throw new Error();
+  }catch{S.bible.push({id:uid(),ref,date:dt,done:false,pushed:0});}
+  document.getElementById("bible-ref").value="";
+  saveState();renderBible();
 }
 
 function renderBooks(){
   const cls={reading:"bs-reading",queue:"bs-queue",done:"bs-done"};
+  const active=S.books.filter(b=>b.status==="reading").length;
   document.getElementById("books-card").innerHTML=`
-    <div class="card-title"><span>Reading Queue</span><span class="badge b-glow">${S.books.filter(b=>b.status==="reading").length} active</span></div>
-    `+S.books.map(b=>`
-    <div class="book-row">
-      <div>
-        <div class="bk-title">${b.title}</div>
-        <div class="bk-author">${b.author}</div>
-        ${b.total>0?`<div style="margin-top:6px;width:120px"><div class="pbar"><div class="pfill ${pfClass(b.page/b.total*100)}" style="width:${Math.round(b.page/b.total*100)}%"></div></div></div>`:""}
+    <div class="card-title"><span>Reading Queue</span><span class="badge b-glow">${active} reading</span></div>
+    `+S.books.map(b=>{
+      const total=b.total_pages||b.total||0;
+      const pct=total>0?Math.round(b.page/total*100):0;
+      return`<div class="book-row">
+        <div style="flex:1;min-width:0">
+          <div class="bk-title">${b.title}</div>
+          <div class="bk-author">${b.author||""}</div>
+          ${total>0?`<div style="margin-top:5px;display:flex;align-items:center;gap:8px">
+            <div style="width:100px"><div class="pbar"><div class="pfill ${pfClass(pct)}" style="width:${pct}%"></div></div></div>
+            <span style="font-size:8px;color:var(--muted)">${b.page}/${total}p</span>
+            <input type="number" class="at-input" id="bp-${b.id}" placeholder="pg" value="${b.page}"
+              style="width:56px;padding:2px 5px;font-size:9px" onchange="updateBookPage(${b.id},this.value)">
+          </div>`:""}
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:5px">
+          <span class="bk-status ${cls[b.status]}">${b.status}</span>
+          <select class="at-input" style="font-size:9px;padding:2px 5px;width:90px" onchange="updateBookStatus(${b.id},this.value)">
+            <option value="queue" ${b.status==="queue"?"selected":""}>queue</option>
+            <option value="reading" ${b.status==="reading"?"selected":""}>reading</option>
+            <option value="done" ${b.status==="done"?"selected":""}>done</option>
+          </select>
+          <button class="at-add-btn" style="background:var(--danger);border-color:var(--danger);font-size:8px;padding:3px 8px" onclick="deleteBook(${b.id})">✕</button>
+        </div>
+      </div>`;
+    }).join("")+`
+    <div style="margin-top:14px;border-top:1px solid #54ACBF14;padding-top:12px">
+      <div class="card-title" style="margin-bottom:8px"><span>Add Book</span></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 80px 80px auto;gap:8px">
+        <input class="at-input" id="bk-title" placeholder="Title">
+        <input class="at-input" id="bk-author" placeholder="Author">
+        <input class="at-input" id="bk-page" placeholder="Page" type="number" min="0">
+        <input class="at-input" id="bk-total" placeholder="Total" type="number" min="0">
+        <button class="at-add-btn" onclick="addBook()">+ Add</button>
       </div>
-      <span class="bk-status ${cls[b.status]}">${b.status}</span>
-    </div>`).join("");
+    </div>`;
+}
+
+async function updateBookPage(id,val){
+  const page=parseInt(val)||0;
+  const b=S.books.find(x=>x.id===id);
+  if(!b)return;
+  b.page=page;
+  saveState();renderBooks();
+  try{await fetch(`${API_BASE}/books/${id}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({page})});}catch{}
+}
+
+async function updateBookStatus(id,status){
+  const b=S.books.find(x=>x.id===id);
+  if(!b)return;
+  b.status=status;
+  addLog(`Book status: "${b.title.slice(0,30)}" → ${status}`);
+  saveState();renderBooks();
+  try{await fetch(`${API_BASE}/books/${id}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({status})});}catch{}
+}
+
+async function deleteBook(id){
+  if(!confirm("Remove this book?"))return;
+  S.books=S.books.filter(b=>b.id!==id);
+  saveState();renderBooks();
+  try{await fetch(`${API_BASE}/books/${id}`,{method:"DELETE"});}catch{}
+}
+
+async function addBook(){
+  const title=document.getElementById("bk-title").value.trim();
+  const author=document.getElementById("bk-author").value.trim();
+  const page=parseInt(document.getElementById("bk-page").value)||0;
+  const total_pages=parseInt(document.getElementById("bk-total").value)||0;
+  if(!title)return;
+  try{
+    const r=await fetch(`${API_BASE}/books`,{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({title,author,status:"queue",page,total_pages})});
+    if(r.ok){const d=await r.json();S.books.push({id:d.id,title,author,status:"queue",page,total_pages});}
+    else throw new Error();
+  }catch{S.books.push({id:uid(),title,author,status:"queue",page,total_pages});}
+  ["bk-title","bk-author","bk-page","bk-total"].forEach(x=>{document.getElementById(x).value="";});
+  addLog(`Book added: ${title.slice(0,40)}`);
+  saveState();renderBooks();
 }
 
 /* ═══════════════════════════════════════════════════
@@ -1412,7 +1682,6 @@ function renderSprintRoadmap(){
     </div>`;
   }).join("");
 
-  // Sprint KPIs
   document.getElementById("sprint-kpis").innerHTML=
     ["sprint_100m","sprint_200m","sprint_400m"].map(k=>kpiRow(k)).join("");
 }
@@ -1423,7 +1692,6 @@ function toggleSprintTask(phaseId,taskId){
   const task=phase.tasks.find(t=>t.id===taskId);
   if(!task)return;
   task.done=!task.done;
-  // Sync to any linked todo
   S.todos.forEach(t=>{if(t.roadmapId===taskId)t.done=task.done});
   addLog(`Sprint task ${task.done?"done":"undone"}: ${task.text.slice(0,35)}`);
   saveState();
@@ -1468,7 +1736,6 @@ function toggleAcadTask(subId,taskId){
   if(!task)return;
   task.done=!task.done;
   S.todos.forEach(t=>{if(t.roadmapId===taskId)t.done=task.done});
-  // Update KPI
   const kpiMap={
     "acad-maths":"maths_syllabus","acad-fm":"further_maths",
     "acad-biz":"business","acad-econ":"economics"
@@ -1520,21 +1787,20 @@ async function parseDump() {
   errEl.style.display = "none";
 
   try {
-    // Calling YOUR local backend /parse route
-const r = await fetch(`${API_BASE}/parse`, {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ text: text }) // Must be 'text' to match schemas.py
-});
+    const r = await fetch(`${API_BASE}/parse`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: text })
+    });
 
     if (!r.ok) throw new Error(`Backend Error: ${r.status}`);
-    
+
     const result = await r.json();
-    
+
     ta.value = "";
-    await syncFromBackend(); // Refresh the whole dashboard with real DB data
-    
-    // Display the advisory insight from the backend
+    await syncFromBackend();
+    fetchAndRenderRadar(); // Refresh radar after brain dump updates data
+
     resEl.innerHTML = `<div class="advisory-inner">🧠 ${result.advisory}</div>`;
     resEl.style.display = "block";
     addChatMsg(`Parsed: ${result.summary}`, "bot");
@@ -1581,7 +1847,6 @@ async function sendChat(){
   inp.value="";inp.disabled=true;
   addChatMsg(text,"user");
 
-  // Build context snapshot
   const ctx={
     kpis:S.kpis,
     habits:Object.fromEntries(Object.entries(S.habits).map(([k,h])=>[k,h.done])),
@@ -1590,7 +1855,6 @@ async function sendChat(){
     log:S.log.slice(-10).map(l=>l.message),
   };
 
-  // Session ID — persist in localStorage
   let sessionId = localStorage.getItem("founderOS_session");
   if(!sessionId){
     sessionId = Date.now().toString(36) + Math.random().toString(36).slice(2);
@@ -1601,11 +1865,7 @@ async function sendChat(){
     const r = await fetch(`${API_BASE}/chat`, {
       method: "POST",
       headers: {"Content-Type":"application/json"},
-      body: JSON.stringify({
-        message: text,
-        session_id: sessionId,
-        context: ctx
-      })
+      body: JSON.stringify({ message: text, session_id: sessionId, context: ctx })
     });
     if(!r.ok) throw new Error("Backend "+r.status);
     const data = await r.json();
@@ -1622,7 +1882,6 @@ async function sendChat(){
    AGENT ALERTS + PROACTIVE BRIEF
 ═══════════════════════════════════════════════════ */
 function checkUrgentAlerts(){
-  // Auto-flag todos linked to behind-schedule annual targets
   S.annualTargets.forEach(at=>{
     const st=atScheduleStatus(at);
     if(st.label==="Critical"||st.label==="Behind"){
@@ -1657,11 +1916,11 @@ function renderAgentAlerts(){
       </div>`).join("")
     :`<div style="font-size:9px;color:var(--muted)">✓ No critical alerts.</div>`;
 
-  // Notify if critical
   alerts.filter(a=>a.type==="danger").forEach(a=>{
     if(Notification.permission==="granted")new Notification("Founder OS Alert",{body:a.text,icon:""});
   });
 }
+
 async function generateBrief(){
   document.getElementById("brief-text").textContent="Generating…";
 
@@ -1690,6 +1949,168 @@ async function generateBrief(){
 }
 
 /* ═══════════════════════════════════════════════════
+   RADAR CHART — PHASE 3
+   Fetches /radar from backend, renders pure SVG.
+   Domains: Core · Physical · Intellect · Business · Skills · Social
+═══════════════════════════════════════════════════ */
+const RADAR_DOMAINS = [
+  { key:"core",      label:"Core",      color:"#A7EBF2" },
+  { key:"physical",  label:"Physical",  color:"#4ECDC4" },
+  { key:"intellect", label:"Intellect", color:"#A78BFA" },
+  { key:"business",  label:"Business",  color:"#26A0D0" },
+  { key:"skills",    label:"Skills",    color:"#FFD166" },
+  { key:"social",    label:"Social",    color:"#54ACBF" },
+];
+
+function polarToXY(cx, cy, r, angleDeg) {
+  const rad = (angleDeg - 90) * Math.PI / 180;
+  return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
+}
+
+function buildRadarSVG(scores, size) {
+  size = size || 210;
+  const cx = size / 2, cy = size / 2;
+  const maxR = size * 0.36;
+  const n = RADAR_DOMAINS.length;
+  const step = 360 / n;
+  const rings = [0.25, 0.5, 0.75, 1.0];
+
+  let svg = `<svg viewBox="0 0 ${size} ${size}" xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}">`;
+
+  // ── Ring backgrounds ──────────────────────────────────────
+  rings.forEach(function(f) {
+    const pts = RADAR_DOMAINS.map(function(_, i) {
+      const p = polarToXY(cx, cy, maxR * f, i * step);
+      return p.x + "," + p.y;
+    }).join(" ");
+    const opacity = f === 1.0 ? "0.14" : "0.06";
+    svg += `<polygon points="${pts}" fill="none" stroke="#54ACBF" stroke-width="0.8" opacity="${opacity}"/>`;
+  });
+
+  // ── Axis spokes ───────────────────────────────────────────
+  RADAR_DOMAINS.forEach(function(_, i) {
+    const p = polarToXY(cx, cy, maxR, i * step);
+    svg += `<line x1="${cx}" y1="${cy}" x2="${p.x}" y2="${p.y}" stroke="#54ACBF" stroke-width="0.5" opacity="0.18"/>`;
+  });
+
+  // ── Data polygon ──────────────────────────────────────────
+  const dataPoints = RADAR_DOMAINS.map(function(d, i) {
+    const score = scores[d.key] || 0;
+    const r = maxR * (score / 100);
+    return polarToXY(cx, cy, r, i * step);
+  });
+  const polyPts = dataPoints.map(function(p) { return p.x + "," + p.y; }).join(" ");
+  svg += `<polygon points="${polyPts}" fill="#A7EBF2" fill-opacity="0.12" stroke="#A7EBF2" stroke-width="1.5" stroke-linejoin="round"/>`;
+
+  // ── Data dots ─────────────────────────────────────────────
+  dataPoints.forEach(function(p, i) {
+    const d = RADAR_DOMAINS[i];
+    svg += `<circle cx="${p.x}" cy="${p.y}" r="3.5" fill="${d.color}" stroke="#011C40" stroke-width="1.2"/>`;
+  });
+
+  // ── Axis labels ───────────────────────────────────────────
+  RADAR_DOMAINS.forEach(function(d, i) {
+    const labelR = maxR + 17;
+    const p = polarToXY(cx, cy, labelR, i * step);
+    const score = scores[d.key] !== undefined ? scores[d.key] : 0;
+    const anchor = p.x < cx - 5 ? "end" : p.x > cx + 5 ? "start" : "middle";
+    svg += `<text x="${p.x}" y="${p.y + 4}" text-anchor="${anchor}" font-family="IBM Plex Mono,monospace" font-size="8" fill="#A7EBF2" opacity="0.9">${d.label}</text>`;
+  });
+
+  svg += `</svg>`;
+  return svg;
+}
+
+async function fetchAndRenderRadar() {
+  const loadingEl  = document.getElementById("radar-loading");
+  const wrapEl     = document.getElementById("radar-chart-wrap");
+  const badgeEl    = document.getElementById("radar-composite-badge");
+  const centerVal  = document.getElementById("radar-center-val");
+  const svgWrap    = document.getElementById("radar-svg-wrap");
+  const legendEl   = document.getElementById("radar-legend");
+
+  if (!loadingEl) return; // Not on dashboard
+
+  loadingEl.style.display = "block";
+  wrapEl.style.display    = "none";
+
+  try {
+    const r = await fetch(API_BASE + "/radar");
+    if (!r.ok) throw new Error("radar " + r.status);
+    const data = await r.json();
+    const scores    = data.scores;
+    const composite = data.composite;
+
+    // Badge + centre
+    badgeEl.textContent   = composite + " / 100";
+    centerVal.textContent = composite;
+
+    // SVG — remove stale, inject fresh
+    const oldSVG = svgWrap.querySelector("svg");
+    if (oldSVG) oldSVG.remove();
+    svgWrap.insertAdjacentHTML("afterbegin", buildRadarSVG(scores, 210));
+
+    // Legend with mini progress bars
+    legendEl.innerHTML = RADAR_DOMAINS.map(function(d) {
+      const s = scores[d.key] !== undefined ? scores[d.key] : 0;
+      const barStyle = "width:" + s + "%;max-width:100%;height:2px;background:" + d.color + ";border-radius:1px;margin-top:3px;transition:width 0.6s ease";
+      return `<div class="rdl-item">
+        <div class="rdl-dot" style="background:${d.color}"></div>
+        <span>${d.label}</span>
+        <span class="rdl-score">${s}</span>
+      </div>`;
+    }).join("");
+
+    loadingEl.style.display = "none";
+    wrapEl.style.display    = "block";
+
+  } catch(e) {
+    loadingEl.textContent = "Backend offline — start server.";
+  }
+}
+
+/* ═══════════════════════════════════════════════════
+   SETTINGS
+═══════════════════════════════════════════════════ */
+function renderSettings(){
+  // Social score
+  const ss=document.getElementById("social-score-slider");
+  const sv=document.getElementById("social-score-val");
+  if(ss){ss.value=S.social;sv.textContent=S.social;}
+
+  // KPI targets
+  const kpiEl=document.getElementById("kpi-target-settings");
+  if(!kpiEl)return;
+  kpiEl.innerHTML=Object.entries(S.kpis).map(([k,kpi])=>`
+    <div class="settings-row">
+      <div><div class="sr-label">${kpi.label}</div><div class="sr-sub">Current: ${kpi.value}${kpi.unit}</div></div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input class="sr-input" type="number" id="kt-${k}" value="${kpi.target}" style="width:100px">
+        <button class="sr-btn" onclick="saveKpiTarget('${k}')">Save</button>
+      </div>
+    </div>`).join("");
+}
+
+async function saveSocialScore(){
+  const val=parseInt(document.getElementById("social-score-slider").value);
+  S.social=val;
+  document.getElementById("social-score-val").textContent=val;
+  saveState();
+  addLog(`Social score updated: ${val}`);
+  try{await fetch(`${API_BASE}/social-score`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({value:val})});}catch{}
+}
+
+async function saveKpiTarget(key){
+  const val=parseFloat(document.getElementById("kt-"+key).value);
+  if(isNaN(val))return;
+  S.kpis[key].target=val;
+  saveState();
+  addLog(`KPI target updated: ${S.kpis[key].label} → ${val}`);
+  try{await fetch(`${API_BASE}/kpis`,{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({updates:[{key,value:S.kpis[key].value}]})});}catch{}
+}
+
+/* ═══════════════════════════════════════════════════
    NOTIFICATIONS
 ═══════════════════════════════════════════════════ */
 function requestNotifPermission(){
@@ -1698,13 +2119,139 @@ function requestNotifPermission(){
   });
 }
 
-// Drift check every 30 minutes
 setInterval(()=>{
   const drifting=Object.values(S.habits).filter(h=>!h.done).length;
   if(drifting>0&&Notification.permission==="granted"){
     new Notification("Founder OS — Drift Alert",{body:`${drifting} habit${drifting>1?"s":""} still pending. Character Before Status.`});
   }
 },30*60*1000);
+
+/* ═══════════════════════════════════════════════════
+   BUSINESS
+═══════════════════════════════════════════════════ */
+async function loadBusiness(){
+  try{
+    const [clients,rev]=await Promise.all([
+      fetch(`${API_BASE}/clients`).then(r=>r.json()),
+      fetch(`${API_BASE}/revenue`).then(r=>r.json()),
+    ]);
+    S.business.clients=clients;
+    S.business.revenue=rev.records||[];
+    S.business.revenueTotal=rev.total||0;
+    saveState();
+  }catch{}
+}
+
+function renderBusiness(){
+  loadBusiness().then(()=>{
+    const clients=S.business.clients||[];
+    const records=S.business.revenue||[];
+    const total=S.business.revenueTotal||0;
+
+    const prospect=clients.filter(c=>c.status==="prospect");
+    const active=clients.filter(c=>c.status==="active");
+    const closed=clients.filter(c=>c.status==="closed");
+
+    document.getElementById("biz-revenue-total").textContent=`$${total.toFixed(0)}`;
+
+    const pipeline=clients.filter(c=>c.status!=="lost").reduce((s,c)=>s+c.value,0);
+    document.getElementById("biz-revenue-kpis").innerHTML=`
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:4px">
+        ${[["Pipeline Value","$"+pipeline.toFixed(0),"var(--warn)"],
+           ["Active Clients",active.length,"var(--success)"],
+           ["Prospects",prospect.length,"var(--glow)"]].map(([l,v,c])=>`
+          <div style="text-align:center;padding:10px;background:var(--surface-hi);border-radius:4px;border:1px solid #54ACBF14">
+            <div style="font-family:'Syne',sans-serif;font-size:22px;font-weight:800;color:${c}">${v}</div>
+            <div style="font-size:8px;color:var(--muted);letter-spacing:0.12em;margin-top:2px">${l}</div>
+          </div>`).join("")}
+      </div>`;
+
+    document.getElementById("biz-clients-list").innerHTML=`
+      <div class="card">
+        <div class="card-title"><span>Client Pipeline</span><span class="badge b-glow">${clients.length} total</span></div>
+        ${clients.length===0?`<div style="font-size:9px;color:var(--muted)">No clients yet. Add your first prospect below.</div>`:""}
+        ${["prospect","active","closed"].map(stage=>{
+          const group=clients.filter(c=>c.status===stage);
+          if(!group.length)return"";
+          const stageColor={prospect:"var(--warn)",active:"var(--success)",closed:"var(--muted)"}[stage];
+          return`<div style="margin-bottom:12px">
+            <div style="font-size:8px;letter-spacing:0.2em;color:${stageColor};text-transform:uppercase;margin-bottom:6px">${stage} (${group.length})</div>
+            ${group.map(c=>`<div style="background:var(--surface-hi);border:1px solid #54ACBF14;border-radius:4px;padding:9px 11px;margin-bottom:5px;display:flex;justify-content:space-between;align-items:flex-start">
+              <div>
+                <div style="font-size:10px;color:var(--text)">${c.name}${c.company?` · <span style="color:var(--muted)">${c.company}</span>`:""}</div>
+                ${c.service?`<div style="font-size:8px;color:var(--interactive);margin-top:2px">${c.service}</div>`:""}
+                ${c.notes?`<div style="font-size:8px;color:var(--muted);margin-top:3px">${c.notes}</div>`:""}
+              </div>
+              <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
+                ${c.value>0?`<div style="font-size:10px;color:var(--success);font-weight:700">$${c.value.toFixed(0)}</div>`:""}
+                <select class="at-input" style="font-size:8px;padding:2px 4px;width:85px" onchange="updateClientStatus(${c.id},this.value)">
+                  ${["prospect","active","closed","lost"].map(s=>`<option value="${s}" ${c.status===s?"selected":""}>${s}</option>`).join("")}
+                </select>
+                <button class="at-add-btn" style="background:var(--danger);border-color:var(--danger);font-size:8px;padding:2px 7px" onclick="deleteClient(${c.id})">✕</button>
+              </div>
+            </div>`).join("")}
+          </div>`;
+        }).join("")}
+      </div>`;
+
+    document.getElementById("biz-revenue-list").innerHTML=records.length===0
+      ?`<div style="font-size:9px;color:var(--muted)">No revenue logged yet.</div>`
+      :records.map(r=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid #54ACBF0A">
+          <div>
+            <div style="font-size:11px;color:var(--success);font-weight:700">+$${r.amount.toFixed(2)}</div>
+            <div style="font-size:8px;color:var(--muted);margin-top:2px">${r.source||"—"} · ${r.date}</div>
+          </div>
+          <button class="at-add-btn" style="background:var(--danger);border-color:var(--danger);font-size:8px;padding:2px 7px" onclick="deleteRevenue(${r.id})">✕</button>
+        </div>`).join("");
+  });
+}
+
+async function addClient(){
+  const name=document.getElementById("biz-client-name").value.trim();
+  const company=document.getElementById("biz-client-company").value.trim();
+  const service=document.getElementById("biz-client-service").value.trim();
+  const value=parseFloat(document.getElementById("biz-client-value").value)||0;
+  if(!name)return;
+  try{
+    const r=await fetch(`${API_BASE}/clients`,{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({name,company,service,value,status:"prospect"})});
+    if(!r.ok)throw new Error();
+  }catch{}
+  ["biz-client-name","biz-client-company","biz-client-service","biz-client-value"].forEach(x=>{document.getElementById(x).value="";});
+  addLog(`Client added: ${name}`);
+  renderBusiness();
+}
+
+async function updateClientStatus(id,status){
+  try{await fetch(`${API_BASE}/clients/${id}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({status})});}catch{}
+  addLog(`Client status → ${status}`);
+  renderBusiness();
+}
+
+async function deleteClient(id){
+  if(!confirm("Remove client?"))return;
+  try{await fetch(`${API_BASE}/clients/${id}`,{method:"DELETE"});}catch{}
+  renderBusiness();
+}
+
+async function addRevenue(){
+  const amount=parseFloat(document.getElementById("biz-rev-amount").value);
+  const source=document.getElementById("biz-rev-source").value.trim();
+  if(isNaN(amount)||amount<=0)return;
+  try{
+    await fetch(`${API_BASE}/revenue`,{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({amount,source,date:todayStr()})});
+  }catch{}
+  document.getElementById("biz-rev-amount").value="";
+  document.getElementById("biz-rev-source").value="";
+  addLog(`Revenue logged: $${amount} — ${source}`);
+  renderBusiness();
+}
+
+async function deleteRevenue(id){
+  try{await fetch(`${API_BASE}/revenue/${id}`,{method:"DELETE"});}catch{}
+  renderBusiness();
+}
 
 /* ═══════════════════════════════════════════════════
    DATA
@@ -1728,18 +2275,16 @@ function resetSystem(){
 dailyReset();
 renderHeader();
 renderDash();
+fetchAndRenderRadar();
 renderChatHistory();
 checkUrgentAlerts();
 renderAgentAlerts();
-// Start the live connection
 syncFromBackend();
-setInterval(syncFromBackend, 30000); // Check for AI updates every 30s
-
-// Update header every minute
+setInterval(syncFromBackend, 30000);
 setInterval(()=>{renderHeader();},60000);
-
-// Update countdown every hour
 setInterval(()=>{if(document.getElementById("p-dashboard").classList.contains("active"))renderCountdown();},3600000);
+setInterval(()=>{if(document.getElementById("p-dashboard").classList.contains("active"))fetchAndRenderRadar();},5*60*1000);
+setInterval(()=>{if(document.getElementById("p-timetable").classList.contains("active"))renderTimetable();},60000);
 </script>
 </body>
 </html>

@@ -4,7 +4,6 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-import sqlite3
 from datetime import date, timedelta, datetime
 from typing import List, Optional, Dict, Any
 import json
@@ -13,7 +12,10 @@ import database
 import models
 import schemas
 from database import engine, get_db, SessionLocal
-from models import AIMemory, Habit, AnnualTarget, KPISnapshot, RoadmapTask
+from models import (
+    AIMemory, Habit, AnnualTarget, KPISnapshot, RoadmapTask,
+    BibleEntry, Book, SocialScore, Client, Revenue,
+)
 from memory_service import get_recent_memories
 from openai_client import (
     get_chat_response_with_memory,
@@ -40,20 +42,6 @@ app.add_middleware(
 FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend")
 if os.path.isdir(FRONTEND_DIR):
     app.mount("/app", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
-
-# ── CHAT MEMORY (SQLite, session-based) ──────────────────────
-conn = sqlite3.connect("chat_memory.db", check_same_thread=False)
-c = conn.cursor()
-c.execute("""
-CREATE TABLE IF NOT EXISTS chats (
-    session_id TEXT,
-    role TEXT,
-    content TEXT,
-    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-)
-""")
-conn.commit()
-
 
 # ── KPI DEFAULTS ─────────────────────────────────────────────
 # In-memory KPI store (persisted via KPISnapshot on update)
@@ -84,6 +72,37 @@ def load_kpi_state(db: Session):
 
 
 # ── STARTUP ──────────────────────────────────────────────────
+BIBLE_PLAN = [
+    "Genesis 1–2", "Genesis 3–5", "Proverbs 1", "Proverbs 2", "Psalm 1",
+    "Matthew 5–7", "Romans 8", "Proverbs 3", "Acts 1–2", "John 1",
+    "Proverbs 4", "Psalm 23", "Luke 15", "Proverbs 5", "1 Corinthians 13",
+    "Proverbs 6", "Psalm 91", "John 3", "Proverbs 7", "Acts 4–5",
+]
+
+def _seed_bible_if_empty(db: Session):
+    if db.query(BibleEntry).count() == 0:
+        today = date.today()
+        for i, ref in enumerate(BIBLE_PLAN):
+            entry_date = today - timedelta(days=7) + timedelta(days=i)
+            done = entry_date < today
+            db.add(BibleEntry(ref=ref, date=entry_date, done=done, pushed=0))
+        db.commit()
+
+
+BOOK_DEFAULTS_DATA = [
+    ("The Almanack of Naval Ravikant", "Naval Ravikant", "reading", 67, 240),
+    ("Zero to One", "Peter Thiel", "queue", 0, 195),
+    ("The Hard Thing About Hard Things", "Ben Horowitz", "queue", 0, 304),
+    ("Atomic Habits", "James Clear", "done", 320, 320),
+]
+
+def _seed_books_if_empty(db: Session):
+    if db.query(Book).count() == 0:
+        for title, author, status, page, total in BOOK_DEFAULTS_DATA:
+            db.add(Book(title=title, author=author, status=status, page=page, total_pages=total))
+        db.commit()
+
+
 @app.on_event("startup")
 async def startup():
     db = SessionLocal()
@@ -92,6 +111,8 @@ async def startup():
         _seed_habits_if_empty(db)
         _seed_annual_targets_if_empty(db)
         _seed_roadmap_tasks_if_empty(db)
+        _seed_bible_if_empty(db)
+        _seed_books_if_empty(db)
     finally:
         db.close()
 
@@ -414,13 +435,21 @@ def get_radar(db: Session = Depends(get_db)):
     sprint_pct = round(sum(1 for t in sprint_tasks if t.done) / max(len(sprint_tasks), 1) * 100)
     acad_pct = round(sum(1 for t in acad_tasks if t.done) / max(len(acad_tasks), 1) * 100)
 
+    social_snap = db.query(SocialScore).order_by(SocialScore.date.desc()).first()
+    social_score = social_snap.value if social_snap else 50
+
+    clients_all = db.query(Client).all()
+    revenue_total = db.query(func.sum(Revenue.amount)).scalar() or 0
+
     context = {
         "kpis": _kpi_state,
         "habits": habits_today,
         "annual_targets": annual,
         "bible_streak": streak,
         "roadmap_pct": {"sprint": sprint_pct, "academic": acad_pct},
-        "social_score": 50,  # manual until social tracking added
+        "social_score": social_score,
+        "clients": [{"name": c.name, "status": c.status, "value": c.value} for c in clients_all],
+        "revenue_total": revenue_total,
     }
 
     scores = get_radar_scores(context)
@@ -510,15 +539,16 @@ def proactive_brief(payload: schemas.ProactiveBriefRequest):
 def chat_endpoint(request: schemas.ChatRequest, db: Session = Depends(get_db)):
     session = request.session_id
 
-    c.execute("SELECT role, content FROM chats WHERE session_id=? ORDER BY rowid", (session,))
-    messages = [{"role": r, "content": m} for r, m in c.fetchall()]
+    history = db.query(models.ChatMessage).filter(
+        models.ChatMessage.session_id == session
+    ).order_by(models.ChatMessage.created_at).all()
+
+    messages = [{"role": m.role, "content": m.content} for m in history]
     messages.append({"role": "user", "content": request.message})
 
-    c.execute("INSERT INTO chats (session_id, role, content) VALUES (?, ?, ?)",
-              (session, "user", request.message))
-    conn.commit()
+    db.add(models.ChatMessage(session_id=session, role="user", content=request.message))
+    db.commit()
 
-    # Inject live context if provided
     context_note = ""
     if request.context:
         context_note = f"\n\n[Live system context]: {json.dumps(request.context)}"
@@ -526,11 +556,192 @@ def chat_endpoint(request: schemas.ChatRequest, db: Session = Depends(get_db)):
 
     bot_reply = get_chat_response_with_memory(messages, db=db, context_type="chat")
 
-    c.execute("INSERT INTO chats (session_id, role, content) VALUES (?, ?, ?)",
-              (session, "assistant", bot_reply))
-    conn.commit()
+    db.add(models.ChatMessage(session_id=session, role="assistant", content=bot_reply))
+    db.commit()
 
     return {"reply": bot_reply}
+
+
+# ── BIBLE ────────────────────────────────────────────────────
+@app.get("/bible")
+def get_bible(db: Session = Depends(get_db)):
+    entries = db.query(BibleEntry).order_by(BibleEntry.date.asc()).all()
+    if not entries:
+        _seed_bible_if_empty(db)
+        entries = db.query(BibleEntry).order_by(BibleEntry.date.asc()).all()
+    return [{"id": e.id, "ref": e.ref, "date": str(e.date), "done": e.done, "pushed": e.pushed} for e in entries]
+
+
+@app.post("/bible")
+def add_bible_entry(payload: schemas.BibleEntryCreate, db: Session = Depends(get_db)):
+    entry = BibleEntry(ref=payload.ref, date=payload.date, done=False, pushed=0)
+    db.add(entry)
+    db.commit()
+    db.refresh(entry)
+    return {"id": entry.id, "ref": entry.ref, "date": str(entry.date)}
+
+
+@app.patch("/bible/{entry_id}/toggle")
+def toggle_bible_entry(entry_id: int, db: Session = Depends(get_db)):
+    entry = db.query(BibleEntry).filter(BibleEntry.id == entry_id).first()
+    if not entry:
+        raise HTTPException(404, "Entry not found")
+    entry.done = not entry.done
+    db.commit()
+    return {"id": entry.id, "done": entry.done}
+
+
+@app.get("/bible/streak")
+def bible_streak_endpoint(db: Session = Depends(get_db)):
+    records = db.query(BibleEntry).filter(
+        BibleEntry.done == True
+    ).order_by(BibleEntry.date.desc()).all()
+    streak = 0
+    check = date.today()
+    for r in records:
+        if r.date == check:
+            streak += 1
+            check = check - timedelta(days=1)
+        else:
+            break
+    return {"streak": streak}
+
+
+# ── BOOKS ─────────────────────────────────────────────────────
+@app.get("/books")
+def get_books(db: Session = Depends(get_db)):
+    books = db.query(Book).order_by(Book.created_at.asc()).all()
+    if not books:
+        _seed_books_if_empty(db)
+        books = db.query(Book).order_by(Book.created_at.asc()).all()
+    return [{"id": b.id, "title": b.title, "author": b.author, "status": b.status,
+             "page": b.page, "total_pages": b.total_pages} for b in books]
+
+
+@app.post("/books")
+def add_book(payload: schemas.BookCreate, db: Session = Depends(get_db)):
+    book = Book(**payload.dict())
+    db.add(book)
+    db.commit()
+    db.refresh(book)
+    return {"id": book.id, "title": book.title}
+
+
+@app.patch("/books/{book_id}")
+def update_book(book_id: int, payload: schemas.BookUpdate, db: Session = Depends(get_db)):
+    book = db.query(Book).filter(Book.id == book_id).first()
+    if not book:
+        raise HTTPException(404, "Book not found")
+    if payload.status is not None:
+        book.status = payload.status
+    if payload.page is not None:
+        book.page = payload.page
+    if payload.total_pages is not None:
+        book.total_pages = payload.total_pages
+    db.commit()
+    return {"id": book.id, "status": book.status, "page": book.page}
+
+
+@app.delete("/books/{book_id}")
+def delete_book(book_id: int, db: Session = Depends(get_db)):
+    book = db.query(Book).filter(Book.id == book_id).first()
+    if not book:
+        raise HTTPException(404, "Book not found")
+    db.delete(book)
+    db.commit()
+    return {"deleted": book_id}
+
+
+# ── SOCIAL SCORE ──────────────────────────────────────────────
+@app.get("/social-score")
+def get_social_score(db: Session = Depends(get_db)):
+    latest = db.query(SocialScore).order_by(SocialScore.date.desc()).first()
+    return {"value": latest.value if latest else 50, "date": str(latest.date) if latest else None}
+
+
+@app.post("/social-score")
+def update_social_score(payload: schemas.SocialScoreUpdate, db: Session = Depends(get_db)):
+    db.add(SocialScore(value=payload.value, date=date.today()))
+    db.commit()
+    return {"value": payload.value}
+
+
+# ── CLIENTS ───────────────────────────────────────────────────
+@app.get("/clients")
+def get_clients(db: Session = Depends(get_db)):
+    clients = db.query(Client).order_by(Client.created_at.desc()).all()
+    return [{"id": c.id, "name": c.name, "company": c.company, "status": c.status,
+             "value": c.value, "service": c.service, "notes": c.notes,
+             "created_at": str(c.created_at)} for c in clients]
+
+
+@app.post("/clients")
+def add_client(payload: schemas.ClientCreate, db: Session = Depends(get_db)):
+    client = Client(**payload.dict())
+    db.add(client)
+    db.commit()
+    db.refresh(client)
+    return {"id": client.id, "name": client.name, "status": client.status}
+
+
+@app.patch("/clients/{client_id}")
+def update_client(client_id: int, payload: schemas.ClientUpdate, db: Session = Depends(get_db)):
+    client = db.query(Client).filter(Client.id == client_id).first()
+    if not client:
+        raise HTTPException(404, "Client not found")
+    if payload.status is not None:
+        client.status = payload.status
+    if payload.value is not None:
+        client.value = payload.value
+    if payload.notes is not None:
+        client.notes = payload.notes
+    if payload.service is not None:
+        client.service = payload.service
+    client.updated_at = datetime.utcnow()
+    db.commit()
+    return {"id": client.id, "status": client.status}
+
+
+@app.delete("/clients/{client_id}")
+def delete_client(client_id: int, db: Session = Depends(get_db)):
+    client = db.query(Client).filter(Client.id == client_id).first()
+    if not client:
+        raise HTTPException(404, "Client not found")
+    db.delete(client)
+    db.commit()
+    return {"deleted": client_id}
+
+
+# ── REVENUE ───────────────────────────────────────────────────
+@app.get("/revenue")
+def get_revenue(db: Session = Depends(get_db)):
+    records = db.query(Revenue).order_by(Revenue.date.desc()).all()
+    total = sum(r.amount for r in records)
+    return {
+        "total": total,
+        "records": [{"id": r.id, "amount": r.amount, "source": r.source,
+                     "client_id": r.client_id, "date": str(r.date), "notes": r.notes}
+                    for r in records]
+    }
+
+
+@app.post("/revenue")
+def add_revenue(payload: schemas.RevenueCreate, db: Session = Depends(get_db)):
+    record = Revenue(**payload.dict())
+    db.add(record)
+    db.commit()
+    db.refresh(record)
+    return {"id": record.id, "amount": record.amount}
+
+
+@app.delete("/revenue/{revenue_id}")
+def delete_revenue(revenue_id: int, db: Session = Depends(get_db)):
+    record = db.query(Revenue).filter(Revenue.id == revenue_id).first()
+    if not record:
+        raise HTTPException(404, "Revenue record not found")
+    db.delete(record)
+    db.commit()
+    return {"deleted": revenue_id}
 
 
 # ── EXISTING WEEKLY TARGET ENDPOINTS (unchanged) ─────────────
