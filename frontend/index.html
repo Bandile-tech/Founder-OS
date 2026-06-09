@@ -524,13 +524,14 @@ body{
       <div class="nav-item active" onclick="nav('dashboard',this)" id="ni-dashboard">
         <span class="ni">▣</span> Dashboard
       </div>
-      <div class="nav-item" onclick="nav('brain',this)" id="ni-brain">
+      <!-- Brain Dump / AI and Activity Log nav items removed — functionality merged into Dashboard -->
+      <!-- <div class="nav-item" onclick="nav('brain',this)" id="ni-brain">
         <span class="ni">⚡</span> Brain Dump / AI
         <span class="nb" id="nb-brain"></span>
       </div>
       <div class="nav-item" onclick="nav('log',this)" id="ni-log">
         <span class="ni">◈</span> Activity Log
-      </div>
+      </div> -->
     </div>
     <div class="nav-group">
       <div class="nav-group-label">Ecosystem</div>
@@ -585,6 +586,29 @@ body{
           <!-- COUNTDOWN STRIP -->
           <div class="countdown-strip" id="countdown-strip"></div>
 
+          <!-- UNIFIED COMMAND INPUT -->
+          <div class="card" id="unified-cmd-card">
+            <div class="card-title"><span>⚡ Command</span><span class="badge b-glow" id="ucmd-mode-badge">Ready</span></div>
+            <div style="display:flex;gap:6px;align-items:center">
+              <input id="ucmd-input" class="quick-add" style="flex:1;margin:0"
+                placeholder="Brain dump or ask anything… (Enter to send)"
+                onkeydown="ucmdKey(event)">
+              <button class="btn-parse" style="padding:6px 12px;font-size:9px" onclick="submitUnifiedInput()">→</button>
+            </div>
+            <div id="ucmd-result" style="display:none;margin-top:8px;font-size:9px;color:var(--muted);border-top:1px solid var(--border);padding-top:8px"></div>
+          </div>
+
+          <!-- CONVERSATION HISTORY -->
+          <div class="card" id="conv-hist-card">
+            <div class="card-title" style="cursor:pointer" onclick="toggleConvHist()">
+              <span>Conversation History</span>
+              <span class="badge b-muted" id="conv-hist-badge">0</span>
+            </div>
+            <div id="conv-hist-body" style="display:none">
+              <div id="conv-hist-list" style="max-height:260px;overflow-y:auto"></div>
+            </div>
+          </div>
+
           <!-- TODAY'S TASKS -->
           <div class="card">
             <div class="card-title">
@@ -594,6 +618,31 @@ body{
             <div id="drift-box-dash"></div>
             <input class="quick-add" id="quick-add" placeholder="+ Quick add (Enter to save)…" onkeydown="quickAdd(event)">
             <div id="todo-list"></div>
+          </div>
+
+          <!-- RECENT ACTIVITY -->
+          <div class="card" id="recent-act-card">
+            <div class="card-title" style="cursor:pointer" onclick="toggleRecentActivity()">
+              <span>Recent Activity</span>
+              <span class="badge b-muted" id="recent-act-badge">Today</span>
+            </div>
+            <div id="recent-act-body" style="display:none">
+              <div id="recent-act-list" style="font-size:9px;color:var(--muted)">Loading…</div>
+              <div style="margin-top:8px;text-align:right">
+                <button class="btn-parse" style="font-size:8px;padding:4px 10px" onclick="openFullLogModal()">View full log →</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- FULL LOG MODAL -->
+          <div id="full-log-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:1000;align-items:center;justify-content:center">
+            <div style="background:var(--card);border:1px solid var(--border);border-radius:8px;padding:20px;width:min(600px,90vw);max-height:80vh;overflow-y:auto">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+                <div style="font-family:'Syne',sans-serif;font-size:13px;color:var(--glow)">Activity — Last 30 Days</div>
+                <button onclick="closeFullLogModal()" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px">✕</button>
+              </div>
+              <div id="full-log-list" style="font-size:9px;color:var(--muted)">Loading…</div>
+            </div>
           </div>
 
           <!-- ANNUAL TARGETS SUMMARY -->
@@ -657,8 +706,8 @@ body{
       </div>
     </div>
 
-    <!-- ── BRAIN DUMP / AI CHAT ── -->
-    <div class="page" id="p-brain" style="height:100%">
+    <!-- ── BRAIN DUMP / AI CHAT — moved to Dashboard; page hidden, kept for reference ── -->
+    <div style="display:none"><div class="page" id="p-brain" style="height:100%"><!-- HIDDEN -->
       <div class="chat-layout">
         <div class="chat-main">
           <div class="dump-area">
@@ -694,15 +743,15 @@ body{
           <button class="btn-parse" style="width:100%;margin-top:8px;justify-content:center" onclick="generateBrief()">Generate Brief</button>
         </div>
       </div>
-    </div>
+    </div></div><!-- end hidden brain page -->
 
-    <!-- ── ACTIVITY LOG ── -->
-    <div class="page" id="p-log">
+    <!-- ── ACTIVITY LOG — hidden, kept for reference ── -->
+    <div style="display:none"><div class="page" id="p-log">
       <div class="card">
         <div class="card-title"><span>System Activity Log</span><span class="badge b-muted" id="log-count">0 entries</span></div>
         <div id="log-list"><div class="log-entry" style="color:var(--muted)">No activity yet.</div></div>
       </div>
-    </div>
+    </div></div><!-- end hidden log page -->
 
     <!-- ── TIMETABLE ── -->
     <div class="page" id="p-timetable">
@@ -1128,9 +1177,10 @@ function nav(page,el){
 }
 
 function renderPage(page){
-  if(page==="dashboard"){renderDash();fetchAndRenderRadar()}
-  else if(page==="brain"){renderAgentAlerts()}
-  else if(page==="log"){renderLog()}
+  if(page==="dashboard"){renderDash();fetchAndRenderRadar();renderConversationHistory();if(_recentActOpen)renderRecentActivity()}
+  // brain and log pages are now hidden — their nav items removed
+  // else if(page==="brain"){renderAgentAlerts()}
+  // else if(page==="log"){renderLog()}
   else if(page==="timetable"){renderTimetable()}
   else if(page==="bible"){renderBible()}
   else if(page==="books"){renderBooks()}
@@ -1768,9 +1818,10 @@ function renderLog(){
 /* ═══════════════════════════════════════════════════
    BRAIN DUMP — AI PARSE
 ═══════════════════════════════════════════════════ */
-document.getElementById("dump-ta").addEventListener("keydown",e=>{
-  if((e.ctrlKey||e.metaKey)&&e.key==="Enter")parseDump();
-});
+// Brain Dump keyboard shortcut removed — p-brain is now hidden
+// document.getElementById("dump-ta").addEventListener("keydown",e=>{
+//   if((e.ctrlKey||e.metaKey)&&e.key==="Enter")parseDump();
+// });
 
 async function parseDump() {
   const ta = document.getElementById("dump-ta");
@@ -1839,6 +1890,159 @@ function renderChatHistory(){
 }
 
 function chatKey(e){if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();sendChat()}}
+
+/* ═══════════════════════════════════════════════════
+   UNIFIED COMMAND INPUT (Dashboard)
+═══════════════════════════════════════════════════ */
+function ucmdKey(e){if(e.key==="Enter"){e.preventDefault();submitUnifiedInput()}}
+
+async function submitUnifiedInput(){
+  const inp=document.getElementById("ucmd-input");
+  const text=inp.value.trim();
+  if(!text)return;
+
+  const badge=document.getElementById("ucmd-mode-badge");
+  const result=document.getElementById("ucmd-result");
+  badge.textContent="Thinking…";
+  badge.className="badge b-glow";
+  inp.disabled=true;
+  result.style.display="none";
+
+  let sessionId=localStorage.getItem("founderOS_session");
+  if(!sessionId){sessionId=Date.now().toString(36)+Math.random().toString(36).slice(2);localStorage.setItem("founderOS_session",sessionId);}
+
+  const ctx={
+    kpis:S.kpis,
+    habits:Object.fromEntries(Object.entries(S.habits).map(([k,h])=>[k,h.done])),
+    todosActive:S.todos.filter(t=>!t.done).length,
+    annualTargets:S.annualTargets.map(a=>({name:a.name,current:a.current,target:a.target})),
+  };
+
+  try{
+    const r=await fetch(`${API_BASE}/input`,{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({text,session_id:sessionId,context:ctx})});
+    if(!r.ok)throw new Error("Backend "+r.status);
+    const data=await r.json();
+
+    inp.value="";
+
+    if(data.type==="log"){
+      // Persist in local chat history with system marker
+      S.chatHistory.push({text:`📥 Logged: ${data.summary}`,role:"bot",time:nowTime()});
+      saveState();
+      // Toast
+      result.innerHTML=`<div style="color:var(--success)">✓ Logged — ${escHtml(data.summary)}</div>${data.advisory?`<div style="margin-top:4px;color:var(--muted)">${escHtml(data.advisory)}</div>`:""}`;
+      result.style.display="block";
+      badge.textContent="Logged";
+      badge.className="badge b-suc";
+      // Refresh data
+      await syncFromBackend();
+      renderRecentActivity();
+    } else {
+      // Query reply — show inline + add to conversation history
+      S.chatHistory.push({text,role:"user",time:nowTime()});
+      S.chatHistory.push({text:data.reply,role:"bot",time:nowTime()});
+      if(S.chatHistory.length>80)S.chatHistory=S.chatHistory.slice(-80);
+      saveState();
+      result.innerHTML=`<div style="color:var(--glow);margin-bottom:4px">⚡ ${escHtml(text)}</div><div style="color:var(--text)">${escHtml(data.reply).replace(/\n/g,"<br>")}</div>`;
+      result.style.display="block";
+      badge.textContent="Reply";
+      badge.className="badge b-glow";
+      renderConversationHistory();
+    }
+  }catch(e){
+    result.innerHTML=`<div style="color:var(--danger)">Backend offline — check server.</div>`;
+    result.style.display="block";
+    badge.textContent="Error";
+    badge.className="badge b-danger";
+  }finally{
+    inp.disabled=false;
+    inp.focus();
+  }
+}
+
+function escHtml(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;")}
+
+/* ═══════════════════════════════════════════════════
+   RECENT ACTIVITY PANEL (Dashboard)
+═══════════════════════════════════════════════════ */
+let _recentActOpen=false;
+
+function toggleRecentActivity(){
+  _recentActOpen=!_recentActOpen;
+  const body=document.getElementById("recent-act-body");
+  body.style.display=_recentActOpen?"block":"none";
+  if(_recentActOpen)renderRecentActivity();
+}
+
+async function renderRecentActivity(){
+  const el=document.getElementById("recent-act-list");
+  if(!el)return;
+  try{
+    const r=await fetch(`${API_BASE}/logs/today`);
+    if(!r.ok)throw new Error();
+    const logs=await r.json();
+    const badge=document.getElementById("recent-act-badge");
+    badge.textContent=`${logs.length} today`;
+    if(!logs.length){el.innerHTML=`<div style="color:var(--muted)">No activity logged today.</div>`;return;}
+    el.innerHTML=logs.map(l=>`<div style="padding:4px 0;border-bottom:1px solid var(--border);color:var(--text)">${escHtml(l.entry)}<span style="float:right;color:var(--muted)">${l.date}</span></div>`).join("");
+  }catch{
+    el.innerHTML=`<div style="color:var(--muted)">Could not load activity.</div>`;
+  }
+}
+
+async function openFullLogModal(){
+  const modal=document.getElementById("full-log-modal");
+  const el=document.getElementById("full-log-list");
+  modal.style.display="flex";
+  el.innerHTML="Loading…";
+  try{
+    const r=await fetch(`${API_BASE}/logs/recent?days=30`);
+    if(!r.ok)throw new Error();
+    const logs=await r.json();
+    if(!logs.length){el.innerHTML=`<div>No activity in the last 30 days.</div>`;return;}
+    // Group by date
+    const byDate={};
+    logs.forEach(l=>{(byDate[l.date]=byDate[l.date]||[]).push(l.entry);});
+    el.innerHTML=Object.entries(byDate).map(([d,entries])=>
+      `<div style="margin-bottom:10px"><div style="color:var(--glow);margin-bottom:4px;font-family:'Syne',sans-serif">${d}</div>`+
+      entries.map(e=>`<div style="padding:2px 0;border-bottom:1px solid var(--border)">${escHtml(e)}</div>`).join("")+
+      `</div>`
+    ).join("");
+  }catch{
+    el.innerHTML=`<div style="color:var(--danger)">Could not load log.</div>`;
+  }
+}
+
+function closeFullLogModal(){
+  document.getElementById("full-log-modal").style.display="none";
+}
+
+/* ═══════════════════════════════════════════════════
+   CONVERSATION HISTORY PANEL (Dashboard)
+═══════════════════════════════════════════════════ */
+let _convHistOpen=false;
+
+function toggleConvHist(){
+  _convHistOpen=!_convHistOpen;
+  document.getElementById("conv-hist-body").style.display=_convHistOpen?"block":"none";
+  if(_convHistOpen)renderConversationHistory();
+}
+
+function renderConversationHistory(){
+  const el=document.getElementById("conv-hist-list");
+  if(!el)return;
+  const hist=S.chatHistory.slice(-20); // last 10 exchanges = 20 msgs
+  const badge=document.getElementById("conv-hist-badge");
+  badge.textContent=Math.floor(S.chatHistory.length/2)+" exchanges";
+  if(!hist.length){el.innerHTML=`<div style="font-size:9px;color:var(--muted);padding:4px 0">No conversation yet.</div>`;return;}
+  el.innerHTML=hist.map(m=>`<div style="padding:5px 0;border-bottom:1px solid var(--border)">
+    <span style="color:${m.role==="user"?"var(--glow)":"var(--muted)"};font-size:8px;letter-spacing:0.1em">${m.role==="user"?"YOU":"AI"}</span>
+    <span style="color:var(--text);font-size:9px;margin-left:6px">${escHtml(m.text).replace(/\n/g,"<br>")}</span>
+    <span style="float:right;font-size:8px;color:var(--muted)">${m.time||""}</span>
+  </div>`).join("");
+  el.scrollTop=el.scrollHeight;
+}
 
 async function sendChat(){
   const inp=document.getElementById("chat-inp");
@@ -2276,9 +2480,9 @@ dailyReset();
 renderHeader();
 renderDash();
 fetchAndRenderRadar();
-renderChatHistory();
+renderConversationHistory(); // replaces renderChatHistory() — now in Dashboard panel
 checkUrgentAlerts();
-renderAgentAlerts();
+// renderAgentAlerts() moved — agent-alerts panel is in hidden p-brain; alerts visible via conv history
 syncFromBackend();
 setInterval(syncFromBackend, 30000);
 setInterval(()=>{renderHeader();},60000);
