@@ -566,6 +566,90 @@ def parse_brain_dump(payload: schemas.ParseRequest, db: Session = Depends(get_db
     }
 
 
+# ── UNIFIED INPUT (routes to parse or chat) ──────────────────
+_QUERY_STARTERS = ("what","when","why","how","who","where","is","are","can","could","should","will","tell","show","give","explain","summarise","summarize","help","do you","did i","have i","am i")
+
+@app.post("/input")
+def unified_input(request: schemas.UnifiedInputRequest, db: Session = Depends(get_db)):
+    """
+    Single entry point for Dashboard unified command box.
+    Routes to /parse (log) or /chat (query) and returns
+    {type: "log"|"query", ...fields}.
+    """
+    global _kpi_state
+    text = request.text.strip()
+    lo = text.lower()
+    is_query = text.endswith("?") or any(lo.startswith(w) for w in _QUERY_STARTERS)
+
+    if is_query:
+        # ── CHAT path ──────────────────────────────────────────
+        session = request.session_id
+        history = db.query(models.ChatMessage).filter(
+            models.ChatMessage.session_id == session
+        ).order_by(models.ChatMessage.created_at).all()
+        messages = [{"role": m.role, "content": m.content} for m in history]
+        messages.append({"role": "user", "content": text})
+        db.add(models.ChatMessage(session_id=session, role="user", content=text))
+        db.commit()
+
+        context_parts: list[str] = []
+        today_logs = db.query(models.DailyLog).filter(
+            models.DailyLog.date == date.today()
+        ).order_by(models.DailyLog.id.asc()).all()
+        if today_logs:
+            log_lines = "\n".join(f"- {l.entry}" for l in today_logs if l.entry)
+            if log_lines:
+                context_parts.append(f"[Today's activity log]\n{log_lines}")
+        if request.context:
+            context_parts.append(f"[Live system context]\n{json.dumps(request.context)}")
+        if context_parts:
+            messages[-1]["content"] += "\n\n" + "\n\n".join(context_parts)
+
+        reply = get_chat_response_with_memory(messages, db=db, context_type="chat")
+        db.add(models.ChatMessage(session_id=session, role="assistant", content=reply))
+        db.commit()
+        return {"type": "query", "reply": reply}
+    else:
+        # ── PARSE path ─────────────────────────────────────────
+        roadmap_ids = [t.task_id for t in db.query(RoadmapTask).all()]
+        context = {"roadmap_ids": roadmap_ids, "today": str(date.today())}
+        parsed = get_parse_response(text, context)
+
+        revenue_logged: list[dict] = []
+        if parsed.get("revenue_updates"):
+            for ru in parsed["revenue_updates"]:
+                amount = ru.get("amount")
+                if not amount or float(amount) <= 0:
+                    continue
+                source = ru.get("source") or ""
+                client_name = ru.get("client") or ""
+                client_id = None
+                if client_name:
+                    matched = db.query(Client).filter(
+                        func.lower(Client.name).contains(client_name.lower())
+                    ).first()
+                    if matched:
+                        client_id = matched.id
+                db.add(Revenue(amount=float(amount), source=source, client_id=client_id,
+                               date=date.today(), notes="auto-logged via unified input"))
+                revenue_logged.append({"amount": float(amount), "source": source})
+            if revenue_logged:
+                db.commit()
+
+        if parsed.get("log_entry"):
+            db.add(models.DailyLog(date=date.today(), entry=parsed["log_entry"],
+                                    weekly_target_id=None, impact_score=0))
+            db.commit()
+
+        return {
+            "type": "log",
+            "summary": parsed.get("summary") or "Entry logged.",
+            "advisory": parsed.get("advisory") or "Character Before Status.",
+            "revenue_logged": revenue_logged,
+            "status": "ok",
+        }
+
+
 # ── PROACTIVE BRIEF ──────────────────────────────────────────
 @app.post("/proactive-brief")
 def proactive_brief(payload: schemas.ProactiveBriefRequest):
@@ -844,6 +928,18 @@ def get_today_logs(db: Session = Depends(get_db)):
     logs = db.query(models.DailyLog).filter(
         models.DailyLog.date == date.today()
     ).order_by(models.DailyLog.id.desc()).all()
+    return [{"id": l.id, "entry": l.entry, "weekly_target_id": l.weekly_target_id,
+             "impact_score": l.impact_score, "date": str(l.date)} for l in logs]
+
+
+@app.get("/logs/recent")
+def get_recent_logs(days: int = 30, db: Session = Depends(get_db)):
+    """Return DailyLog entries from the last N days (default 30), newest first."""
+    from datetime import timedelta
+    cutoff = date.today() - timedelta(days=days)
+    logs = db.query(models.DailyLog).filter(
+        models.DailyLog.date >= cutoff
+    ).order_by(models.DailyLog.date.desc(), models.DailyLog.id.desc()).all()
     return [{"id": l.id, "entry": l.entry, "weekly_target_id": l.weekly_target_id,
              "impact_score": l.impact_score, "date": str(l.date)} for l in logs]
 

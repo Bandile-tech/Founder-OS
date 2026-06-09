@@ -88,6 +88,12 @@ class ParseRequest(BaseModel):
     session_id: Optional[str] = None
 
 
+class UnifiedInputRequest(BaseModel):
+    text: str
+    session_id: str
+    context: Optional[Dict[str, Any]] = None
+
+
 class ChatRequest(BaseModel):
     message: str
     session_id: str
