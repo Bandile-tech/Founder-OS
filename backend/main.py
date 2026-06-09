@@ -457,38 +457,49 @@ def get_radar(db: Session = Depends(get_db)):
     return {"scores": scores, "composite": composite, "computed_at": str(datetime.utcnow())}
 
 
-# ── PARSE (Brain Dump) ───────────────────────────────────────
-@app.post("/parse")
-def parse_brain_dump(payload: schemas.ParseRequest, db: Session = Depends(get_db)):
+# ── SHARED PARSE-APPLICATION HELPER ─────────────────────────
+def apply_parse_updates(db: Session, parsed: dict, today: date) -> dict:
+    """
+    Apply every update extracted by the AI parser to the database.
+
+    Called by both /parse and /input so there is exactly one copy of
+    this logic.  Returns a structured summary of what was applied.
+    """
     global _kpi_state
 
-    roadmap_ids = [t.task_id for t in db.query(RoadmapTask).all()]
-    context = {"roadmap_ids": roadmap_ids, "today": str(date.today())}
+    result: dict = {
+        "habits_updated":          [],   # list of {key, label, strategy}
+        "kpi_updates_applied":     [],   # list of key strings
+        "todos_added":             [],   # list of text strings
+        "roadmap_completed":       [],   # list of task_id strings
+        "annual_updates_applied":  [],   # list of name_fragment strings
+        "revenue_logged":          [],   # list of {amount, source}
+        "log_entry_created":       False,
+    }
 
-    parsed = get_parse_response(payload.text, context)
-
-    # Apply KPI updates
-    kpi_updates_applied = []
+    # ── KPI updates ──────────────────────────────────────────
     if parsed.get("kpi_updates"):
         for u in parsed["kpi_updates"]:
-            if u["key"] in _kpi_state:
+            if u.get("key") in _kpi_state:
                 _kpi_state[u["key"]]["value"] = u["value"]
-                db.add(KPISnapshot(key=u["key"], value=u["value"], date=date.today()))
-                kpi_updates_applied.append(u["key"])
-        if kpi_updates_applied:
+                db.add(KPISnapshot(key=u["key"], value=u["value"], date=today))
+                result["kpi_updates_applied"].append(u["key"])
+        if result["kpi_updates_applied"]:
             db.commit()
 
-    # Apply roadmap completions
+    # ── Roadmap completions ───────────────────────────────────
     if parsed.get("roadmap_complete"):
         for task_id in parsed["roadmap_complete"]:
             task = db.query(RoadmapTask).filter(RoadmapTask.task_id == task_id).first()
             if task:
                 task.done = True
-        db.commit()
+                result["roadmap_completed"].append(task_id)
+        if result["roadmap_completed"]:
+            db.commit()
 
-    # Apply habit updates — three-tier fuzzy matching
+    # ── Habit updates — three-tier fuzzy matching ─────────────
     if parsed.get("habits_done"):
-        today_habits = db.query(Habit).filter(Habit.date == date.today()).all()
+        today_habits = db.query(Habit).filter(Habit.date == today).all()
         for ai_key in parsed["habits_done"]:
             matched_habit = None
             strategy = None
@@ -497,8 +508,7 @@ def parse_brain_dump(payload: schemas.ParseRequest, db: Session = Depends(get_db
             # Tier 1: exact key match
             for h in today_habits:
                 if h.key == ai_key:
-                    matched_habit = h
-                    strategy = "exact_key"
+                    matched_habit, strategy = h, "exact_key"
                     break
 
             # Tier 2: label substring match (either direction)
@@ -506,54 +516,64 @@ def parse_brain_dump(payload: schemas.ParseRequest, db: Session = Depends(get_db
                 for h in today_habits:
                     label_lo = h.label.lower()
                     if ai_key_lo in label_lo or label_lo in ai_key_lo:
-                        matched_habit = h
-                        strategy = "label_substring"
+                        matched_habit, strategy = h, "label_substring"
                         break
 
-            # Tier 3: any word overlap between ai_key and label
+            # Tier 3: any word overlap between ai_key words and label words
             if not matched_habit:
-                ai_words = set(w for w in ai_key_lo.split() if len(w) > 2)
+                ai_words = {w for w in ai_key_lo.split() if len(w) > 2}
                 for h in today_habits:
-                    label_words = set(w for w in h.label.lower().split() if len(w) > 2)
+                    label_words = {w for w in h.label.lower().split() if len(w) > 2}
                     if ai_words & label_words:
-                        matched_habit = h
-                        strategy = "keyword_overlap"
+                        matched_habit, strategy = h, "keyword_overlap"
                         break
 
             if matched_habit:
                 matched_habit.done = True
+                result["habits_updated"].append({
+                    "key":      matched_habit.key,
+                    "label":    matched_habit.label,
+                    "strategy": strategy,
+                })
                 print(f"[parse] habit '{ai_key}' matched '{matched_habit.key}' via {strategy}")
             else:
-                print(f"[parse] habit '{ai_key}' — no match found (today has {[h.key for h in today_habits]})")
-        db.commit()
+                print(f"[parse] habit '{ai_key}' — no match (today: {[h.key for h in today_habits]})")
 
-    # Apply annual target updates
+        if result["habits_updated"]:
+            db.commit()
+
+    # ── Annual target updates ─────────────────────────────────
     if parsed.get("annual_updates"):
         for u in parsed["annual_updates"]:
             frag = u.get("name_fragment", "").lower()
+            if not frag:
+                continue
             target = db.query(AnnualTarget).filter(
                 func.lower(AnnualTarget.name).contains(frag)
             ).first()
             if target:
                 target.current_value = u["current"]
                 target.updated_at = datetime.utcnow()
-        db.commit()
+                result["annual_updates_applied"].append(frag)
+        if result["annual_updates_applied"]:
+            db.commit()
 
+    # ── Todo additions ────────────────────────────────────────
     if parsed.get("todos_add"):
         for t in parsed["todos_add"]:
-            new_todo = models.Todo(
+            db.add(models.Todo(
                 text=t["text"],
                 priority=t.get("priority", 5),
                 category=t.get("category", "personal"),
-                due=t.get("due", str(date.today())),
+                due=t.get("due", str(today)),
                 source="ai",
-                roadmap_id=t.get("roadmapId")
-            )
-            db.add(new_todo)
-        db.commit()
+                roadmap_id=t.get("roadmapId"),
+            ))
+            result["todos_added"].append(t["text"])
+        if result["todos_added"]:
+            db.commit()
 
-    # Apply revenue updates
-    revenue_logged = []
+    # ── Revenue updates ───────────────────────────────────────
     if parsed.get("revenue_updates"):
         for ru in parsed["revenue_updates"]:
             amount = ru.get("amount")
@@ -561,7 +581,6 @@ def parse_brain_dump(payload: schemas.ParseRequest, db: Session = Depends(get_db
                 continue
             source = ru.get("source") or ""
             client_name = ru.get("client") or ""
-            # Optionally link to an existing client by name
             client_id = None
             if client_name:
                 matched = db.query(Client).filter(
@@ -573,29 +592,44 @@ def parse_brain_dump(payload: schemas.ParseRequest, db: Session = Depends(get_db
                 amount=float(amount),
                 source=source,
                 client_id=client_id,
-                date=date.today(),
-                notes=f"auto-logged via brain dump",
+                date=today,
+                notes="auto-logged via brain dump",
             ))
-            revenue_logged.append({"amount": float(amount), "source": source})
-        if revenue_logged:
+            result["revenue_logged"].append({"amount": float(amount), "source": source})
+        if result["revenue_logged"]:
             db.commit()
 
-    # Persist brain dump as a standalone DailyLog entry
+    # ── DailyLog entry ────────────────────────────────────────
     if parsed.get("log_entry"):
         db.add(models.DailyLog(
-            date=date.today(),
+            date=today,
             entry=parsed["log_entry"],
             weekly_target_id=None,
             impact_score=0,
         ))
         db.commit()
+        result["log_entry_created"] = True
 
+    return result
+
+
+# ── PARSE (Brain Dump) ───────────────────────────────────────
+@app.post("/parse")
+def parse_brain_dump(payload: schemas.ParseRequest, db: Session = Depends(get_db)):
+    roadmap_ids = [t.task_id for t in db.query(RoadmapTask).all()]
+    context = {"roadmap_ids": roadmap_ids, "today": str(date.today())}
+
+    parsed = get_parse_response(payload.text, context)
+    updates = apply_parse_updates(db, parsed, date.today())
+
+    # Backward-compatible response: keep existing top-level fields, add "updates" object
     return {
-        "summary": parsed.get("summary") or "Brain dump processed.",
-        "advisory": parsed.get("advisory") or "Character Before Status. Maintain discipline.",
-        "kpi_updates_applied": kpi_updates_applied,
-        "revenue_logged": revenue_logged,
-        "status": "ok"
+        "summary":             parsed.get("summary") or "Brain dump processed.",
+        "advisory":            parsed.get("advisory") or "Character Before Status. Maintain discipline.",
+        "kpi_updates_applied": updates["kpi_updates_applied"],   # legacy field kept
+        "revenue_logged":      updates["revenue_logged"],         # legacy field kept
+        "updates":             updates,
+        "status":              "ok",
     }
 
 
@@ -647,39 +681,14 @@ def unified_input(request: schemas.UnifiedInputRequest, db: Session = Depends(ge
         roadmap_ids = [t.task_id for t in db.query(RoadmapTask).all()]
         context = {"roadmap_ids": roadmap_ids, "today": str(date.today())}
         parsed = get_parse_response(text, context)
-
-        revenue_logged: list[dict] = []
-        if parsed.get("revenue_updates"):
-            for ru in parsed["revenue_updates"]:
-                amount = ru.get("amount")
-                if not amount or float(amount) <= 0:
-                    continue
-                source = ru.get("source") or ""
-                client_name = ru.get("client") or ""
-                client_id = None
-                if client_name:
-                    matched = db.query(Client).filter(
-                        func.lower(Client.name).contains(client_name.lower())
-                    ).first()
-                    if matched:
-                        client_id = matched.id
-                db.add(Revenue(amount=float(amount), source=source, client_id=client_id,
-                               date=date.today(), notes="auto-logged via unified input"))
-                revenue_logged.append({"amount": float(amount), "source": source})
-            if revenue_logged:
-                db.commit()
-
-        if parsed.get("log_entry"):
-            db.add(models.DailyLog(date=date.today(), entry=parsed["log_entry"],
-                                    weekly_target_id=None, impact_score=0))
-            db.commit()
+        updates = apply_parse_updates(db, parsed, date.today())
 
         return {
-            "type": "log",
-            "summary": parsed.get("summary") or "Entry logged.",
+            "type":     "log",
+            "summary":  parsed.get("summary") or "Entry logged.",
             "advisory": parsed.get("advisory") or "Character Before Status.",
-            "revenue_logged": revenue_logged,
-            "status": "ok",
+            "updates":  updates,
+            "status":   "ok",
         }
 
 

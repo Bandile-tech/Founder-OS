@@ -1944,8 +1944,22 @@ async function submitUnifiedInput(){
       // Persist in local chat history with system marker
       S.chatHistory.push({text:`📥 Logged: ${data.summary}`,role:"bot",time:nowTime()});
       saveState();
+      // Build compact "what was applied" line from updates object
+      const u=data.updates||{};
+      const chips=[];
+      if(u.habits_updated&&u.habits_updated.length)
+        chips.push(u.habits_updated.map(h=>h.key).join(", ")+" habit"+(u.habits_updated.length>1?"s":"")+" ✓");
+      if(u.kpi_updates_applied&&u.kpi_updates_applied.length)
+        chips.push(u.kpi_updates_applied.join(", ")+" KPI"+(u.kpi_updates_applied.length>1?"s":""));
+      if(u.todos_added&&u.todos_added.length)
+        chips.push(u.todos_added.length+" task"+(u.todos_added.length>1?"s":"")+" added");
+      if(u.roadmap_completed&&u.roadmap_completed.length)
+        chips.push(u.roadmap_completed.length+" roadmap item"+(u.roadmap_completed.length>1?"s":"")+" done");
+      if(u.revenue_logged&&u.revenue_logged.length)
+        chips.push(u.revenue_logged.map(r=>"K"+r.amount+" ("+escHtml(r.source)+")").join(", ")+" revenue");
+      const updateLine=chips.length?`<div style="margin-top:5px;color:var(--glow);font-size:8px;letter-spacing:0.05em">Updated: ${chips.join(" · ")}</div>`:"";
       // Toast
-      result.innerHTML=`<div style="color:var(--success)">✓ Logged — ${escHtml(data.summary)}</div>${data.advisory?`<div style="margin-top:4px;color:var(--muted)">${escHtml(data.advisory)}</div>`:""}`;
+      result.innerHTML=`<div style="color:var(--success)">✓ Logged — ${escHtml(data.summary)}</div>${updateLine}${data.advisory?`<div style="margin-top:4px;color:var(--muted)">${escHtml(data.advisory)}</div>`:""}`;
       result.style.display="block";
       badge.textContent="Logged";
       badge.className="badge b-suc";

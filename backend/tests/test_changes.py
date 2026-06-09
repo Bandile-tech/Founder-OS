@@ -468,3 +468,156 @@ class TestFuzzyHabitMatching:
         assert resp.status_code == 200
         # Nothing should have been ticked
         assert self._habit_done("scripture_prayer") is False
+
+
+# ════════════════════════════════════════════════════════════════
+# 5. /input  →  apply_parse_updates called; full updates surfaced
+# ════════════════════════════════════════════════════════════════
+
+class TestUnifiedInputAppliesUpdates:
+    """
+    Verifies that /input's parse path uses apply_parse_updates so that
+    habits, revenue, and multi-event dumps are all correctly applied
+    and returned in the response's 'updates' object.
+    """
+
+    SESSION = "test-input-session"
+
+    def _seed_habits(self):
+        from datetime import date as _date
+        from models import Habit as _Habit
+        db = _db()
+        DEFAULTS = [
+            ("scripture_prayer", "Scripture & Prayer (pre-5:20am)"),
+            ("ironing",          "Clothes ironed night before"),
+            ("python_session",   "Python / Aether (20:30–21:30)"),
+            ("sprint_training",  "Sprint training"),
+            ("academics",        "Academic study block"),
+        ]
+        for key, label in DEFAULTS:
+            db.add(_Habit(key=key, label=label, done=False, date=_date.today()))
+        db.commit()
+        db.close()
+
+    def _habit_done(self, key: str) -> bool:
+        from datetime import date as _date
+        from models import Habit as _Habit
+        db = _db()
+        h = db.query(_Habit).filter(_Habit.key == key, _Habit.date == _date.today()).first()
+        result = h.done if h else False
+        db.close()
+        return result
+
+    def test_input_ticks_habit_and_returns_it(self):
+        """
+        /input with 'did scripture today':
+        - scripture_prayer habit row becomes done=True
+        - response['updates']['habits_updated'] contains scripture_prayer
+        """
+        self._seed_habits()
+        payload = _fake_parse_response({"habits_done": ["scripture_prayer"]})
+
+        with patch("main.get_parse_response", return_value=payload):
+            resp = client.post("/input", json={
+                "text": "did scripture today",
+                "session_id": self.SESSION,
+            })
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["type"] == "log"
+        assert "updates" in data
+
+        habit_keys = [h["key"] for h in data["updates"]["habits_updated"]]
+        assert "scripture_prayer" in habit_keys
+        assert self._habit_done("scripture_prayer") is True
+
+    def test_input_creates_revenue_and_returns_it(self):
+        """
+        /input with 'earned K500 from Wamu':
+        - Revenue row created in DB
+        - response['updates']['revenue_logged'] contains the entry
+        """
+        payload = _fake_parse_response({
+            "revenue_updates": [{"amount": 500.0, "source": "Wamu's Bakes", "client": None}]
+        })
+
+        with patch("main.get_parse_response", return_value=payload):
+            resp = client.post("/input", json={
+                "text": "earned K500 from Wamu's",
+                "session_id": self.SESSION,
+            })
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["type"] == "log"
+        rev = data["updates"]["revenue_logged"]
+        assert len(rev) == 1
+        assert rev[0]["amount"] == 500.0
+        assert "Wamu" in rev[0]["source"]
+
+        db = _db()
+        from models import Revenue as _Rev
+        rows = db.query(_Rev).all()
+        assert any(r.amount == 500.0 for r in rows)
+        db.close()
+
+    def test_input_multi_event_applies_both(self):
+        """
+        Multi-event dump: habit tick + revenue in one call — both applied.
+        """
+        self._seed_habits()
+        payload = _fake_parse_response({
+            "habits_done": ["scripture_prayer"],
+            "revenue_updates": [{"amount": 250.0, "source": "consulting", "client": None}],
+        })
+
+        with patch("main.get_parse_response", return_value=payload):
+            resp = client.post("/input", json={
+                "text": "did scripture, earned K250 from consulting",
+                "session_id": self.SESSION,
+            })
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert self._habit_done("scripture_prayer") is True
+        assert len(data["updates"]["revenue_logged"]) == 1
+        assert len(data["updates"]["habits_updated"]) == 1
+
+    def test_input_updates_object_structure(self):
+        """Response always contains all expected keys in updates, even when empty."""
+        payload = _fake_parse_response({})  # nothing to apply
+
+        with patch("main.get_parse_response", return_value=payload):
+            resp = client.post("/input", json={
+                "text": "all quiet today",
+                "session_id": self.SESSION,
+            })
+
+        assert resp.status_code == 200
+        u = resp.json()["updates"]
+        for key in ("habits_updated", "kpi_updates_applied", "todos_added",
+                    "roadmap_completed", "annual_updates_applied",
+                    "revenue_logged", "log_entry_created"):
+            assert key in u, f"Missing key: {key}"
+
+    def test_parse_response_still_backward_compatible(self):
+        """
+        /parse must still return legacy top-level fields
+        kpi_updates_applied and revenue_logged unchanged.
+        """
+        payload = _fake_parse_response({
+            "revenue_updates": [{"amount": 100.0, "source": "test", "client": None}],
+        })
+
+        with patch("main.get_parse_response", return_value=payload):
+            resp = client.post("/parse", json={"text": "test"})
+
+        assert resp.status_code == 200
+        data = resp.json()
+        # Legacy fields still present at top level
+        assert "kpi_updates_applied" in data
+        assert "revenue_logged" in data
+        # New unified updates object also present
+        assert "updates" in data
+        assert data["revenue_logged"] == data["updates"]["revenue_logged"]
