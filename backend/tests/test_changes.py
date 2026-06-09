@@ -378,3 +378,93 @@ class TestChatLogInjection:
 
         user_msg = next(m for m in reversed(captured) if m["role"] == "user")
         assert "yesterday's entry" not in user_msg["content"]
+
+
+# ════════════════════════════════════════════════════════════════
+# 4. /parse  →  fuzzy habit matching (Fix 1)
+# ════════════════════════════════════════════════════════════════
+
+class TestFuzzyHabitMatching:
+    """AI may return short/partial habit keys; all three tiers must resolve."""
+
+    def _seed_habits(self):
+        """Insert today's habit rows for all defaults."""
+        from datetime import date as _date
+        db = _db()
+        from models import Habit as _Habit
+        DEFAULTS = [
+            ("scripture_prayer", "Scripture & Prayer (pre-5:20am)"),
+            ("ironing",          "Clothes ironed night before"),
+            ("python_session",   "Python / Aether (20:30–21:30)"),
+            ("sprint_training",  "Sprint training"),
+            ("academics",        "Academic study block"),
+        ]
+        today = _date.today()
+        for key, label in DEFAULTS:
+            db.add(_Habit(key=key, label=label, done=False, date=today))
+        db.commit()
+        db.close()
+
+    def _habit_done(self, key: str) -> bool:
+        from datetime import date as _date
+        from models import Habit as _Habit
+        db = _db()
+        h = db.query(_Habit).filter(_Habit.key == key, _Habit.date == _date.today()).first()
+        result = h.done if h else False
+        db.close()
+        return result
+
+    def test_exact_key_match(self):
+        """Exact key 'scripture_prayer' ticks that habit."""
+        self._seed_habits()
+        payload = _fake_parse_response({"habits_done": ["scripture_prayer"]})
+        with patch("main.get_parse_response", return_value=payload):
+            resp = client.post("/parse", json={"text": "did scripture"})
+        assert resp.status_code == 200
+        assert self._habit_done("scripture_prayer") is True
+
+    def test_label_substring_match_scripture(self):
+        """AI returns 'scripture'; label 'Scripture & Prayer…' must match via substring."""
+        self._seed_habits()
+        payload = _fake_parse_response({"habits_done": ["scripture"]})
+        with patch("main.get_parse_response", return_value=payload):
+            resp = client.post("/parse", json={"text": "did scripture today"})
+        assert resp.status_code == 200
+        assert self._habit_done("scripture_prayer") is True
+
+    def test_label_substring_match_prayer(self):
+        """AI returns 'prayer'; should still resolve to scripture_prayer."""
+        self._seed_habits()
+        payload = _fake_parse_response({"habits_done": ["prayer"]})
+        with patch("main.get_parse_response", return_value=payload):
+            resp = client.post("/parse", json={"text": "did my prayer"})
+        assert resp.status_code == 200
+        assert self._habit_done("scripture_prayer") is True
+
+    def test_keyword_overlap_match_training(self):
+        """AI returns 'sprint session'; 'sprint' overlaps with 'Sprint training'."""
+        self._seed_habits()
+        payload = _fake_parse_response({"habits_done": ["sprint session"]})
+        with patch("main.get_parse_response", return_value=payload):
+            resp = client.post("/parse", json={"text": "finished sprint session"})
+        assert resp.status_code == 200
+        assert self._habit_done("sprint_training") is True
+
+    def test_keyword_overlap_match_python(self):
+        """AI returns 'python'; overlaps with label 'Python / Aether'."""
+        self._seed_habits()
+        payload = _fake_parse_response({"habits_done": ["python"]})
+        with patch("main.get_parse_response", return_value=payload):
+            resp = client.post("/parse", json={"text": "python session done"})
+        assert resp.status_code == 200
+        assert self._habit_done("python_session") is True
+
+    def test_no_match_does_not_crash(self):
+        """Unknown habit key with no overlap must not crash and returns 200."""
+        self._seed_habits()
+        payload = _fake_parse_response({"habits_done": ["xyzzy_nonexistent"]})
+        with patch("main.get_parse_response", return_value=payload):
+            resp = client.post("/parse", json={"text": "nothing relevant"})
+        assert resp.status_code == 200
+        # Nothing should have been ticked
+        assert self._habit_done("scripture_prayer") is False

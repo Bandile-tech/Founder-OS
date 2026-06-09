@@ -486,12 +486,45 @@ def parse_brain_dump(payload: schemas.ParseRequest, db: Session = Depends(get_db
                 task.done = True
         db.commit()
 
-    # Apply habit updates
+    # Apply habit updates — three-tier fuzzy matching
     if parsed.get("habits_done"):
-        for key in parsed["habits_done"]:
-            habit = db.query(Habit).filter(Habit.key == key, Habit.date == date.today()).first()
-            if habit:
-                habit.done = True
+        today_habits = db.query(Habit).filter(Habit.date == date.today()).all()
+        for ai_key in parsed["habits_done"]:
+            matched_habit = None
+            strategy = None
+            ai_key_lo = ai_key.strip().lower()
+
+            # Tier 1: exact key match
+            for h in today_habits:
+                if h.key == ai_key:
+                    matched_habit = h
+                    strategy = "exact_key"
+                    break
+
+            # Tier 2: label substring match (either direction)
+            if not matched_habit:
+                for h in today_habits:
+                    label_lo = h.label.lower()
+                    if ai_key_lo in label_lo or label_lo in ai_key_lo:
+                        matched_habit = h
+                        strategy = "label_substring"
+                        break
+
+            # Tier 3: any word overlap between ai_key and label
+            if not matched_habit:
+                ai_words = set(w for w in ai_key_lo.split() if len(w) > 2)
+                for h in today_habits:
+                    label_words = set(w for w in h.label.lower().split() if len(w) > 2)
+                    if ai_words & label_words:
+                        matched_habit = h
+                        strategy = "keyword_overlap"
+                        break
+
+            if matched_habit:
+                matched_habit.done = True
+                print(f"[parse] habit '{ai_key}' matched '{matched_habit.key}' via {strategy}")
+            else:
+                print(f"[parse] habit '{ai_key}' — no match found (today has {[h.key for h in today_habits]})")
         db.commit()
 
     # Apply annual target updates
