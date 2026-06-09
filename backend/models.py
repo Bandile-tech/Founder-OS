@@ -133,3 +133,77 @@ class Todo(Base):
     due = Column(String)
     source = Column(String)
     roadmap_id = Column(String, nullable=True)
+
+
+class ChatMessage(Base):
+    """Replaces chat_memory.db — stores per-session chat history in founder_os.db."""
+    __tablename__ = "chat_messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    session_id = Column(String, nullable=False, index=True)
+    role = Column(String, nullable=False)       # "user" | "assistant"
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class BibleEntry(Base):
+    """Daily Bible reading plan entries."""
+    __tablename__ = "bible_entries"
+
+    id = Column(Integer, primary_key=True, index=True)
+    ref = Column(String, nullable=False)
+    date = Column(Date, nullable=False)
+    done = Column(Boolean, default=False)
+    pushed = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class Book(Base):
+    """Reading queue — from queue through done."""
+    __tablename__ = "books"
+
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String, nullable=False)
+    author = Column(String, default="")
+    status = Column(String, default="queue")    # reading|queue|done
+    page = Column(Integer, default=0)
+    total_pages = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class SocialScore(Base):
+    """Daily social/network score (0–100), feeds radar."""
+    __tablename__ = "social_scores"
+
+    id = Column(Integer, primary_key=True, index=True)
+    value = Column(Integer, nullable=False)
+    date = Column(Date, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class Client(Base):
+    """Aether business pipeline — prospect → active → closed."""
+    __tablename__ = "clients"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False)
+    company = Column(String, default="")
+    status = Column(String, default="prospect")  # prospect|active|closed|lost
+    value = Column(Float, default=0)
+    service = Column(String, default="")
+    notes = Column(Text, default="")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class Revenue(Base):
+    """Individual revenue transactions."""
+    __tablename__ = "revenue"
+
+    id = Column(Integer, primary_key=True, index=True)
+    amount = Column(Float, nullable=False)
+    source = Column(String, default="")
+    client_id = Column(Integer, ForeignKey("clients.id"), nullable=True)
+    date = Column(Date, nullable=False)
+    notes = Column(Text, default="")
+    created_at = Column(DateTime, default=datetime.utcnow)

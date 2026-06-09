@@ -236,19 +236,30 @@ def get_radar_scores(context: dict) -> dict:
     ]
     intellect = round(sum(acad_scores) / max(len(acad_scores), 1))
 
-    # BUSINESS (annual targets in business category)
-    biz_targets = [a for a in annual if a.get("category") == "business"]
-    if biz_targets:
-        biz_scores = []
-        for a in biz_targets:
-            if a.get("lower_is_better"):
-                pct = kpi_pct({"value": a["current"], "target": a["target"], "lower_is_better": True})
-            else:
-                pct = min(100, (a["current"] / max(a["target"], 1)) * 100)
-            biz_scores.append(pct)
-        business = round(sum(biz_scores) / len(biz_scores))
+    # BUSINESS — real client/revenue data takes priority, fall back to annual targets
+    clients = context.get("clients", [])
+    revenue_total = context.get("revenue_total", 0)
+
+    if clients or revenue_total > 0:
+        active_count = sum(1 for c in clients if c.get("status") == "active")
+        prospect_count = sum(1 for c in clients if c.get("status") == "prospect")
+        rev_score = min(60, (revenue_total / 2000) * 60)   # 2000 USD target
+        pipeline_score = min(25, prospect_count * 8)
+        client_score = min(15, active_count * 15)
+        business = round(rev_score + pipeline_score + client_score)
     else:
-        business = 10  # baseline — just started
+        biz_targets = [a for a in annual if a.get("category") == "business"]
+        if biz_targets:
+            biz_scores = []
+            for a in biz_targets:
+                if a.get("lower_is_better"):
+                    pct = kpi_pct({"value": a["current"], "target": a["target"], "lower_is_better": True})
+                else:
+                    pct = min(100, (a["current"] / max(a["target"], 1)) * 100)
+                biz_scores.append(pct)
+            business = round(sum(biz_scores) / len(biz_scores))
+        else:
+            business = 10  # baseline — just started
 
     # SKILLS (CS50P + Python roadmap)
     python_target = next((a for a in annual if "cs50" in a.get("name", "").lower() or "python" in a.get("name", "").lower()), None)

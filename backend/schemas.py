@@ -74,6 +74,15 @@ class RoadmapBulkUpdate(BaseModel):
     tasks: List[RoadmapTaskUpdate]
 
 
+class TodoCreate(BaseModel):
+    text: str
+    priority: int = 5
+    category: str = "personal"
+    due: Optional[str] = None
+    source: str = "manual"
+    roadmapId: Optional[str] = None
+
+
 class ParseRequest(BaseModel):
     text: str
     session_id: Optional[str] = None
@@ -87,3 +96,50 @@ class ChatRequest(BaseModel):
 
 class ProactiveBriefRequest(BaseModel):
     context: Dict[str, Any]
+
+
+class BibleEntryCreate(BaseModel):
+    ref: str
+    date: date
+
+
+class BookCreate(BaseModel):
+    title: str
+    author: str = ""
+    status: str = "queue"
+    page: int = 0
+    total_pages: int = 0
+
+
+class BookUpdate(BaseModel):
+    status: Optional[str] = None
+    page: Optional[int] = None
+    total_pages: Optional[int] = None
+
+
+class SocialScoreUpdate(BaseModel):
+    value: int
+
+
+class ClientCreate(BaseModel):
+    name: str
+    company: str = ""
+    status: str = "prospect"
+    value: float = 0
+    service: str = ""
+    notes: str = ""
+
+
+class ClientUpdate(BaseModel):
+    status: Optional[str] = None
+    value: Optional[float] = None
+    notes: Optional[str] = None
+    service: Optional[str] = None
+
+
+class RevenueCreate(BaseModel):
+    amount: float
+    source: str = ""
+    client_id: Optional[int] = None
+    date: date
+    notes: str = ""
