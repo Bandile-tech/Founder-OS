@@ -504,6 +504,139 @@ body{
 .mc-sub{font-size:9px;color:var(--muted);margin-top:7px;line-height:1.5}
 
 /* ═══════════════════════════════════════════════════
+   ACADEMIC ROADMAP — NEW DB-DRIVEN UI
+═══════════════════════════════════════════════════ */
+.ar-subject-card{
+  background:var(--surface);border:1px solid #54ACBF14;
+  border-radius:6px;margin-bottom:10px;overflow:hidden;
+}
+.ar-subject-head{
+  display:flex;align-items:center;gap:10px;padding:12px 14px;
+  cursor:pointer;user-select:none;transition:background 0.15s;
+}
+.ar-subject-head:hover{background:#A7EBF206}
+.ar-circle{
+  position:relative;flex-shrink:0;width:44px;height:44px;
+}
+.ar-circle svg{transform:rotate(-90deg)}
+.ar-circle-text{
+  position:absolute;inset:0;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;line-height:1;
+}
+.ar-circle-pct{font-size:10px;font-weight:700;color:var(--glow)}
+.ar-circle-lbl{font-size:7px;color:var(--muted);letter-spacing:0.05em}
+.ar-subj-info{flex:1;min-width:0}
+.ar-subj-name{font-size:11px;color:var(--text)}
+.ar-subj-meta{font-size:8px;color:var(--muted);margin-top:2px}
+.ar-chevron{font-size:10px;color:var(--muted);transition:transform 0.2s;flex-shrink:0}
+.ar-chevron.open{transform:rotate(90deg)}
+.ar-subject-body{display:none;border-top:1px solid #54ACBF0F;padding:0 14px 12px}
+.ar-subject-body.open{display:block}
+
+.ar-topic-section{margin-top:10px}
+.ar-topic-head{
+  display:flex;align-items:center;gap:8px;
+  padding:5px 0;border-bottom:1px solid #54ACBF0A;margin-bottom:4px;
+}
+.ar-topic-name{font-size:10px;color:var(--border);flex:1;letter-spacing:0.04em}
+.ar-weight-sel{
+  background:var(--surface-hi);border:1px solid #54ACBF22;border-radius:3px;
+  color:var(--muted);font-family:'IBM Plex Mono',monospace;font-size:8px;
+  padding:2px 4px;outline:none;cursor:pointer;
+}
+.ar-add-sub-btn{
+  font-size:8px;color:var(--interactive);background:none;border:none;
+  cursor:pointer;letter-spacing:0.06em;padding:0;white-space:nowrap;
+}
+.ar-add-sub-btn:hover{color:var(--glow)}
+
+.ar-subtopic-row{
+  display:flex;align-items:center;gap:7px;
+  padding:5px 0;border-bottom:1px solid #54ACBF07;
+}
+.ar-subtopic-row:last-child{border-bottom:none}
+.ar-sub-name{
+  font-size:10px;flex:1;min-width:0;cursor:text;
+  color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.ar-sub-name-input{
+  font-size:10px;flex:1;min-width:0;
+  background:var(--surface-hi);border:1px solid #54ACBF44;border-radius:3px;
+  color:var(--text);font-family:'IBM Plex Mono',monospace;
+  padding:2px 6px;outline:none;
+}
+.ar-slider{
+  -webkit-appearance:none;appearance:none;
+  width:90px;height:3px;border-radius:2px;outline:none;flex-shrink:0;
+  background:linear-gradient(to right,var(--glow) 0%,var(--glow) var(--pct,0%),#54ACBF22 var(--pct,0%),#54ACBF22 100%);
+  cursor:pointer;
+}
+.ar-slider::-webkit-slider-thumb{
+  -webkit-appearance:none;width:10px;height:10px;border-radius:50%;
+  background:var(--glow);cursor:pointer;
+}
+.ar-pct-label{font-size:9px;color:var(--muted);width:28px;text-align:right;flex-shrink:0}
+.ar-date-label{font-size:8px;color:var(--muted);flex-shrink:0;white-space:nowrap}
+.ar-icon-btn{
+  background:none;border:none;cursor:pointer;font-size:11px;
+  padding:0 2px;opacity:0.45;transition:opacity 0.15s;flex-shrink:0;
+}
+.ar-icon-btn:hover{opacity:1}
+.ar-empty{font-size:9px;color:var(--muted);font-style:italic;padding:6px 0}
+
+.ar-btn{
+  background:var(--interactive);border:1px solid var(--border);
+  color:var(--glow);font-family:'IBM Plex Mono',monospace;
+  font-size:9px;letter-spacing:0.1em;padding:5px 12px;
+  border-radius:3px;cursor:pointer;text-transform:uppercase;white-space:nowrap;
+}
+.ar-btn:hover{background:#2f7aab}
+.ar-btn-sm{
+  background:transparent;border:1px solid #54ACBF33;
+  color:var(--muted);font-family:'IBM Plex Mono',monospace;
+  font-size:8px;letter-spacing:0.1em;padding:4px 9px;
+  border-radius:3px;cursor:pointer;text-transform:uppercase;white-space:nowrap;
+}
+.ar-btn-sm:hover{border-color:var(--border);color:var(--text)}
+.ar-input{
+  background:var(--surface-hi);border:1px solid #54ACBF22;border-radius:4px;
+  color:var(--text);font-family:'IBM Plex Mono',monospace;
+  font-size:10px;padding:6px 8px;outline:none;width:100%;
+}
+.ar-input:focus{border-color:#54ACBF55}
+.ar-add-topic-row{
+  margin-top:10px;display:flex;gap:8px;align-items:center;
+}
+.ar-delete-btn{
+  background:none;border:none;cursor:pointer;font-size:10px;
+  color:var(--danger);opacity:0.35;padding:0 2px;flex-shrink:0;
+  transition:opacity 0.15s;
+}
+.ar-delete-btn:hover{opacity:0.9}
+
+.ar-modal-overlay{
+  position:fixed;inset:0;background:#00000077;
+  display:flex;align-items:center;justify-content:center;z-index:500;
+}
+.ar-modal{
+  background:var(--surface);border:1px solid #54ACBF33;border-radius:8px;
+  padding:20px;width:420px;max-width:90vw;
+}
+.ar-modal-title{font-size:10px;letter-spacing:0.18em;color:var(--muted);text-transform:uppercase;margin-bottom:12px}
+.ar-notes-ta{
+  width:100%;min-height:120px;background:var(--surface-hi);
+  border:1px solid #54ACBF33;border-radius:4px;
+  color:var(--text);font-family:'IBM Plex Mono',monospace;
+  font-size:10px;padding:9px;outline:none;resize:vertical;line-height:1.6;
+}
+
+@media(max-width:640px){
+  .ar-subtopic-row{flex-wrap:wrap}
+  .ar-slider{width:100%;order:5;flex-basis:100%;margin-top:4px}
+  .ar-date-label{display:none}
+}
+
+/* ═══════════════════════════════════════════════════
    ANIMATIONS
 ═══════════════════════════════════════════════════ */
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}
@@ -815,12 +948,34 @@ body{
     <div class="page" id="p-academic">
       <div class="eco-header">
         <div><div class="eco-title">Academic Roadmap</div><div class="eco-sub">CIE Oct–Nov 2026 · Per-subject syllabus tracker</div></div>
-        <div id="exam-countdown-box" style="text-align:right">
-          <div class="cd-val" id="exam-days" style="font-family:'Syne',sans-serif;font-size:24px;color:var(--danger)">—</div>
-          <div style="font-size:8px;color:var(--muted);letter-spacing:0.15em">DAYS TO EXAMS</div>
+        <div style="display:flex;align-items:center;gap:12px">
+          <button class="ar-btn-sm" onclick="showAddSubjectForm()">+ Subject</button>
+          <div id="exam-countdown-box" style="text-align:right">
+            <div class="cd-val" id="exam-days" style="font-family:'Syne',sans-serif;font-size:24px;color:var(--danger)">—</div>
+            <div style="font-size:8px;color:var(--muted);letter-spacing:0.15em">DAYS TO EXAMS</div>
+          </div>
+        </div>
+      </div>
+      <div id="add-subject-form" style="display:none" class="card" style="margin-bottom:14px">
+        <div class="card-title">New Subject</div>
+        <div style="display:grid;grid-template-columns:1fr 100px 140px auto;gap:8px;align-items:center">
+          <input class="ar-input" id="new-subj-name" placeholder="Subject name (e.g. Maths 9709)">
+          <input class="ar-input" id="new-subj-code" placeholder="Code">
+          <input class="ar-input" id="new-subj-exam" type="date" placeholder="Exam date">
+          <button class="ar-btn" onclick="submitAddSubject()">Add</button>
         </div>
       </div>
       <div id="academic-roadmap"></div>
+      <div id="notes-modal" class="ar-modal-overlay" style="display:none" onclick="if(event.target===this)closeNotesModal()">
+        <div class="ar-modal">
+          <div class="ar-modal-title">Subtopic Notes</div>
+          <textarea id="notes-ta" class="ar-notes-ta" placeholder="Add notes, formulas, common mistakes…"></textarea>
+          <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px">
+            <button class="ar-btn-sm" onclick="closeNotesModal()">Cancel</button>
+            <button class="ar-btn" onclick="saveNotes()">Save</button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- ── ANNUAL TARGETS ── -->
@@ -994,31 +1149,6 @@ const DEFAULT_STATE = {
       {id:"sprint-taper",text:"Race-week taper protocol",done:false,pushed:0},
     ]},
   ],
-  academicRoadmap:[
-    {id:"acad-maths",subject:"Maths 9709",color:"var(--glow)",topics:[
-      {id:"m-functions",text:"Functions",done:true,pushed:0},
-      {id:"m-coords",text:"Coordinate Geometry",done:true,pushed:0},
-      {id:"m-trigonometry",text:"Trigonometry",done:true,pushed:0},
-      {id:"m-calc",text:"Calculus (P1)",done:false,pushed:0},
-      {id:"m-stats",text:"Statistics S1",done:false,pushed:0},
-    ]},
-    {id:"acad-fm",subject:"Further Maths 9231",color:"var(--purple)",topics:[
-      {id:"fm-polys",text:"Polynomials & Roots",done:true,pushed:0},
-      {id:"fm-matrices",text:"Matrices",done:false,pushed:0},
-      {id:"fm-vectors",text:"Vectors & 3D Geometry",done:false,pushed:0},
-      {id:"fm-crv",text:"Continuous Random Variables",done:false,pushed:0},
-    ]},
-    {id:"acad-biz",subject:"Business 9609",color:"var(--interactive)",topics:[
-      {id:"biz-people",text:"Human Resource Management",done:false,pushed:0},
-      {id:"biz-ops",text:"Operations Management",done:false,pushed:0},
-      {id:"biz-finance",text:"Finance & Accounting",done:false,pushed:0},
-    ]},
-    {id:"acad-econ",subject:"Economics 9708",color:"var(--warn)",topics:[
-      {id:"econ-micro",text:"Microeconomics — Markets",done:false,pushed:0},
-      {id:"econ-macro",text:"Macroeconomics",done:false,pushed:0},
-      {id:"econ-market",text:"Market Structures (Ch.7)",done:false,pushed:0},
-    ]},
-  ],
   annualTargets:[
     {id:"at-brand",name:"Public brand followers",current:0,target:1000,unit:"followers",category:"business"},
     {id:"at-revenue",name:"AI services revenue",current:0,target:2000,unit:"USD",category:"business"},
@@ -1060,13 +1190,12 @@ const API_BASE = "https://founder-os-backend-f6qn.onrender.com";
 
 async function syncFromBackend() {
   try {
-    const [kpisRaw, habits, todos, annual, sprint, acad, bible, books, socialRaw] = await Promise.all([
+    const [kpisRaw, habits, todos, annual, sprint, bible, books, socialRaw] = await Promise.all([
       fetch(`${API_BASE}/kpis`).then(r => r.json()),
       fetch(`${API_BASE}/habits`).then(r => r.json()),
       fetch(`${API_BASE}/todos`).then(r => r.json()),
       fetch(`${API_BASE}/annual-targets`).then(r => r.json()),
       fetch(`${API_BASE}/roadmap/sprint`).then(r => r.json()),
-      fetch(`${API_BASE}/roadmap/academic`).then(r => r.json()),
       fetch(`${API_BASE}/bible`).then(r => r.json()),
       fetch(`${API_BASE}/books`).then(r => r.json()),
       fetch(`${API_BASE}/social-score`).then(r => r.json()),
@@ -1104,13 +1233,6 @@ async function syncFromBackend() {
         if (task) { task.done = t.done; task.pushed = t.pushed_count || 0; }
       });
     });
-    acad.forEach(t => {
-      S.academicRoadmap.forEach(sub => {
-        const topic = sub.topics.find(x => x.id === t.task_id);
-        if (topic) { topic.done = t.done; topic.pushed = t.pushed_count || 0; }
-      });
-    });
-
     S.bible = bible;
     S.books = books;
     S.social = socialRaw.value || 50;
@@ -1352,9 +1474,6 @@ async function toggleTodo(id){
 function syncRoadmapTask(roadmapId,done){
   S.sprintRoadmap.forEach(phase=>{
     phase.tasks.forEach(t=>{if(t.id===roadmapId)t.done=done});
-  });
-  S.academicRoadmap.forEach(sub=>{
-    sub.topics.forEach(t=>{if(t.id===roadmapId)t.done=done});
   });
   saveState();
 }
@@ -1763,57 +1882,403 @@ function toggleSprintTask(phaseId,taskId){
 }
 
 /* ═══════════════════════════════════════════════════
-   ACADEMIC ROADMAP
+   ACADEMIC ROADMAP — DB-DRIVEN
 ═══════════════════════════════════════════════════ */
-function renderAcademicRoadmap(){
+
+// Module-level state for the academic page
+let _arSubjects = [];      // full subject+topic+subtopic tree from GET /subjects
+let _arProgress = {};      // { code: weighted_pct } from GET /subjects/progress
+let _arExpanded = new Set(); // which subject IDs are expanded
+let _notesSubtopicId = null; // subtopic being edited in notes modal
+let _sliderTimers = {};    // debounce timers keyed by subtopic id
+
+const SUBJ_COLORS = ["var(--glow)","var(--purple)","var(--interactive)","var(--warn)","var(--success)","var(--danger)"];
+
+async function renderAcademicRoadmap(){
+  // Exam countdown
   const examDate="2026-10-01";
   const d=daysUntil(examDate);
   document.getElementById("exam-days").textContent=d>0?d:"!";
 
-  document.getElementById("academic-roadmap").innerHTML=S.academicRoadmap.map(sub=>{
-    const done=sub.topics.filter(t=>t.done).length;
-    const pct=Math.round(done/sub.topics.length*100);
-    return`<div class="roadmap-phase">
-      <div class="rp-head">
-        <div class="rp-num active" style="background:${sub.color};color:#011C40">${pct}%</div>
-        <div>
-          <div class="rp-name">${sub.subject}</div>
-          <div style="font-size:8px;color:var(--muted);margin-top:1px">${done}/${sub.topics.length} topics complete</div>
-        </div>
-        <span class="badge b-muted" style="margin-left:auto">${pct}%</span>
-      </div>
-      <div style="margin-bottom:10px"><div class="pbar"><div class="pfill ${pfClass(pct)}" style="width:${pct}%;background:${sub.color}"></div></div></div>
-      ${sub.topics.map(t=>`
-        <div class="roadmap-task">
-          <div class="rt-cb ${t.done?"checked":""}" onclick="toggleAcadTask('${sub.id}','${t.id}')">${t.done?"✓":""}</div>
-          <span class="rt-text ${t.done?"done":""}">${t.text}</span>
-          ${t.pushed>0?`<span class="rt-pushed">+${t.pushed}d</span>`:""}
-        </div>`).join("")}
-    </div>`;
+  const container=document.getElementById("academic-roadmap");
+  container.innerHTML=`<div style="font-size:9px;color:var(--muted);padding:12px 0">Loading subjects…</div>`;
+
+  try{
+    const [subjects, progress] = await Promise.all([
+      fetch(`${API_BASE}/subjects`).then(r=>r.json()),
+      fetch(`${API_BASE}/subjects/progress`).then(r=>r.json()),
+    ]);
+    _arSubjects = subjects;
+    _arProgress = {};
+    progress.forEach(p=>{ _arProgress[p.code]=p.weighted_pct; });
+
+    // Expand first subject by default if nothing expanded yet
+    if(_arExpanded.size===0 && subjects.length>0){
+      _arExpanded.add(subjects[0].id);
+    }
+    _arRender();
+  }catch(e){
+    container.innerHTML=`<div style="font-size:9px;color:var(--danger);padding:12px 0">Failed to load subjects. Is the backend running?</div>`;
+    console.error("Academic roadmap load failed",e);
+  }
+}
+
+function _arRender(){
+  const container=document.getElementById("academic-roadmap");
+  if(!_arSubjects.length){
+    container.innerHTML=`<div style="font-size:9px;color:var(--muted);font-style:italic;padding:12px 0">No subjects yet. Add one above.</div>`;
+    return;
+  }
+  container.innerHTML=_arSubjects.map((subj,idx)=>{
+    const color=SUBJ_COLORS[idx % SUBJ_COLORS.length];
+    const wpct=_arProgress[subj.code];
+    const pct=wpct!=null?Math.round(wpct):null;
+    const expanded=_arExpanded.has(subj.id);
+    const examDays=subj.exam_date?daysUntil(subj.exam_date):null;
+    const circle=_arCircle(pct,color);
+    const pctLabel=pct!=null?`${pct}%`:"—";
+    const metaParts=[`Code: ${subj.code}`];
+    if(examDays!=null) metaParts.push(`${examDays>0?examDays+"d to exam":"Exam today!"}`);
+    if(wpct==null) metaParts.push("not tracked yet");
+    return`<div class="ar-subject-card" id="arsc-${subj.id}">
+  <div class="ar-subject-head" onclick="arToggle(${subj.id})">
+    ${circle}
+    <div class="ar-subj-info">
+      <div class="ar-subj-name">${subj.name}</div>
+      <div class="ar-subj-meta">${metaParts.join(" · ")}</div>
+    </div>
+    <span class="badge ${_arBadgeClass(pct)}" style="margin-right:4px">${pctLabel}</span>
+    <button class="ar-delete-btn" onclick="event.stopPropagation();arDeleteSubject(${subj.id},'${_esc(subj.name)}')" title="Delete subject">✕</button>
+    <span class="ar-chevron${expanded?" open":""}">▶</span>
+  </div>
+  <div class="ar-subject-body${expanded?" open":""}" id="arb-${subj.id}">
+    ${_arTopicsHtml(subj)}
+    <div class="ar-add-topic-row">
+      <input class="ar-input" id="art-input-${subj.id}" placeholder="New topic name" style="font-size:9px;padding:4px 7px">
+      <select class="ar-weight-sel" id="art-wt-${subj.id}" style="padding:4px 5px">
+        ${[1,2,3,4,5,6,7,8,9,10].map(n=>`<option value="${n}"${n===5?" selected":""}>${n}</option>`).join("")}
+      </select>
+      <button class="ar-btn-sm" onclick="arAddTopic(${subj.id})">+ Topic</button>
+    </div>
+  </div>
+</div>`;
   }).join("");
 }
 
-function toggleAcadTask(subId,taskId){
-  const sub=S.academicRoadmap.find(s=>s.id===subId);
-  if(!sub)return;
-  const task=sub.topics.find(t=>t.id===taskId);
-  if(!task)return;
-  task.done=!task.done;
-  S.todos.forEach(t=>{if(t.roadmapId===taskId)t.done=task.done});
-  const kpiMap={
-    "acad-maths":"maths_syllabus","acad-fm":"further_maths",
-    "acad-biz":"business","acad-econ":"economics"
+function _arCircle(pct,color){
+  const r=18,cx=22,cy=22,circ=2*Math.PI*r;
+  const filled=pct!=null?Math.round((pct/100)*circ):0;
+  const trackColor="#54ACBF18";
+  return`<div class="ar-circle">
+    <svg width="44" height="44" viewBox="0 0 44 44">
+      <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${trackColor}" stroke-width="3"/>
+      <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${color}" stroke-width="3"
+        stroke-dasharray="${filled} ${circ}" stroke-linecap="round"/>
+    </svg>
+    <div class="ar-circle-text">
+      <span class="ar-circle-pct" style="color:${color}">${pct!=null?pct+"%":"?"}</span>
+    </div>
+  </div>`;
+}
+
+function _arBadgeClass(pct){
+  if(pct==null) return"b-muted";
+  if(pct>=75) return"b-suc";
+  if(pct>=40) return"b-glow";
+  return"b-warn";
+}
+
+function _arTopicsHtml(subj){
+  if(!subj.topics||!subj.topics.length) return`<div class="ar-empty" style="margin-top:10px">No topics yet.</div>`;
+  return subj.topics.map(topic=>{
+    const subs=topic.subtopics||[];
+    const subsHtml=subs.length
+      ? subs.map(st=>_arSubtopicRow(st)).join("")
+      : `<div class="ar-empty">No subtopics yet — add one below.</div>`;
+    return`<div class="ar-topic-section">
+  <div class="ar-topic-head">
+    <span class="ar-topic-name">${_esc(topic.name)}</span>
+    <span style="font-size:8px;color:var(--muted);margin-right:4px">wt:</span>
+    <select class="ar-weight-sel" onchange="arUpdateTopicWeight(${topic.id},this.value)">
+      ${[1,2,3,4,5,6,7,8,9,10].map(n=>`<option value="${n}"${n===topic.syllabus_weight?" selected":""}>${n}</option>`).join("")}
+    </select>
+    <button class="ar-add-sub-btn" onclick="arAddSubtopic(${topic.id},${subj.id})" style="margin-left:8px">+ Subtopic</button>
+    <button class="ar-delete-btn" onclick="arDeleteTopic(${topic.id},'${_esc(topic.name)}',${subj.id})" title="Delete topic">✕</button>
+  </div>
+  ${subsHtml}
+</div>`;
+  }).join("");
+}
+
+function _arSubtopicRow(st){
+  const mastery=st.mastery_level||0;
+  const pct=mastery;
+  const mastColor=mastery>=75?"var(--success)":mastery>=40?"var(--glow)":"var(--muted)";
+  const rev=st.last_reviewed_date?st.last_reviewed_date.slice(0,10):"—";
+  return`<div class="ar-subtopic-row" id="arstr-${st.id}">
+  <span class="ar-sub-name" id="arstn-${st.id}" onclick="arStartRename(${st.id})" title="Click to rename">${_esc(st.name)}</span>
+  <input class="ar-slider" type="range" min="0" max="100" value="${mastery}"
+    style="--pct:${pct}%"
+    oninput="arSliderInput(this,${st.id})"
+    onchange="arSliderCommit(this,${st.id})">
+  <span class="ar-pct-label" id="arsp-${st.id}" style="color:${mastColor}">${mastery}%</span>
+  <span class="ar-date-label" title="Last reviewed">${rev}</span>
+  <button class="ar-icon-btn" onclick="arOpenNotes(${st.id})" title="Notes">${st.notes?"📝":"📄"}</button>
+  <button class="ar-delete-btn" onclick="arDeleteSubtopic(${st.id},'${_esc(st.name)}')" title="Delete">✕</button>
+</div>`;
+}
+
+function _esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
+
+function arToggle(subjId){
+  if(_arExpanded.has(subjId)) _arExpanded.delete(subjId);
+  else _arExpanded.add(subjId);
+  const body=document.getElementById(`arb-${subjId}`);
+  const head=document.querySelector(`#arsc-${subjId} .ar-chevron`);
+  if(body) body.classList.toggle("open",_arExpanded.has(subjId));
+  if(head) head.classList.toggle("open",_arExpanded.has(subjId));
+}
+
+/* ── Slider live update + debounced PATCH ── */
+function arSliderInput(el,stId){
+  const v=parseInt(el.value);
+  el.style.setProperty("--pct",v+"%");
+  const lbl=document.getElementById(`arsp-${stId}`);
+  if(lbl){ lbl.textContent=v+"%"; lbl.style.color=v>=75?"var(--success)":v>=40?"var(--glow)":"var(--muted)"; }
+  clearTimeout(_sliderTimers[stId]);
+  _sliderTimers[stId]=setTimeout(()=>arSliderCommit(el,stId),500);
+}
+
+async function arSliderCommit(el,stId){
+  clearTimeout(_sliderTimers[stId]);
+  const v=parseInt(el.value);
+  try{
+    await fetch(`${API_BASE}/subtopics/${stId}`,{method:"PATCH",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({mastery_level:v,last_reviewed_date:todayStr()})});
+    // Refresh progress ring + KPI dashboard without full page reload
+    _arRefreshProgress();
+  }catch(e){ console.error("Mastery update failed",e); }
+}
+
+async function _arRefreshProgress(){
+  try{
+    const progress=await fetch(`${API_BASE}/subjects/progress`).then(r=>r.json());
+    _arProgress={};
+    progress.forEach(p=>{ _arProgress[p.code]=p.weighted_pct; });
+    // Update each subject card's circle + badge in-place
+    _arSubjects.forEach((subj,idx)=>{
+      const color=SUBJ_COLORS[idx%SUBJ_COLORS.length];
+      const pct=_arProgress[subj.code]!=null?Math.round(_arProgress[subj.code]):null;
+      const card=document.getElementById(`arsc-${subj.id}`);
+      if(!card)return;
+      const circleEl=card.querySelector(".ar-circle");
+      if(circleEl) circleEl.outerHTML=_arCircle(pct,color);
+      const badge=card.querySelector(".ar-subject-head .badge");
+      if(badge){ badge.className=`badge ${_arBadgeClass(pct)}`; badge.textContent=pct!=null?pct+"%":"—"; }
+    });
+    // Also refresh the dashboard KPI panel and radar if visible
+    if(document.getElementById("p-dashboard").classList.contains("active")){
+      renderKPIs();
+      fetchAndRenderRadar();
+    }
+  }catch(e){ console.error("Progress refresh failed",e); }
+}
+
+/* ── Inline rename ── */
+function arStartRename(stId){
+  const span=document.getElementById(`arstn-${stId}`);
+  if(!span)return;
+  const cur=span.textContent;
+  const inp=document.createElement("input");
+  inp.className="ar-sub-name-input";
+  inp.value=cur;
+  span.replaceWith(inp);
+  inp.focus(); inp.select();
+  const commit=async()=>{
+    const newName=inp.value.trim()||cur;
+    try{
+      await fetch(`${API_BASE}/subtopics/${stId}`,{method:"PATCH",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({name:newName})});
+    }catch(e){ console.error("Rename failed",e); }
+    const newSpan=document.createElement("span");
+    newSpan.className="ar-sub-name"; newSpan.id=`arstn-${stId}`;
+    newSpan.setAttribute("onclick",`arStartRename(${stId})`);
+    newSpan.title="Click to rename";
+    newSpan.textContent=newName;
+    inp.replaceWith(newSpan);
   };
-  const kpiKey=kpiMap[subId];
-  if(kpiKey){
-    const sub2=S.academicRoadmap.find(s=>s.id===subId);
-    const donePct=Math.round(sub2.topics.filter(t=>t.done).length/sub2.topics.length*100);
-    S.kpis[kpiKey].value=donePct;
+  inp.addEventListener("blur",commit);
+  inp.addEventListener("keydown",e=>{if(e.key==="Enter")inp.blur();if(e.key==="Escape"){inp.value=cur;inp.blur();}});
+}
+
+/* ── Notes modal ── */
+function arOpenNotes(stId){
+  _notesSubtopicId=stId;
+  // Find the subtopic in the tree
+  let notes="";
+  for(const s of _arSubjects){
+    for(const t of s.topics||[]){
+      const st=(t.subtopics||[]).find(x=>x.id===stId);
+      if(st){ notes=st.notes||""; break; }
+    }
   }
-  addLog(`Academic task ${task.done?"done":"undone"}: ${task.text.slice(0,35)}`);
-  saveState();
-  renderAcademicRoadmap();
-  if(document.getElementById("p-dashboard").classList.contains("active"))renderKPIs();
+  document.getElementById("notes-ta").value=notes;
+  document.getElementById("notes-modal").style.display="flex";
+}
+function closeNotesModal(){
+  document.getElementById("notes-modal").style.display="none";
+  _notesSubtopicId=null;
+}
+async function saveNotes(){
+  if(!_notesSubtopicId)return;
+  const notes=document.getElementById("notes-ta").value;
+  try{
+    await fetch(`${API_BASE}/subtopics/${_notesSubtopicId}`,{method:"PATCH",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({notes})});
+    // Update icon in-place
+    const btn=document.querySelector(`#arstr-${_notesSubtopicId} .ar-icon-btn`);
+    if(btn) btn.textContent=notes?"📝":"📄";
+    // Update local cache
+    for(const s of _arSubjects){
+      for(const t of s.topics||[]){
+        const st=(t.subtopics||[]).find(x=>x.id===_notesSubtopicId);
+        if(st){ st.notes=notes; break; }
+      }
+    }
+  }catch(e){ console.error("Notes save failed",e); }
+  closeNotesModal();
+}
+
+/* ── Add subtopic ── */
+async function arAddSubtopic(topicId,subjId){
+  const name=window.prompt("New subtopic name:");
+  if(!name||!name.trim())return;
+  try{
+    const res=await fetch(`${API_BASE}/topics/${topicId}/subtopics`,{method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({name:name.trim(),mastery_level:0})});
+    if(!res.ok)throw new Error(await res.text());
+    // Reload just this subject's data
+    await _arReloadSubject(subjId);
+  }catch(e){ alert("Failed to add subtopic: "+e.message); }
+}
+
+/* ── Add topic ── */
+async function arAddTopic(subjId){
+  const nameEl=document.getElementById(`art-input-${subjId}`);
+  const wtEl=document.getElementById(`art-wt-${subjId}`);
+  const name=(nameEl&&nameEl.value.trim())||"";
+  if(!name)return;
+  const weight=wtEl?parseInt(wtEl.value):5;
+  try{
+    const res=await fetch(`${API_BASE}/subjects/${subjId}/topics`,{method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({name,syllabus_weight:weight})});
+    if(!res.ok)throw new Error(await res.text());
+    if(nameEl) nameEl.value="";
+    await _arReloadSubject(subjId);
+  }catch(e){ alert("Failed to add topic: "+e.message); }
+}
+
+/* ── Update topic weight ── */
+async function arUpdateTopicWeight(topicId,weight){
+  try{
+    await fetch(`${API_BASE}/topics/${topicId}`,{method:"PATCH",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({syllabus_weight:parseInt(weight)})});
+    _arRefreshProgress();
+  }catch(e){ console.error("Weight update failed",e); }
+}
+
+/* ── Delete subtopic ── */
+async function arDeleteSubtopic(stId,name){
+  if(!confirm(`Delete subtopic "${name}"?`))return;
+  try{
+    const res=await fetch(`${API_BASE}/subtopics/${stId}`,{method:"DELETE"});
+    if(!res.ok)throw new Error(await res.text());
+    const row=document.getElementById(`arstr-${stId}`);
+    if(row)row.remove();
+    // Remove from local cache
+    for(const s of _arSubjects){
+      for(const t of s.topics||[]){
+        t.subtopics=(t.subtopics||[]).filter(x=>x.id!==stId);
+      }
+    }
+    _arRefreshProgress();
+  }catch(e){ alert("Delete failed: "+e.message); }
+}
+
+/* ── Delete topic ── */
+async function arDeleteTopic(topicId,name,subjId){
+  if(!confirm(`Delete topic "${name}" and all its subtopics?`))return;
+  try{
+    const res=await fetch(`${API_BASE}/topics/${topicId}`,{method:"DELETE"});
+    if(!res.ok)throw new Error(await res.text());
+    await _arReloadSubject(subjId);
+  }catch(e){ alert("Delete failed: "+e.message); }
+}
+
+/* ── Delete subject ── */
+async function arDeleteSubject(subjId,name){
+  if(!confirm(`Delete subject "${name}" and ALL its topics and subtopics?`))return;
+  try{
+    const res=await fetch(`${API_BASE}/subjects/${subjId}`,{method:"DELETE"});
+    if(!res.ok)throw new Error(await res.text());
+    _arSubjects=_arSubjects.filter(s=>s.id!==subjId);
+    _arExpanded.delete(subjId);
+    _arRender();
+  }catch(e){ alert("Delete failed: "+e.message); }
+}
+
+/* ── Add subject form ── */
+function showAddSubjectForm(){
+  const f=document.getElementById("add-subject-form");
+  f.style.display=f.style.display==="none"?"block":"none";
+}
+async function submitAddSubject(){
+  const name=document.getElementById("new-subj-name").value.trim();
+  const code=document.getElementById("new-subj-code").value.trim();
+  const exam=document.getElementById("new-subj-exam").value||null;
+  if(!name||!code){ alert("Name and code are required."); return; }
+  try{
+    const res=await fetch(`${API_BASE}/subjects`,{method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({name,code,exam_date:exam})});
+    if(!res.ok)throw new Error(await res.text());
+    const newSubj=await res.json();
+    _arSubjects.push(newSubj);
+    _arExpanded.add(newSubj.id);
+    document.getElementById("new-subj-name").value="";
+    document.getElementById("new-subj-code").value="";
+    document.getElementById("new-subj-exam").value="";
+    document.getElementById("add-subject-form").style.display="none";
+    _arRender();
+  }catch(e){ alert("Failed to add subject: "+e.message); }
+}
+
+/* ── Reload a single subject from the API ── */
+async function _arReloadSubject(subjId){
+  try{
+    const subj=await fetch(`${API_BASE}/subjects/${subjId}`).then(r=>r.json());
+    const idx=_arSubjects.findIndex(s=>s.id===subjId);
+    if(idx>=0) _arSubjects[idx]=subj;
+    // Re-render just the body of this card
+    const body=document.getElementById(`arb-${subjId}`);
+    if(body){
+      body.innerHTML=_arTopicsHtml(subj)+`
+      <div class="ar-add-topic-row">
+        <input class="ar-input" id="art-input-${subjId}" placeholder="New topic name" style="font-size:9px;padding:4px 7px">
+        <select class="ar-weight-sel" id="art-wt-${subjId}">
+          ${[1,2,3,4,5,6,7,8,9,10].map(n=>`<option value="${n}"${n===5?" selected":""}>${n}</option>`).join("")}
+        </select>
+        <button class="ar-btn-sm" onclick="arAddTopic(${subjId})">+ Topic</button>
+      </div>`;
+    }
+    _arRefreshProgress();
+  }catch(e){ console.error("Subject reload failed",e); }
 }
 
 /* ═══════════════════════════════════════════════════
