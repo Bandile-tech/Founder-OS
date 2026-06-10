@@ -1,4 +1,5 @@
 from sqlalchemy import Column, Integer, String, Date, Float, Text, DateTime, ForeignKey, Boolean
+from sqlalchemy.orm import relationship
 from datetime import datetime
 from database import Base
 
@@ -207,3 +208,58 @@ class Revenue(Base):
     date = Column(Date, nullable=False)
     notes = Column(Text, default="")
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+# ── ACADEMIC ROADMAP ────────────────────────────────────────
+
+class Subject(Base):
+    """One row per A-Level subject (e.g. Maths 9709)."""
+    __tablename__ = "subjects"
+
+    id         = Column(Integer, primary_key=True, index=True)
+    name       = Column(String, nullable=False)        # "Maths 9709"
+    code       = Column(String, nullable=False, unique=True)  # "9709"
+    exam_date  = Column(Date, nullable=True)
+    sort_order = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    topics = relationship(
+        "Topic", back_populates="subject",
+        cascade="all, delete-orphan",
+        order_by="Topic.sort_order",
+    )
+
+
+class Topic(Base):
+    """A chapter / paper within a subject (e.g. Pure Mathematics 1)."""
+    __tablename__ = "topics"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    subject_id      = Column(Integer, ForeignKey("subjects.id", ondelete="CASCADE"), nullable=False)
+    name            = Column(String, nullable=False)
+    sort_order      = Column(Integer, default=0)
+    syllabus_weight = Column(Integer, default=5)  # 1-10, used for weighted_pct
+    created_at      = Column(DateTime, default=datetime.utcnow)
+
+    subject   = relationship("Subject", back_populates="topics")
+    subtopics = relationship(
+        "Subtopic", back_populates="topic",
+        cascade="all, delete-orphan",
+        order_by="Subtopic.sort_order",
+    )
+
+
+class Subtopic(Base):
+    """A specific revision item within a topic."""
+    __tablename__ = "subtopics"
+
+    id                 = Column(Integer, primary_key=True, index=True)
+    topic_id           = Column(Integer, ForeignKey("topics.id", ondelete="CASCADE"), nullable=False)
+    name               = Column(String, nullable=False)
+    mastery_level      = Column(Integer, default=0)   # 0-100
+    last_reviewed_date = Column(Date, nullable=True)
+    notes              = Column(Text, nullable=True)
+    sort_order         = Column(Integer, default=0)
+    created_at         = Column(DateTime, default=datetime.utcnow)
+
+    topic = relationship("Topic", back_populates="subtopics")

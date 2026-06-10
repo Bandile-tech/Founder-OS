@@ -15,6 +15,7 @@ from database import engine, get_db, SessionLocal
 from models import (
     AIMemory, Habit, AnnualTarget, KPISnapshot, RoadmapTask,
     BibleEntry, Book, SocialScore, Client, Revenue,
+    Subject, Topic, Subtopic,
 )
 from memory_service import get_recent_memories
 from openai_client import (
@@ -105,6 +106,7 @@ def _seed_books_if_empty(db: Session):
 
 @app.on_event("startup")
 async def startup():
+    from migrations.m002_academic_roadmap import seed_subjects
     db = SessionLocal()
     try:
         load_kpi_state(db)
@@ -113,6 +115,7 @@ async def startup():
         _seed_roadmap_tasks_if_empty(db)
         _seed_bible_if_empty(db)
         _seed_books_if_empty(db)
+        seed_subjects(db)
     finally:
         db.close()
 
@@ -441,6 +444,10 @@ def get_radar(db: Session = Depends(get_db)):
     clients_all = db.query(Client).all()
     revenue_total = db.query(func.sum(Revenue.amount)).scalar() or 0
 
+    # Academic mastery from Subject/Topic/Subtopic (single source of truth)
+    academic_progress = _compute_subject_progress(db)
+    acad_mastery = {row["code"]: row["weighted_pct"] for row in academic_progress}
+
     context = {
         "kpis": _kpi_state,
         "habits": habits_today,
@@ -450,11 +457,240 @@ def get_radar(db: Session = Depends(get_db)):
         "social_score": social_score,
         "clients": [{"name": c.name, "status": c.status, "value": c.value} for c in clients_all],
         "revenue_total": revenue_total,
+        "acad_mastery": acad_mastery,   # {"9709": 42.5, "9231": null, ...}
     }
 
     scores = get_radar_scores(context)
     composite = round(sum(scores.values()) / len(scores))
     return {"scores": scores, "composite": composite, "computed_at": str(datetime.utcnow())}
+
+
+# ── ACADEMIC ROADMAP ─────────────────────────────────────────
+
+def _compute_subject_progress(db: Session) -> list[dict]:
+    """
+    Aggregate mastery per subject.  Called by both /subjects/progress
+    and /radar so the intellect score and the dashboard KPIs share
+    exactly one computation path.
+
+    Returns a list of dicts:
+      {subject_id, subject_name, code, mastery_pct, weighted_pct,
+       subtopic_count}
+
+    mastery_pct  = simple average mastery across all subtopics
+    weighted_pct = Σ(topic.weight * avg_mastery_in_topic) / Σ(topic.weight)
+                   Topics with zero subtopics are excluded from weighting.
+    Both are None when the subject has zero subtopics across all topics.
+    """
+    subjects = db.query(Subject).order_by(Subject.sort_order).all()
+    results = []
+    for subj in subjects:
+        all_mastery: list[int] = []
+        weighted_sum = 0.0
+        weight_total = 0
+        for topic in subj.topics:
+            if not topic.subtopics:
+                continue
+            topic_avg = sum(s.mastery_level for s in topic.subtopics) / len(topic.subtopics)
+            all_mastery.extend(s.mastery_level for s in topic.subtopics)
+            weighted_sum += topic.syllabus_weight * topic_avg
+            weight_total += topic.syllabus_weight
+
+        subtopic_count = len(all_mastery)
+        mastery_pct  = round(sum(all_mastery) / subtopic_count, 1) if subtopic_count else None
+        weighted_pct = round(weighted_sum / weight_total, 1)       if weight_total  else None
+
+        results.append({
+            "subject_id":     subj.id,
+            "subject_name":   subj.name,
+            "code":           subj.code,
+            "exam_date":      str(subj.exam_date) if subj.exam_date else None,
+            "mastery_pct":    mastery_pct,
+            "weighted_pct":   weighted_pct,
+            "subtopic_count": subtopic_count,
+        })
+    return results
+
+
+def _serialize_subject(s: Subject) -> dict:
+    return {
+        "id":         s.id,
+        "name":       s.name,
+        "code":       s.code,
+        "exam_date":  str(s.exam_date) if s.exam_date else None,
+        "sort_order": s.sort_order,
+        "topics": [_serialize_topic(t) for t in s.topics],
+    }
+
+
+def _serialize_topic(t: Topic) -> dict:
+    return {
+        "id":               t.id,
+        "subject_id":       t.subject_id,
+        "name":             t.name,
+        "syllabus_weight":  t.syllabus_weight,
+        "sort_order":       t.sort_order,
+        "subtopics": [_serialize_subtopic(st) for st in t.subtopics],
+    }
+
+
+def _serialize_subtopic(st: Subtopic) -> dict:
+    return {
+        "id":                 st.id,
+        "topic_id":           st.topic_id,
+        "name":               st.name,
+        "mastery_level":      st.mastery_level,
+        "last_reviewed_date": str(st.last_reviewed_date) if st.last_reviewed_date else None,
+        "notes":              st.notes,
+        "sort_order":         st.sort_order,
+    }
+
+
+# Subject CRUD
+@app.get("/subjects")
+def list_subjects(db: Session = Depends(get_db)):
+    subjects = db.query(Subject).order_by(Subject.sort_order).all()
+    return [_serialize_subject(s) for s in subjects]
+
+
+@app.post("/subjects", status_code=201)
+def create_subject(payload: schemas.SubjectCreate, db: Session = Depends(get_db)):
+    existing = db.query(Subject).filter(Subject.code == payload.code).first()
+    if existing:
+        raise HTTPException(400, f"Subject with code '{payload.code}' already exists")
+    subj = Subject(**payload.model_dump())
+    db.add(subj)
+    db.commit()
+    db.refresh(subj)
+    return _serialize_subject(subj)
+
+
+@app.patch("/subjects/{subject_id}")
+def update_subject(subject_id: int, payload: schemas.SubjectUpdate, db: Session = Depends(get_db)):
+    subj = db.query(Subject).filter(Subject.id == subject_id).first()
+    if not subj:
+        raise HTTPException(404, "Subject not found")
+    for field, val in payload.model_dump(exclude_none=True).items():
+        setattr(subj, field, val)
+    db.commit()
+    db.refresh(subj)
+    return _serialize_subject(subj)
+
+
+@app.delete("/subjects/{subject_id}", status_code=204)
+def delete_subject(subject_id: int, db: Session = Depends(get_db)):
+    subj = db.query(Subject).filter(Subject.id == subject_id).first()
+    if not subj:
+        raise HTTPException(404, "Subject not found")
+    db.delete(subj)
+    db.commit()
+
+
+# Topic CRUD
+@app.post("/subjects/{subject_id}/topics", status_code=201)
+def create_topic(subject_id: int, payload: schemas.TopicCreate, db: Session = Depends(get_db)):
+    subj = db.query(Subject).filter(Subject.id == subject_id).first()
+    if not subj:
+        raise HTTPException(404, "Subject not found")
+    topic = Topic(subject_id=subject_id, **payload.model_dump())
+    db.add(topic)
+    db.commit()
+    db.refresh(topic)
+    return _serialize_topic(topic)
+
+
+@app.patch("/topics/{topic_id}")
+def update_topic(topic_id: int, payload: schemas.TopicUpdate, db: Session = Depends(get_db)):
+    topic = db.query(Topic).filter(Topic.id == topic_id).first()
+    if not topic:
+        raise HTTPException(404, "Topic not found")
+    for field, val in payload.model_dump(exclude_none=True).items():
+        setattr(topic, field, val)
+    db.commit()
+    db.refresh(topic)
+    return _serialize_topic(topic)
+
+
+@app.delete("/topics/{topic_id}", status_code=204)
+def delete_topic(topic_id: int, db: Session = Depends(get_db)):
+    topic = db.query(Topic).filter(Topic.id == topic_id).first()
+    if not topic:
+        raise HTTPException(404, "Topic not found")
+    db.delete(topic)
+    db.commit()
+
+
+# Subtopic CRUD
+@app.post("/topics/{topic_id}/subtopics", status_code=201)
+def create_subtopic(topic_id: int, payload: schemas.SubtopicCreate, db: Session = Depends(get_db)):
+    topic = db.query(Topic).filter(Topic.id == topic_id).first()
+    if not topic:
+        raise HTTPException(404, "Topic not found")
+    st = Subtopic(topic_id=topic_id, **payload.model_dump())
+    db.add(st)
+    db.commit()
+    db.refresh(st)
+    return _serialize_subtopic(st)
+
+
+@app.patch("/subtopics/{subtopic_id}")
+def update_subtopic(subtopic_id: int, payload: schemas.SubtopicUpdate, db: Session = Depends(get_db)):
+    st = db.query(Subtopic).filter(Subtopic.id == subtopic_id).first()
+    if not st:
+        raise HTTPException(404, "Subtopic not found")
+    updates = payload.model_dump(exclude_none=True)
+    # Auto-set last_reviewed_date when mastery changes (unless caller provided a date)
+    if "mastery_level" in updates and "last_reviewed_date" not in updates:
+        updates["last_reviewed_date"] = date.today()
+    for field, val in updates.items():
+        setattr(st, field, val)
+    db.commit()
+    db.refresh(st)
+    return _serialize_subtopic(st)
+
+
+@app.delete("/subtopics/{subtopic_id}", status_code=204)
+def delete_subtopic(subtopic_id: int, db: Session = Depends(get_db)):
+    st = db.query(Subtopic).filter(Subtopic.id == subtopic_id).first()
+    if not st:
+        raise HTTPException(404, "Subtopic not found")
+    db.delete(st)
+    db.commit()
+
+
+# Progress + Weakest
+@app.get("/subjects/progress")
+def subjects_progress(db: Session = Depends(get_db)):
+    return _compute_subject_progress(db)
+
+
+@app.get("/subjects/weakest")
+def weakest_subtopics(limit: int = Query(5, ge=1, le=50), db: Session = Depends(get_db)):
+    """
+    Returns the N subtopics with the lowest mastery_level, ordered by
+    parent topic's syllabus_weight DESC then mastery_level ASC.
+    Topics with higher weight surface weak subtopics first.
+    """
+    rows = (
+        db.query(Subtopic, Topic, Subject)
+        .join(Topic, Subtopic.topic_id == Topic.id)
+        .join(Subject, Topic.subject_id == Subject.id)
+        .order_by(Topic.syllabus_weight.desc(), Subtopic.mastery_level.asc())
+        .limit(limit)
+        .all()
+    )
+    return [
+        {
+            "subtopic_id":   st.id,
+            "name":          st.name,
+            "mastery_level": st.mastery_level,
+            "topic_name":    t.name,
+            "topic_weight":  t.syllabus_weight,
+            "subject_name":  s.name,
+            "subject_code":  s.code,
+        }
+        for st, t, s in rows
+    ]
 
 
 # ── SHARED PARSE-APPLICATION HELPER ─────────────────────────

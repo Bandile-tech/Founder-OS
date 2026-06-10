@@ -13,53 +13,13 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
-# ── make sure we can import from backend/ ───────────────────────
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import models
-from database import Base, get_db
 from main import app
-
-# ── in-memory SQLite — StaticPool shares the same DB across all connections ──
-engine = create_engine(
-    "sqlite:///:memory:",
-    connect_args={"check_same_thread": False},
-    poolclass=StaticPool,
-)
-TestSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-# Create tables once at module load
-Base.metadata.create_all(bind=engine)
-
-
-@pytest.fixture(autouse=True)
-def fresh_db():
-    """Truncate every table before each test; leave the schema intact."""
-    db = TestSessionLocal()
-    for table in reversed(Base.metadata.sorted_tables):
-        db.execute(table.delete())
-    db.commit()
-    db.close()
-    yield
-
-
-def get_test_db():
-    db = TestSessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
-# Override the FastAPI dependency so every request uses the in-memory DB
-app.dependency_overrides[get_db] = get_test_db
-
-client = TestClient(app, raise_server_exceptions=True)
+# Engine, session, client, override, and fresh_db fixture come from conftest.py
+from tests.conftest import TestSessionLocal, client
 
 
 # ════════════════════════════════════════════════════════════════

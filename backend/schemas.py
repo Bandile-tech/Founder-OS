@@ -149,3 +149,64 @@ class RevenueCreate(BaseModel):
     client_id: Optional[int] = None
     date: date
     notes: str = ""
+
+
+# ── ACADEMIC ROADMAP ─────────────────────────────────────────
+
+class SubjectCreate(BaseModel):
+    name: str
+    code: str
+    exam_date: Optional[date] = None
+    sort_order: int = 0
+
+
+class SubjectUpdate(BaseModel):
+    name: Optional[str] = None
+    exam_date: Optional[date] = None
+    sort_order: Optional[int] = None
+
+
+class TopicCreate(BaseModel):
+    name: str
+    syllabus_weight: int = 5
+    sort_order: int = 0
+
+
+class TopicUpdate(BaseModel):
+    name: Optional[str] = None
+    syllabus_weight: Optional[int] = None
+    sort_order: Optional[int] = None
+
+
+class SubtopicCreate(BaseModel):
+    name: str
+    mastery_level: int = 0
+    notes: Optional[str] = None
+    sort_order: int = 0
+
+
+class SubtopicUpdate(BaseModel):
+    name: Optional[str] = None
+    mastery_level: Optional[int] = None
+    last_reviewed_date: Optional[date] = None
+    notes: Optional[str] = None
+    sort_order: Optional[int] = None
+
+
+class SubjectProgressOut(BaseModel):
+    subject_id: int
+    subject_name: str
+    code: str
+    mastery_pct: Optional[float]    # None when zero subtopics
+    weighted_pct: Optional[float]   # None when zero subtopics
+    subtopic_count: int
+
+
+class WeakestSubtopicOut(BaseModel):
+    subtopic_id: int
+    name: str
+    mastery_level: int
+    topic_name: str
+    topic_weight: int
+    subject_name: str
+    subject_code: str
