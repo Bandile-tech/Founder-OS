@@ -126,7 +126,7 @@ def get_parse_response(text: str, context: dict) -> dict:
 
     system_prompt = f"""You are the Founder OS parsing engine for Bandile Masocha.
 
-Context: Year 12, Trident College, Zambia. A-levels: Maths 9709, Further Maths 9231, Business 9609, Economics 9708. Sprinter (100m/200m/400m). ISAZ Regionals ~17 May 2026. CIE exams Oct-Nov 2026. Building Aether AI services.
+Context: Year 12, Trident College, Zambia. A-levels: Maths 9709, Further Maths 9231, Business 9609, Economics 9708. CIE exams Oct-Nov 2026. Building Aether AI services. Compound lifting: Bench Press, Pull-ups, Squat, Incline DB Press, Barbell Row.
 
 Known roadmap task IDs: {', '.join(roadmap_ids)}
 
@@ -135,16 +135,26 @@ Parse the brain dump and return ONLY valid JSON, no markdown, no explanation.
 Schema:
 {{
   "summary": "one-line summary",
-  "kpi_updates": [{{"key": "sprint_100m|sprint_200m|sprint_400m|maths_syllabus|further_maths|business|economics", "value": number}}],
-  "todos_add": [{{"text": "string", "priority": 1, "category": "athletics|academics|business|personal", "due": "YYYY-MM-DD|null", "roadmap_id": "id-or-null"}}],
+  "kpi_updates": [{{"key": "maths_syllabus|further_maths|business|economics", "value": number}}],
+  "todos_add": [{{"text": "string", "priority": 1, "category": "health|academics|business|personal", "due": "YYYY-MM-DD|null", "roadmap_id": "id-or-null"}}],
   "todos_complete": ["text fragment"],
   "roadmap_complete": ["roadmap-task-id"],
   "habits_done": ["scripture_prayer|ironing|python_session|sprint_training|academics"],
   "annual_updates": [{{"name_fragment": "string", "current": number}}],
   "revenue_updates": [{{"amount": number, "source": "string", "client": "name-or-null"}}],
   "log_entry": "short log message",
-  "advisory": "1-2 sentence strategic insight or null"
+  "advisory": "1-2 sentence strategic insight or null",
+  "health_updates": {{
+    "sleep_hours": number_or_null,
+    "mobility_done": true_or_null,
+    "session_done": true_or_null,
+    "main_lift": "Bench Press|Pull-ups|Squat|Incline DB Press|Barbell Row|null",
+    "top_set_weight": number_or_null,
+    "top_set_reps": integer_or_null
+  }}
 }}
+
+Health extraction rules: extract sleep_hours from phrases like "slept 7 hours". Set mobility_done=true if mobility/stretching mentioned. Set session_done=true if a training session is mentioned. Extract main_lift and top_set_weight/reps from lift descriptions like "80kg x 5 on bench". Omit health_updates key entirely if no health content found.
 
 Today is {today}. Return valid JSON only."""
 
@@ -212,7 +222,13 @@ def get_radar_scores(context: dict) -> dict:
     faith_score = min(bible_streak * 10, 100)
     core = round((habit_score * 0.6 + faith_score * 0.4))
 
-    # PHYSICAL (sprint KPI progress)
+    # HEALTH (mobility, session consistency, sleep — computed in main.py)
+    health_ctx = context.get("health", {})
+    if health_ctx.get("insufficient_data") or health_ctx.get("score") is None:
+        health = 50  # neutral baseline when no data yet
+    else:
+        health = health_ctx["score"]
+
     def kpi_pct(k):
         if not k:
             return 0
@@ -221,13 +237,6 @@ def get_radar_scores(context: dict) -> dict:
             d = k["value"] - k["target"]
             return max(0, min(100, ((gap - d) / gap) * 100))
         return min(100, (k["value"] / k["target"]) * 100)
-
-    sprint_scores = [
-        kpi_pct(kpis.get("sprint_100m")),
-        kpi_pct(kpis.get("sprint_200m")),
-        kpi_pct(kpis.get("sprint_400m")),
-    ]
-    physical = round(sum(sprint_scores) / max(len(sprint_scores), 1))
 
     # INTELLECT — prefer live subject mastery from Subject/Topic/Subtopic;
     # fall back to _kpi_state percentages when subjects have no subtopics yet.
@@ -278,10 +287,10 @@ def get_radar_scores(context: dict) -> dict:
     social = context.get("social_score", 50)
 
     return {
-        "core": max(0, min(100, core)),
-        "physical": max(0, min(100, physical)),
+        "core":      max(0, min(100, core)),
+        "health":    max(0, min(100, health)),
         "intellect": max(0, min(100, intellect)),
-        "business": max(0, min(100, business)),
-        "skills": max(0, min(100, skills)),
-        "social": max(0, min(100, social)),
+        "business":  max(0, min(100, business)),
+        "skills":    max(0, min(100, skills)),
+        "social":    max(0, min(100, social)),
     }

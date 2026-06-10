@@ -263,3 +263,36 @@ class Subtopic(Base):
     created_at         = Column(DateTime, default=datetime.utcnow)
 
     topic = relationship("Topic", back_populates="subtopics")
+
+
+# ── HEALTH MODULE ────────────────────────────────────────────
+
+class DailyHealth(Base):
+    """One row per calendar day. Captures sleep, mobility, and the main lift."""
+    __tablename__ = "daily_health"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    date            = Column(Date, nullable=False, unique=True)
+    sleep_hours     = Column(Float, nullable=True)
+    mobility_done   = Column(Boolean, default=False)
+    session_done    = Column(Boolean, default=False)
+    main_lift       = Column(String, nullable=True)
+    top_set_weight  = Column(Float, nullable=True)
+    top_set_reps    = Column(Integer, nullable=True)
+    notes           = Column(Text, nullable=True)
+    created_at      = Column(DateTime, default=datetime.utcnow)
+    updated_at      = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class WeeklyHealth(Base):
+    """One row per ISO week (keyed by Monday). Weekly check-in data."""
+    __tablename__ = "weekly_health"
+
+    id                   = Column(Integer, primary_key=True, index=True)
+    week_start_date      = Column(Date, nullable=False, unique=True)
+    bodyweight_kg        = Column(Float, nullable=True)
+    protein_target_hit   = Column(Boolean, nullable=True)
+    any_lift_progressed  = Column(Boolean, nullable=True)
+    energy_level         = Column(Integer, nullable=True)   # 1–5
+    created_at           = Column(DateTime, default=datetime.utcnow)
+    updated_at           = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

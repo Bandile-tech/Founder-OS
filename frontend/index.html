@@ -591,6 +591,35 @@ body{
   border-radius:3px;cursor:pointer;text-transform:uppercase;white-space:nowrap;
 }
 .ar-btn:hover{background:#2f7aab}
+/* ── Health page ── */
+.health-field-row{display:flex;align-items:center;gap:10px}
+.health-lbl{font-size:10px;color:var(--muted);letter-spacing:0.08em;min-width:110px;text-transform:uppercase}
+.health-num{
+  background:var(--surface-hi);border:1px solid #54ACBF22;border-radius:4px;
+  color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:12px;
+  padding:5px 8px;width:80px;outline:none;
+}
+.health-num:focus{border-color:var(--glow)}
+.health-sel{
+  background:var(--surface-hi);border:1px solid #54ACBF22;border-radius:4px;
+  color:var(--text);font-family:'IBM Plex Mono',monospace;font-size:11px;
+  padding:5px 8px;outline:none;cursor:pointer;
+}
+.health-tog{
+  background:transparent;border:1px solid #54ACBF33;border-radius:3px;
+  color:var(--muted);font-family:'IBM Plex Mono',monospace;
+  font-size:9px;letter-spacing:0.1em;padding:5px 12px;cursor:pointer;
+  text-transform:uppercase;
+}
+.health-tog.htog-on{background:var(--success);border-color:var(--success);color:#011C40;font-weight:700}
+.health-tog.htog-off{background:var(--danger);border-color:var(--danger);color:#fff}
+.health-energy-btn{
+  background:transparent;border:1px solid #54ACBF33;border-radius:3px;
+  color:var(--muted);font-family:'IBM Plex Mono',monospace;
+  font-size:11px;width:28px;height:28px;cursor:pointer;
+}
+.health-energy-btn.he-active{background:var(--glow);border-color:var(--glow);color:#011C40;font-weight:700}
+
 .ar-btn-sm{
   background:transparent;border:1px solid #54ACBF33;
   color:var(--muted);font-family:'IBM Plex Mono',monospace;
@@ -691,8 +720,8 @@ body{
       <div class="nav-item" onclick="nav('books',this)">
         <span class="ni">▤</span> Reading Queue
       </div>
-      <div class="nav-item" onclick="nav('sprint',this)">
-        <span class="ni">⚡</span> Sprint Roadmap
+      <div class="nav-item" onclick="nav('health',this)">
+        <span class="ni">💪</span> Health
       </div>
       <div class="nav-item" onclick="nav('academic',this)">
         <span class="ni">◉</span> Academic Roadmap
@@ -807,8 +836,8 @@ body{
           <!-- PERFORMANCE KPIs -->
           <div class="card">
             <div class="card-title"><span>Performance KPIs</span><span class="badge b-glow">Live</span></div>
-            <div class="sec-head">Athletics</div>
-            <div id="kpi-ath"></div>
+            <div class="sec-head">Health</div>
+            <div id="kpi-health"></div>
             <div class="sec-head" style="margin-top:10px">Academics</div>
             <div id="kpi-acad"></div>
           </div>
@@ -928,19 +957,40 @@ body{
       <div class="card" id="books-card"></div>
     </div>
 
-    <!-- ── SPRINT ROADMAP ── -->
-    <div class="page" id="p-sprint">
+    <!-- ── HEALTH ── -->
+    <div class="page" id="p-health">
       <div class="eco-header">
-        <div><div class="eco-title">Sprint Roadmap</div><div class="eco-sub">Phase-based · Linked to KPIs · ISAZ Regionals target</div></div>
-        <div id="regionals-box" style="text-align:right">
-          <div class="cd-val" style="font-family:'Syne',sans-serif;font-size:24px;color:var(--warn)">—</div>
-          <div style="font-size:8px;color:var(--muted);letter-spacing:0.15em">DAYS TO REGIONALS</div>
+        <div><div class="eco-title">Health</div><div class="eco-sub">Daily log · Weekly check-in · Lift progression</div></div>
+      </div>
+      <!-- Daily Log -->
+      <div class="card" id="health-daily-card">
+        <div class="card-title"><span id="health-daily-date">Today</span><span class="badge b-glow">Daily Log</span></div>
+        <div id="health-daily-body"></div>
+      </div>
+      <!-- Weekly Check-in -->
+      <div class="card" style="margin-top:10px" id="health-weekly-card">
+        <div class="card-title"><span id="health-weekly-label">This Week</span><span class="badge" style="background:var(--accent2);color:#011C40">Weekly</span></div>
+        <div id="health-weekly-body"></div>
+        <!-- History panel -->
+        <div style="margin-top:12px">
+          <button class="ar-btn-sm" onclick="toggleHealthHistory()" id="health-hist-btn">View history</button>
+          <div id="health-history-panel" style="display:none;margin-top:10px">
+            <table style="width:100%;border-collapse:collapse;font-size:11px">
+              <thead><tr style="color:var(--muted);text-align:left">
+                <th style="padding:4px 8px">Week of</th>
+                <th style="padding:4px 8px">Weight</th>
+                <th style="padding:4px 8px">Energy</th>
+                <th style="padding:4px 8px">Lift progress</th>
+              </tr></thead>
+              <tbody id="health-history-rows"></tbody>
+            </table>
+          </div>
         </div>
       </div>
-      <div id="sprint-roadmap"></div>
+      <!-- Lift Progression -->
       <div class="card" style="margin-top:10px">
-        <div class="card-title"><span>Sprint KPIs</span></div>
-        <div id="sprint-kpis"></div>
+        <div class="card-title"><span>Lift Progression</span><span class="badge" style="background:var(--muted);color:#fff">PBs</span></div>
+        <div id="health-lifts-body"></div>
       </div>
     </div>
 
@@ -1087,14 +1137,12 @@ body{
 ═══════════════════════════════════════════════════ */
 const DEFAULT_STATE = {
   kpis:{
-    sprint_100m:{label:"100m PB",value:11.2,unit:"s",target:10.8,lowerBetter:true},
-    sprint_200m:{label:"200m PB",value:23.1,unit:"s",target:22.5,lowerBetter:true},
-    sprint_400m:{label:"400m PB",value:55.99,unit:"s",target:53.0,lowerBetter:true},
     maths_syllabus:{label:"Maths 9709",value:62,unit:"%",target:100,lowerBetter:false},
     further_maths:{label:"Further Maths 9231",value:48,unit:"%",target:100,lowerBetter:false},
     business:{label:"Business 9609",value:71,unit:"%",target:100,lowerBetter:false},
     economics:{label:"Economics 9708",value:55,unit:"%",target:100,lowerBetter:false},
   },
+  health:{daily:null,weekly:null},
   todos:[
     {id:1,text:"CS50P: Complete Problem Set 3",priority:1,done:false,category:"business",due:"2026-04-29",source:"manual",roadmapId:null,urgent:false},
     {id:2,text:"Further Maths: Matrices revision",priority:2,done:false,category:"academics",due:"2026-04-28",source:"manual",roadmapId:"fm-matrices",urgent:false},
@@ -1131,23 +1179,6 @@ const DEFAULT_STATE = {
     {time:"18:00–20:00",label:"Academics"},
     {time:"20:30–21:30",label:"Python / Aether / Founder OS"},
     {time:"21:45–22:00",label:"Iron clothes + wind down"},
-  ],
-  sprintRoadmap:[
-    {id:"sprint-p1",phase:1,name:"Foundation + Rugby Season",dates:"Jan–Mar 2026",status:"done",tasks:[
-      {id:"sprint-base",text:"Build aerobic base — 3×/week easy runs",done:true,pushed:0},
-      {id:"sprint-form",text:"Sprint form drills — A/B skips daily",done:true,pushed:0},
-    ]},
-    {id:"sprint-p2",phase:2,name:"Post-Rugby — Speed Development",dates:"29 Mar–17 Apr",status:"done",tasks:[
-      {id:"sprint-acc",text:"Acceleration phase drills (Mon sessions)",done:false,pushed:0},
-      {id:"sprint-max",text:"Max speed work — flying 30m (Wed)",done:false,pushed:0},
-      {id:"sprint-plyo",text:"Plyometrics — box jumps, bounds",done:true,pushed:0},
-    ]},
-    {id:"sprint-p3",phase:3,name:"Athletics Peak — Regionals Prep",dates:"18 Apr–Regionals",status:"active",tasks:[
-      {id:"sprint-200se",text:"200m speed endurance (3×150m @ 85%)",done:false,pushed:0},
-      {id:"sprint-fly30",text:"Flying 30m benchmark — target 2.7s",done:false,pushed:0},
-      {id:"sprint-400sub48",text:"400m time trial — target sub-48s",done:false,pushed:0},
-      {id:"sprint-taper",text:"Race-week taper protocol",done:false,pushed:0},
-    ]},
   ],
   annualTargets:[
     {id:"at-brand",name:"Public brand followers",current:0,target:1000,unit:"followers",category:"business"},
@@ -1190,16 +1221,17 @@ const API_BASE = "https://founder-os-backend-f6qn.onrender.com";
 
 async function syncFromBackend() {
   try {
-    const [kpisRaw, habits, todos, annual, sprint, bible, books, socialRaw, acadProgress] = await Promise.all([
+    const [kpisRaw, habits, todos, annual, bible, books, socialRaw, acadProgress, healthDaily, healthWeekly] = await Promise.all([
       fetch(`${API_BASE}/kpis`).then(r => r.json()),
       fetch(`${API_BASE}/habits`).then(r => r.json()),
       fetch(`${API_BASE}/todos`).then(r => r.json()),
       fetch(`${API_BASE}/annual-targets`).then(r => r.json()),
-      fetch(`${API_BASE}/roadmap/sprint`).then(r => r.json()),
       fetch(`${API_BASE}/bible`).then(r => r.json()),
       fetch(`${API_BASE}/books`).then(r => r.json()),
       fetch(`${API_BASE}/social-score`).then(r => r.json()),
       fetch(`${API_BASE}/subjects/progress`).then(r => r.json()),
+      fetch(`${API_BASE}/health/daily/today`).then(r => r.json()),
+      fetch(`${API_BASE}/health/weekly/current`).then(r => r.json()),
     ]);
 
     // kpisRaw is a dict keyed by kpi key
@@ -1215,6 +1247,9 @@ async function syncFromBackend() {
       const key = CODE_TO_KPI[p.code];
       if (key && S.kpis[key]) S.kpis[key].value = p.weighted_pct ?? 0;
     });
+
+    // Store live health data for dashboard KPI panel
+    S.health = { daily: healthDaily, weekly: healthWeekly };
 
     habits.forEach(h => {
       if (S.habits[h.key]) S.habits[h.key].done = h.done;
@@ -1233,13 +1268,6 @@ async function syncFromBackend() {
       lowerBetter: a.lower_is_better,
     }));
 
-    // Only update done/pushed state — keep structure from DEFAULT_STATE
-    sprint.forEach(t => {
-      S.sprintRoadmap.forEach(phase => {
-        const task = phase.tasks.find(x => x.id === t.task_id);
-        if (task) { task.done = t.done; task.pushed = t.pushed_count || 0; }
-      });
-    });
     S.bible = bible;
     S.books = books;
     S.social = socialRaw.value || 50;
@@ -1327,7 +1355,7 @@ function renderPage(page){
   else if(page==="timetable"){renderTimetable()}
   else if(page==="bible"){renderBible()}
   else if(page==="books"){renderBooks()}
-  else if(page==="sprint"){renderSprintRoadmap()}
+  else if(page==="health"){renderHealth()}
   else if(page==="academic"){renderAcademicRoadmap()}
   else if(page==="annual"){renderAnnualTargets()}
   else if(page==="settings"){renderSettings()}
@@ -1393,10 +1421,22 @@ function cdBox(val,label,sub){
 }
 
 function renderKPIs(){
-  const ath=["sprint_100m","sprint_200m","sprint_400m"];
   const acad=["maths_syllabus","further_maths","business","economics"];
-  document.getElementById("kpi-ath").innerHTML=ath.map(k=>kpiRow(k)).join("");
   document.getElementById("kpi-acad").innerHTML=acad.map(k=>kpiRow(k)).join("");
+
+  // Health summary from live S.health
+  const d=S.health&&S.health.daily;
+  const w=S.health&&S.health.weekly;
+  const sleepVal=d&&d.sleep_hours!=null?d.sleep_hours+"h":"—";
+  const mobVal=d?(d.mobility_done?"DONE":"PENDING"):"—";
+  const sessVal=d?(d.session_done?"YES":"REST DAY"):"—";
+  const energyVal=w&&w.energy_level!=null?w.energy_level+"/5":"—";
+  const mkRow=(label,val,hi)=>`<div class="kpi-row"><div class="kpi-head"><span>${label}</span><span class="kpi-v" style="color:${hi?'var(--success)':'var(--glow)'}">${val}</span></div></div>`;
+  document.getElementById("kpi-health").innerHTML=
+    mkRow("Sleep last night",sleepVal,d&&d.sleep_hours>=7)+
+    mkRow("Mobility",mobVal,d&&d.mobility_done)+
+    mkRow("Session",sessVal,d&&d.session_done)+
+    mkRow("Energy this week",energyVal,w&&w.energy_level>=4);
 }
 
 function kpiRow(k){
@@ -1479,9 +1519,7 @@ async function toggleTodo(id){
 }
 
 function syncRoadmapTask(roadmapId,done){
-  S.sprintRoadmap.forEach(phase=>{
-    phase.tasks.forEach(t=>{if(t.id===roadmapId)t.done=done});
-  });
+  // Sprint roadmap removed in Phase 3 — no-op kept for todo toggle compat.
   saveState();
 }
 
@@ -1838,55 +1876,175 @@ async function addBook(){
 }
 
 /* ═══════════════════════════════════════════════════
-   SPRINT ROADMAP
+   HEALTH PAGE
+═══════════════════════════════════════════════════ */
+const LIFT_NAMES=["Bench Press","Pull-ups","Squat","Incline DB Press","Barbell Row"];
+let _healthHistOpen=false;
+
+async function renderHealth(){
+  // Fetch fresh data every render
+  try{
+    const [daily,weekly,lifts]=await Promise.all([
+      fetch(`${API_BASE}/health/daily/today`).then(r=>r.json()),
+      fetch(`${API_BASE}/health/weekly/current`).then(r=>r.json()),
+      fetch(`${API_BASE}/health/lifts/progression`).then(r=>r.json()),
+    ]);
+    S.health={daily,weekly};
+    _renderDailyCard(daily);
+    _renderWeeklyCard(weekly);
+    _renderLiftsPanel(lifts);
+    if(_healthHistOpen)_loadHealthHistory();
+  }catch(e){console.error("Health render failed",e);}
+}
+
+function _renderDailyCard(d){
+  const today=new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"});
+  document.getElementById("health-daily-date").textContent=today;
+  const sessionFields=d.session_done?`
+    <div class="health-field-row" style="margin-top:8px">
+      <label class="health-lbl">Main Lift</label>
+      <select class="health-sel" onchange="patchDaily('main_lift',this.value)">
+        <option value="">— select —</option>
+        ${LIFT_NAMES.map(n=>`<option value="${n}"${d.main_lift===n?" selected":""}>${n}</option>`).join("")}
+      </select>
+    </div>
+    <div class="health-field-row" style="margin-top:8px">
+      <label class="health-lbl">Top Set</label>
+      <div style="display:flex;gap:6px;align-items:center">
+        <input class="health-num" type="number" min="0" step="2.5" placeholder="kg"
+          value="${d.top_set_weight??""}"
+          onchange="patchDaily('top_set_weight',parseFloat(this.value)||null)">
+        <span style="color:var(--muted);font-size:11px">×</span>
+        <input class="health-num" type="number" min="0" step="1" placeholder="reps"
+          value="${d.top_set_reps??""}"
+          onchange="patchDaily('top_set_reps',parseInt(this.value)||null)">
+      </div>
+    </div>`:"";
+  document.getElementById("health-daily-body").innerHTML=`
+    <div class="health-field-row">
+      <label class="health-lbl">Sleep</label>
+      <input class="health-num" type="number" min="0" max="12" step="0.5" placeholder="hrs"
+        value="${d.sleep_hours??""}"
+        onchange="patchDaily('sleep_hours',parseFloat(this.value)||null)">
+    </div>
+    <div class="health-field-row" style="margin-top:8px">
+      <label class="health-lbl">Mobility</label>
+      <button class="health-tog ${d.mobility_done?'htog-on':''}" onclick="patchDaily('mobility_done',${!d.mobility_done})">
+        ${d.mobility_done?"DONE":"PENDING"}
+      </button>
+    </div>
+    <div class="health-field-row" style="margin-top:8px">
+      <label class="health-lbl">Session</label>
+      <button class="health-tog ${d.session_done?'htog-on':''}" onclick="patchDaily('session_done',${!d.session_done})">
+        ${d.session_done?"YES":"REST DAY"}
+      </button>
+    </div>
+    ${sessionFields}`;
+}
+
+function _renderWeeklyCard(w){
+  const ws=new Date(w.week_start_date);
+  const label="Week of "+ws.toLocaleDateString("en-GB",{day:"numeric",month:"long"});
+  document.getElementById("health-weekly-label").textContent=label;
+  const energyBtns=[1,2,3,4,5].map(n=>
+    `<button class="health-energy-btn ${w.energy_level===n?'he-active':''}"
+      onclick="patchWeekly('energy_level',${n})">${n}</button>`
+  ).join("");
+  document.getElementById("health-weekly-body").innerHTML=`
+    <div class="health-field-row">
+      <label class="health-lbl">Bodyweight</label>
+      <input class="health-num" type="number" min="0" step="0.1" placeholder="kg"
+        value="${w.bodyweight_kg??""}"
+        onchange="patchWeekly('bodyweight_kg',parseFloat(this.value)||null)">
+    </div>
+    <div class="health-field-row" style="margin-top:8px">
+      <label class="health-lbl">Protein target</label>
+      <button class="health-tog ${w.protein_target_hit===true?'htog-on':w.protein_target_hit===false?'htog-off':''}"
+        onclick="patchWeekly('protein_target_hit',${w.protein_target_hit!==true})">
+        ${w.protein_target_hit===true?"HIT":w.protein_target_hit===false?"MISSED":"—"}
+      </button>
+    </div>
+    <div class="health-field-row" style="margin-top:8px">
+      <label class="health-lbl">Lift progress</label>
+      <button class="health-tog ${w.any_lift_progressed===true?'htog-on':w.any_lift_progressed===false?'htog-off':''}"
+        onclick="patchWeekly('any_lift_progressed',${w.any_lift_progressed!==true})">
+        ${w.any_lift_progressed===true?"YES":w.any_lift_progressed===false?"NO":"—"}
+      </button>
+    </div>
+    <div class="health-field-row" style="margin-top:8px">
+      <label class="health-lbl">Energy</label>
+      <div style="display:flex;gap:4px">${energyBtns}</div>
+    </div>`;
+}
+
+function _renderLiftsPanel(lifts){
+  document.getElementById("health-lifts-body").innerHTML=lifts.map(l=>{
+    const best=l.best_weight!=null?`${l.best_weight}kg × ${l.best_reps??'?'} reps`:"No data";
+    const sub=l.best_date?`${l.sessions_logged} session${l.sessions_logged!==1?"s":""} · last ${l.best_date}`:`${l.sessions_logged} sessions`;
+    return`<div class="kpi-row"><div class="kpi-head">
+      <span>${l.lift_name}</span>
+      <span class="kpi-v" style="color:var(--glow)">${best}</span>
+    </div><div style="font-size:9px;color:var(--muted);margin-top:2px">${sub}</div></div>`;
+  }).join("");
+}
+
+async function patchDaily(field,value){
+  const today=new Date().toISOString().slice(0,10);
+  try{
+    const body={};body[field]=value;
+    const r=await fetch(`${API_BASE}/health/daily/${today}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    const d=await r.json();
+    S.health.daily=d;
+    _renderDailyCard(d);
+    renderKPIs();
+  }catch(e){console.error("patchDaily failed",e);}
+}
+
+async function patchWeekly(field,value){
+  const ws=S.health&&S.health.weekly?S.health.weekly.week_start_date:null;
+  if(!ws)return;
+  try{
+    const body={};body[field]=value;
+    const r=await fetch(`${API_BASE}/health/weekly/${ws}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    const w=await r.json();
+    S.health.weekly=w;
+    _renderWeeklyCard(w);
+    renderKPIs();
+  }catch(e){console.error("patchWeekly failed",e);}
+}
+
+function toggleHealthHistory(){
+  _healthHistOpen=!_healthHistOpen;
+  document.getElementById("health-history-panel").style.display=_healthHistOpen?"block":"none";
+  document.getElementById("health-hist-btn").textContent=_healthHistOpen?"Hide history":"View history";
+  if(_healthHistOpen)_loadHealthHistory();
+}
+
+async function _loadHealthHistory(){
+  try{
+    const rows=await fetch(`${API_BASE}/health/weekly/history?weeks=8`).then(r=>r.json());
+    document.getElementById("health-history-rows").innerHTML=rows.map(w=>{
+      const ws=new Date(w.week_start_date).toLocaleDateString("en-GB",{day:"numeric",month:"short"});
+      const bw=w.bodyweight_kg!=null?w.bodyweight_kg+"kg":"—";
+      const en=w.energy_level!=null?w.energy_level+"/5":"—";
+      const lp=w.any_lift_progressed===true?"✓":w.any_lift_progressed===false?"✗":"—";
+      return`<tr style="border-top:1px solid var(--border)">
+        <td style="padding:5px 8px;color:var(--text)">${ws}</td>
+        <td style="padding:5px 8px;color:var(--muted)">${bw}</td>
+        <td style="padding:5px 8px;color:var(--muted)">${en}</td>
+        <td style="padding:5px 8px;color:var(--muted)">${lp}</td>
+      </tr>`;
+    }).join("");
+  }catch(e){console.error("History load failed",e);}
+}
+
+/* ═══════════════════════════════════════════════════
+   SPRINT ROADMAP (stub — page removed, backend preserved)
 ═══════════════════════════════════════════════════ */
 function renderSprintRoadmap(){
-  const regDate="2026-05-17";
-  const d=daysUntil(regDate);
-  const rb=document.getElementById("regionals-box");
-  if(rb)rb.querySelector(".cd-val").textContent=d>0?d:"Race week!";
-
-  document.getElementById("sprint-roadmap").innerHTML=S.sprintRoadmap.map(phase=>{
-    const doneTasks=phase.tasks.filter(t=>t.done).length;
-    const pct=Math.round(doneTasks/phase.tasks.length*100);
-    const stClass=phase.status==="done"?"done":phase.status==="active"?"active":"";
-    return`<div class="roadmap-phase">
-      <div class="rp-head">
-        <div class="rp-num ${stClass}">${phase.phase}</div>
-        <div>
-          <div class="rp-name">${phase.name}</div>
-          <div style="font-size:8px;color:var(--muted);margin-top:1px">${phase.dates}</div>
-        </div>
-        <div style="margin-left:auto;text-align:right">
-          <div class="badge ${phase.status==="done"?"b-suc":phase.status==="active"?"b-glow":"b-muted"}">${phase.status.toUpperCase()}</div>
-          <div style="font-size:8px;color:var(--muted);margin-top:4px">${pct}% tasks done</div>
-        </div>
-      </div>
-      <div style="margin-bottom:8px"><div class="pbar"><div class="pfill ${pfClass(pct)}" style="width:${pct}%"></div></div></div>
-      ${phase.tasks.map(t=>`
-        <div class="roadmap-task">
-          <div class="rt-cb ${t.done?"checked":""}" onclick="toggleSprintTask('${phase.id}','${t.id}')">${t.done?"✓":""}</div>
-          <span class="rt-text ${t.done?"done":""}">${t.text}</span>
-          ${t.pushed>0?`<span class="rt-pushed">+${t.pushed}d</span>`:""}
-        </div>`).join("")}
-    </div>`;
-  }).join("");
-
-  document.getElementById("sprint-kpis").innerHTML=
-    ["sprint_100m","sprint_200m","sprint_400m"].map(k=>kpiRow(k)).join("");
+  // Sprint Roadmap page removed in Phase 3. Backend /roadmap/sprint preserved.
 }
 
-function toggleSprintTask(phaseId,taskId){
-  const phase=S.sprintRoadmap.find(p=>p.id===phaseId);
-  if(!phase)return;
-  const task=phase.tasks.find(t=>t.id===taskId);
-  if(!task)return;
-  task.done=!task.done;
-  S.todos.forEach(t=>{if(t.roadmapId===taskId)t.done=task.done});
-  addLog(`Sprint task ${task.done?"done":"undone"}: ${task.text.slice(0,35)}`);
-  saveState();
-  renderSprintRoadmap();
-}
 
 /* ═══════════════════════════════════════════════════
    ACADEMIC ROADMAP — DB-DRIVEN
@@ -2677,7 +2835,7 @@ async function generateBrief(){
 ═══════════════════════════════════════════════════ */
 const RADAR_DOMAINS = [
   { key:"core",      label:"Core",      color:"#A7EBF2" },
-  { key:"physical",  label:"Physical",  color:"#4ECDC4" },
+  { key:"health",    label:"Health",    color:"#4ECDC4" },
   { key:"intellect", label:"Intellect", color:"#A78BFA" },
   { key:"business",  label:"Business",  color:"#26A0D0" },
   { key:"skills",    label:"Skills",    color:"#FFD166" },
