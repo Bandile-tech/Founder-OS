@@ -229,14 +229,20 @@ def get_radar_scores(context: dict) -> dict:
     ]
     physical = round(sum(sprint_scores) / max(len(sprint_scores), 1))
 
-    # INTELLECT (academic KPI average)
-    acad_scores = [
-        kpi_pct(kpis.get("maths_syllabus")),
-        kpi_pct(kpis.get("further_maths")),
-        kpi_pct(kpis.get("business")),
-        kpi_pct(kpis.get("economics")),
-    ]
-    intellect = round(sum(acad_scores) / max(len(acad_scores), 1))
+    # INTELLECT — prefer live subject mastery from Subject/Topic/Subtopic;
+    # fall back to _kpi_state percentages when subjects have no subtopics yet.
+    acad_mastery = context.get("acad_mastery", {})
+    tracked = [v for v in acad_mastery.values() if v is not None]
+    if tracked:
+        intellect = round(sum(tracked) / len(tracked))
+    else:
+        acad_scores = [
+            kpi_pct(kpis.get("maths_syllabus")),
+            kpi_pct(kpis.get("further_maths")),
+            kpi_pct(kpis.get("business")),
+            kpi_pct(kpis.get("economics")),
+        ]
+        intellect = round(sum(acad_scores) / max(len(acad_scores), 1))
 
     # BUSINESS — real client/revenue data takes priority, fall back to annual targets
     clients = context.get("clients", [])
