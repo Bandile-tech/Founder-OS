@@ -1190,7 +1190,7 @@ const API_BASE = "https://founder-os-backend-f6qn.onrender.com";
 
 async function syncFromBackend() {
   try {
-    const [kpisRaw, habits, todos, annual, sprint, bible, books, socialRaw] = await Promise.all([
+    const [kpisRaw, habits, todos, annual, sprint, bible, books, socialRaw, acadProgress] = await Promise.all([
       fetch(`${API_BASE}/kpis`).then(r => r.json()),
       fetch(`${API_BASE}/habits`).then(r => r.json()),
       fetch(`${API_BASE}/todos`).then(r => r.json()),
@@ -1199,6 +1199,7 @@ async function syncFromBackend() {
       fetch(`${API_BASE}/bible`).then(r => r.json()),
       fetch(`${API_BASE}/books`).then(r => r.json()),
       fetch(`${API_BASE}/social-score`).then(r => r.json()),
+      fetch(`${API_BASE}/subjects/progress`).then(r => r.json()),
     ]);
 
     // kpisRaw is a dict keyed by kpi key
@@ -1207,6 +1208,12 @@ async function syncFromBackend() {
         S.kpis[key].value = kpi.value;
         S.kpis[key].target = kpi.target;
       }
+    });
+
+    // Override academic KPI values with live subject mastery data
+    acadProgress.forEach(p => {
+      const key = CODE_TO_KPI[p.code];
+      if (key && S.kpis[key]) S.kpis[key].value = p.weighted_pct ?? 0;
     });
 
     habits.forEach(h => {
@@ -1888,6 +1895,12 @@ function toggleSprintTask(phaseId,taskId){
 // Module-level state for the academic page
 let _arSubjects = [];      // full subject+topic+subtopic tree from GET /subjects
 let _arProgress = {};      // { code: weighted_pct } from GET /subjects/progress
+const CODE_TO_KPI = {
+  "9709": "maths_syllabus",
+  "9231": "further_maths",
+  "9609": "business",
+  "9708": "economics",
+};
 let _arExpanded = new Set(); // which subject IDs are expanded
 let _notesSubtopicId = null; // subtopic being edited in notes modal
 let _sliderTimers = {};    // debounce timers keyed by subtopic id
@@ -2065,7 +2078,11 @@ async function _arRefreshProgress(){
   try{
     const progress=await fetch(`${API_BASE}/subjects/progress`).then(r=>r.json());
     _arProgress={};
-    progress.forEach(p=>{ _arProgress[p.code]=p.weighted_pct; });
+    progress.forEach(p=>{
+      _arProgress[p.code]=p.weighted_pct;
+      const key=CODE_TO_KPI[p.code];
+      if(key && S.kpis[key]) S.kpis[key].value=p.weighted_pct??0;
+    });
     // Update each subject card's circle + badge in-place
     _arSubjects.forEach((subj,idx)=>{
       const color=SUBJ_COLORS[idx%SUBJ_COLORS.length];
