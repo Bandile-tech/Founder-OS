@@ -210,3 +210,22 @@ class WeakestSubtopicOut(BaseModel):
     topic_weight: int
     subject_name: str
     subject_code: str
+
+
+# ── HEALTH MODULE ─────────────────────────────────────────────
+
+class DailyHealthPatch(BaseModel):
+    sleep_hours: Optional[float] = None
+    mobility_done: Optional[bool] = None
+    session_done: Optional[bool] = None
+    main_lift: Optional[str] = None
+    top_set_weight: Optional[float] = None
+    top_set_reps: Optional[int] = None
+    notes: Optional[str] = None
+
+
+class WeeklyHealthPatch(BaseModel):
+    bodyweight_kg: Optional[float] = None
+    protein_target_hit: Optional[bool] = None
+    any_lift_progressed: Optional[bool] = None
+    energy_level: Optional[int] = None

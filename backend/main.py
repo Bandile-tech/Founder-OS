@@ -16,6 +16,7 @@ from models import (
     AIMemory, Habit, AnnualTarget, KPISnapshot, RoadmapTask,
     BibleEntry, Book, SocialScore, Client, Revenue,
     Subject, Topic, Subtopic,
+    DailyHealth, WeeklyHealth,
 )
 from memory_service import get_recent_memories
 from openai_client import (
@@ -47,13 +48,10 @@ if os.path.isdir(FRONTEND_DIR):
 # ── KPI DEFAULTS ─────────────────────────────────────────────
 # In-memory KPI store (persisted via KPISnapshot on update)
 KPI_DEFAULTS = {
-    "sprint_100m":    {"label": "100m PB",          "value": 11.2,  "unit": "s",  "target": 10.8, "lower_is_better": True},
-    "sprint_200m":    {"label": "200m PB",          "value": 23.1,  "unit": "s",  "target": 22.5, "lower_is_better": True},
-    "sprint_400m":    {"label": "400m PB",          "value": 55.99, "unit": "s",  "target": 53.0, "lower_is_better": True},
-    "maths_syllabus": {"label": "Maths 9709",       "value": 62,    "unit": "%",  "target": 100,  "lower_is_better": False},
-    "further_maths":  {"label": "Further Maths 9231","value": 48,   "unit": "%",  "target": 100,  "lower_is_better": False},
-    "business":       {"label": "Business 9609",    "value": 71,    "unit": "%",  "target": 100,  "lower_is_better": False},
-    "economics":      {"label": "Economics 9708",   "value": 55,    "unit": "%",  "target": 100,  "lower_is_better": False},
+    "maths_syllabus": {"label": "Maths 9709",        "value": 62, "unit": "%", "target": 100, "lower_is_better": False},
+    "further_maths":  {"label": "Further Maths 9231", "value": 48, "unit": "%", "target": 100, "lower_is_better": False},
+    "business":       {"label": "Business 9609",      "value": 71, "unit": "%", "target": 100, "lower_is_better": False},
+    "economics":      {"label": "Economics 9708",     "value": 55, "unit": "%", "target": 100, "lower_is_better": False},
 }
 
 # Runtime KPI state (loaded from latest snapshots on startup)
@@ -448,6 +446,9 @@ def get_radar(db: Session = Depends(get_db)):
     academic_progress = _compute_subject_progress(db)
     acad_mastery = {row["code"]: row["weighted_pct"] for row in academic_progress}
 
+    # Health axis data — last 7 days of DailyHealth rows
+    health_context = _compute_health_radar(db)
+
     context = {
         "kpis": _kpi_state,
         "habits": habits_today,
@@ -457,7 +458,8 @@ def get_radar(db: Session = Depends(get_db)):
         "social_score": social_score,
         "clients": [{"name": c.name, "status": c.status, "value": c.value} for c in clients_all],
         "revenue_total": revenue_total,
-        "acad_mastery": acad_mastery,   # {"9709": 42.5, "9231": null, ...}
+        "acad_mastery": acad_mastery,
+        "health": health_context,
     }
 
     scores = get_radar_scores(context)
@@ -693,6 +695,166 @@ def weakest_subtopics(limit: int = Query(5, ge=1, le=50), db: Session = Depends(
     ]
 
 
+# ── HEALTH MODULE ────────────────────────────────────────────
+
+LIFT_NAMES = ["Bench Press", "Pull-ups", "Squat", "Incline DB Press", "Barbell Row"]
+
+# Mon=0, Tue=1, Wed=2, Fri=4, Sat=5
+TRAINING_WEEKDAYS = {0, 1, 2, 4, 5}
+
+
+def _get_or_create_daily_health(db: Session, for_date: date) -> DailyHealth:
+    row = db.query(DailyHealth).filter(DailyHealth.date == for_date).first()
+    if not row:
+        row = DailyHealth(date=for_date)
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+    return row
+
+
+def _get_or_create_weekly_health(db: Session, week_start: date) -> WeeklyHealth:
+    row = db.query(WeeklyHealth).filter(WeeklyHealth.week_start_date == week_start).first()
+    if not row:
+        row = WeeklyHealth(week_start_date=week_start)
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+    return row
+
+
+def _current_week_start() -> date:
+    today = date.today()
+    return today - timedelta(days=today.weekday())  # last Monday
+
+
+def _serialize_daily_health(r: DailyHealth) -> dict:
+    return {
+        "id": r.id, "date": str(r.date),
+        "sleep_hours": r.sleep_hours, "mobility_done": r.mobility_done,
+        "session_done": r.session_done, "main_lift": r.main_lift,
+        "top_set_weight": r.top_set_weight, "top_set_reps": r.top_set_reps,
+        "notes": r.notes,
+    }
+
+
+def _serialize_weekly_health(r: WeeklyHealth) -> dict:
+    return {
+        "id": r.id, "week_start_date": str(r.week_start_date),
+        "bodyweight_kg": r.bodyweight_kg,
+        "protein_target_hit": r.protein_target_hit,
+        "any_lift_progressed": r.any_lift_progressed,
+        "energy_level": r.energy_level,
+    }
+
+
+def _compute_health_radar(db: Session) -> dict:
+    """
+    Compute the Health radar axis from the last 7 DailyHealth rows.
+    Returns None for each component when fewer than 3 rows exist.
+    """
+    cutoff = date.today() - timedelta(days=6)
+    rows = db.query(DailyHealth).filter(DailyHealth.date >= cutoff).all()
+    if len(rows) < 3:
+        return {"insufficient_data": True, "score": None}
+
+    mobility_pct = sum(1 for r in rows if r.mobility_done) / 7 * 100
+
+    training_days_in_window = sum(
+        1 for i in range(7)
+        if ((date.today() - timedelta(days=i)).weekday() in TRAINING_WEEKDAYS)
+    )
+    sessions_done = sum(1 for r in rows if r.session_done)
+    session_pct = (sessions_done / max(training_days_in_window, 1)) * 100
+
+    sleep_vals = [r.sleep_hours for r in rows if r.sleep_hours is not None]
+    if sleep_vals:
+        avg_sleep = sum(sleep_vals) / len(sleep_vals)
+        sleep_score = min(100, (avg_sleep / 8) * 100)
+    else:
+        sleep_score = 0
+
+    score = round(0.4 * mobility_pct + 0.4 * session_pct + 0.2 * sleep_score)
+    return {
+        "insufficient_data": False,
+        "score": max(0, min(100, score)),
+        "mobility_pct": round(mobility_pct),
+        "session_pct": round(session_pct),
+        "sleep_score": round(sleep_score),
+        "rows_in_window": len(rows),
+    }
+
+
+@app.get("/health/daily/today")
+def get_daily_health_today(db: Session = Depends(get_db)):
+    return _serialize_daily_health(_get_or_create_daily_health(db, date.today()))
+
+
+@app.patch("/health/daily/{log_date}")
+def patch_daily_health(log_date: date, payload: schemas.DailyHealthPatch, db: Session = Depends(get_db)):
+    row = _get_or_create_daily_health(db, log_date)
+    for field, val in payload.model_dump(exclude_none=True).items():
+        setattr(row, field, val)
+    db.commit()
+    db.refresh(row)
+    return _serialize_daily_health(row)
+
+
+@app.get("/health/daily/recent")
+def get_daily_health_recent(days: int = Query(14, ge=1, le=90), db: Session = Depends(get_db)):
+    cutoff = date.today() - timedelta(days=days - 1)
+    rows = db.query(DailyHealth).filter(DailyHealth.date >= cutoff).order_by(DailyHealth.date.desc()).all()
+    return [_serialize_daily_health(r) for r in rows]
+
+
+@app.get("/health/weekly/current")
+def get_weekly_health_current(db: Session = Depends(get_db)):
+    return _serialize_weekly_health(_get_or_create_weekly_health(db, _current_week_start()))
+
+
+@app.patch("/health/weekly/{week_start}")
+def patch_weekly_health(week_start: date, payload: schemas.WeeklyHealthPatch, db: Session = Depends(get_db)):
+    row = _get_or_create_weekly_health(db, week_start)
+    for field, val in payload.model_dump(exclude_none=True).items():
+        setattr(row, field, val)
+    db.commit()
+    db.refresh(row)
+    return _serialize_weekly_health(row)
+
+
+@app.get("/health/weekly/history")
+def get_weekly_health_history(weeks: int = Query(8, ge=1, le=52), db: Session = Depends(get_db)):
+    cutoff = _current_week_start() - timedelta(weeks=weeks - 1)
+    rows = db.query(WeeklyHealth).filter(
+        WeeklyHealth.week_start_date >= cutoff
+    ).order_by(WeeklyHealth.week_start_date.desc()).all()
+    return [_serialize_weekly_health(r) for r in rows]
+
+
+@app.get("/health/lifts/progression")
+def get_lift_progression(db: Session = Depends(get_db)):
+    results = []
+    for lift in LIFT_NAMES:
+        rows = db.query(DailyHealth).filter(
+            DailyHealth.main_lift == lift,
+            DailyHealth.top_set_weight.isnot(None),
+        ).all()
+        best = None
+        for r in rows:
+            if best is None:
+                best = r
+            elif (r.top_set_weight, r.top_set_reps or 0) > (best.top_set_weight, best.top_set_reps or 0):
+                best = r
+        results.append({
+            "lift_name":      lift,
+            "best_weight":    best.top_set_weight if best else None,
+            "best_reps":      best.top_set_reps if best else None,
+            "best_date":      str(best.date) if best else None,
+            "sessions_logged": len(rows),
+        })
+    return results
+
+
 # ── SHARED PARSE-APPLICATION HELPER ─────────────────────────
 def apply_parse_updates(db: Session, parsed: dict, today: date) -> dict:
     """
@@ -845,6 +1007,21 @@ def apply_parse_updates(db: Session, parsed: dict, today: date) -> dict:
         ))
         db.commit()
         result["log_entry_created"] = True
+
+    # ── Health updates ────────────────────────────────────────
+    if parsed.get("health_updates"):
+        hu = parsed["health_updates"]
+        health_row = _get_or_create_daily_health(db, today)
+        health_fields = ["sleep_hours", "mobility_done", "session_done",
+                         "main_lift", "top_set_weight", "top_set_reps"]
+        changed = False
+        for field in health_fields:
+            if hu.get(field) is not None:
+                setattr(health_row, field, hu[field])
+                changed = True
+        if changed:
+            db.commit()
+        result["health_updated"] = changed
 
     return result
 
