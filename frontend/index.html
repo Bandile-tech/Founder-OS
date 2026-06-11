@@ -2947,12 +2947,31 @@ async function submitUnifiedInput(){
         chips.push(u.roadmap_completed.length+" roadmap item"+(u.roadmap_completed.length>1?"s":"")+" done");
       if(u.revenue_logged&&u.revenue_logged.length)
         chips.push(u.revenue_logged.map(r=>"K"+r.amount+" ("+escHtml(r.source)+")").join(", ")+" revenue");
-      const updateLine=chips.length?`<div style="margin-top:5px;color:var(--glow);font-size:8px;letter-spacing:0.05em">Updated: ${chips.join(" · ")}</div>`:"";
-      // Toast
-      result.innerHTML=`<div style="color:var(--success)">✓ Logged — ${escHtml(data.summary)}</div>${updateLine}${data.advisory?`<div style="margin-top:4px;color:var(--muted)">${escHtml(data.advisory)}</div>`:""}`;
-      result.style.display="block";
-      badge.textContent="Logged";
-      badge.className="badge b-suc";
+      const updateLine=chips.length?`<div style="margin-top:5px;color:var(--glow);font-size:8px;letter-spacing:0.05em">✓ Applied: ${chips.join(" · ")}</div>`:"";
+
+      if(data.status==="partial"){
+        // Persistent gate-locked warning panel — does NOT auto-fade
+        const blocked=(data.trades_blocked||[]).map(b=>`<li style="margin:2px 0">${escHtml(b)}</li>`).join("");
+        const blockedList=blocked?`<ul style="margin:6px 0 0 14px;padding:0;font-size:9px;color:#f5a623">${blocked}</ul>`:"";
+        result.innerHTML=`
+          <div id="gate-warning-panel" style="border:1px solid #f5a623;border-radius:4px;padding:10px 12px;background:rgba(245,166,35,0.08)">
+            <div style="color:#f5a623;font-weight:700;font-size:11px;letter-spacing:0.08em">⚠ Refused: Gate is LOCKED</div>
+            <div style="margin-top:6px;color:#f5a623;font-size:9px;line-height:1.5">${escHtml(data.gate_locked_warning||"")}</div>
+            ${blockedList}
+            ${updateLine}
+            <button onclick="document.getElementById('gate-warning-panel').remove()" style="margin-top:8px;background:none;border:1px solid #f5a623;color:#f5a623;padding:3px 10px;border-radius:3px;cursor:pointer;font-size:8px;letter-spacing:0.06em">Dismiss</button>
+          </div>`;
+        result.style.display="block";
+        badge.textContent="Partial — Refused";
+        badge.style.background="#f5a623";
+        badge.style.color="#011C40";
+      } else {
+        // Normal success toast
+        result.innerHTML=`<div style="color:var(--success)">✓ Logged — ${escHtml(data.summary)}</div>${updateLine}${data.advisory?`<div style="margin-top:4px;color:var(--muted)">${escHtml(data.advisory)}</div>`:""}`;
+        result.style.display="block";
+        badge.textContent="Logged";
+        badge.className="badge b-suc";
+      }
       // Refresh data
       await syncFromBackend();
       renderRecentActivity();
