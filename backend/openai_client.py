@@ -132,6 +132,20 @@ Known roadmap task IDs: {', '.join(roadmap_ids)}
 
 Parse the brain dump and return ONLY valid JSON, no markdown, no explanation.
 
+CRITICAL EXTRACTION RULE: Process each category as a separate, independent extraction pass. A single sentence can contain multiple actionable categories — extract ALL of them. The presence of one category (e.g. a trade) does NOT exclude others (e.g. habits, revenue, KPIs) from the same input. Never skip a category because another was already found.
+
+Example of correct mixed extraction:
+Input: "Did scripture today and logged a live trade EURUSD long +$50, all rules followed"
+Correct output includes BOTH:
+  "habits_done": ["scripture_prayer"]
+  "trade_logs": [{{"type": "live", "pair": "EURUSD", "direction": "long", "net_pl_usd": 50, "adherence": true, "outcome": "win", "r_multiple": null}}]
+
+Example:
+Input: "Earned K500 from Wamu's and logged a backtest GBPUSD short +1.5R"
+Correct output includes BOTH:
+  "revenue_updates": [{{"amount": 500, "source": "Wamu's Bakes & Cakes", "client": null}}]
+  "trade_logs": [{{"type": "backtest", "pair": "GBPUSD", "direction": "short", "r_multiple": 1.5, "outcome": "win", "adherence": true}}]
+
 Schema:
 {{
   "summary": "one-line summary",
@@ -172,7 +186,7 @@ Schema:
 
 Health extraction rules: extract sleep_hours from phrases like "slept 7 hours". Set mobility_done=true if mobility/stretching mentioned. Set session_done=true if a training session is mentioned. For lifts, populate lift_logs array — one entry per lift mentioned. lift_name is the exact lift name (e.g. "Bench Press", "Deadlift", "Squat"). If a new lift name is mentioned that isn't in the known list, include it anyway — the system will auto-create it. Omit health_updates key entirely if no health content found. Omit lift_logs key entirely if no lifts mentioned.
 
-Trading extraction rules: populate trade_logs when a trade or backtest is mentioned. type must be "backtest" if replay/backtest/TradingView replay is mentioned, else "live". pair should be inferred from the text (default EURUSD if unclear). direction is "long" or "short". r_multiple is the R gained/lost (positive for wins, negative for stop-hits). outcome: "win" if positive R, "loss" if negative R or stop hit, "breakeven" if 0R. adherence is true unless rule violations are mentioned. Set rule_broken=true and fill rule_broken_description if a rule break is described. Omit trade_logs key entirely if no trading content found.
+Trading extraction rules: populate trade_logs when a trade or backtest is mentioned. type must be "backtest" if replay/backtest/TradingView replay is mentioned, else "live". pair should be inferred from the text (default EURUSD if unclear). direction is "long" or "short". r_multiple is the R gained/lost (positive for wins, negative for stop-hits). outcome: "win" if positive R, "loss" if negative R or stop hit, "breakeven" if 0R. adherence is true unless rule violations are mentioned. Set rule_broken=true and fill rule_broken_description if a rule break is described. Omit trade_logs key entirely if no trading content found. Remember: trade_logs is always extracted in addition to other categories, never instead of them.
 
 Today is {today}. Return valid JSON only."""
 
