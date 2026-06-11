@@ -151,10 +151,28 @@ Schema:
   }},
   "lift_logs": [
     {{"lift_name": "string", "weight_kg": number, "reps": integer}}
+  ],
+  "trade_logs": [
+    {{
+      "type": "backtest or live",
+      "pair": "EURUSD or GBPUSD or other pair string",
+      "direction": "long or short",
+      "r_multiple": number_or_null,
+      "outcome": "win or loss or breakeven or null",
+      "adherence": true_or_false_or_null,
+      "entry_reason": "string_or_null",
+      "account_name": "string_or_null — only for live trades",
+      "risk_pct": number_or_null,
+      "net_pl_usd": number_or_null,
+      "rule_broken": true_or_false_or_null,
+      "rule_broken_description": "string_or_null"
+    }}
   ]
 }}
 
 Health extraction rules: extract sleep_hours from phrases like "slept 7 hours". Set mobility_done=true if mobility/stretching mentioned. Set session_done=true if a training session is mentioned. For lifts, populate lift_logs array — one entry per lift mentioned. lift_name is the exact lift name (e.g. "Bench Press", "Deadlift", "Squat"). If a new lift name is mentioned that isn't in the known list, include it anyway — the system will auto-create it. Omit health_updates key entirely if no health content found. Omit lift_logs key entirely if no lifts mentioned.
+
+Trading extraction rules: populate trade_logs when a trade or backtest is mentioned. type must be "backtest" if replay/backtest/TradingView replay is mentioned, else "live". pair should be inferred from the text (default EURUSD if unclear). direction is "long" or "short". r_multiple is the R gained/lost (positive for wins, negative for stop-hits). outcome: "win" if positive R, "loss" if negative R or stop hit, "breakeven" if 0R. adherence is true unless rule violations are mentioned. Set rule_broken=true and fill rule_broken_description if a rule break is described. Omit trade_logs key entirely if no trading content found.
 
 Today is {today}. Return valid JSON only."""
 

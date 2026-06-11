@@ -17,6 +17,7 @@ from models import (
     BibleEntry, Book, SocialScore, Client, Revenue,
     Subject, Topic, Subtopic,
     DailyHealth, WeeklyHealth, Lift, LiftLog,
+    PropFirmAccount, BacktestTrade, LiveTrade,
 )
 from memory_service import get_recent_memories
 from openai_client import (
@@ -44,6 +45,9 @@ app.add_middleware(
 FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend")
 if os.path.isdir(FRONTEND_DIR):
     app.mount("/app", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
+
+# ── CONSTANTS ────────────────────────────────────────────────
+TEN_K_START_DATE = date(2026, 6, 1)   # floor for both AI revenue and trading P/L aggregation
 
 # ── KPI DEFAULTS ─────────────────────────────────────────────
 # In-memory KPI store (persisted via KPISnapshot on update)
@@ -1153,6 +1157,90 @@ def apply_parse_updates(db: Session, parsed: dict, today: date) -> dict:
             db.commit()
         result["lift_logs_created"] = logs_created
 
+    # ── Trade logs from brain dump ────────────────────────────
+    if parsed.get("trade_logs"):
+        trades_created = []
+        trades_blocked = []
+        gate = None   # lazy-compute once if a live trade is attempted
+
+        for entry in parsed["trade_logs"]:
+            trade_type = (entry.get("type") or "backtest").lower()
+            pair = entry.get("pair") or "EURUSD"
+            direction = entry.get("direction") or "long"
+            r_multiple = entry.get("r_multiple")
+            outcome = entry.get("outcome") or "loss"
+            adherence = entry.get("adherence")
+            if adherence is None:
+                adherence = True
+            entry_reason = entry.get("entry_reason")
+            rule_broken = bool(entry.get("rule_broken"))
+            rule_broken_desc = entry.get("rule_broken_description")
+
+            # r_multiple is required for a meaningful trade row
+            if r_multiple is None:
+                continue
+
+            if trade_type == "backtest":
+                db.add(BacktestTrade(
+                    date=today, pair=pair, direction=direction,
+                    entry_reason=entry_reason,
+                    r_multiple=float(r_multiple),
+                    rule_adherence=bool(adherence),
+                    outcome=outcome,
+                ))
+                trades_created.append({"type": "backtest", "pair": pair, "r_multiple": r_multiple})
+
+            elif trade_type == "live":
+                # Gate check — compute once per parse call
+                if gate is None:
+                    gate = _compute_gate(db)
+                if gate["status"] == "LOCKED":
+                    trades_blocked.append({
+                        "type": "live", "pair": pair,
+                        "reason": "Gate LOCKED",
+                        "gate": gate,
+                    })
+                    continue
+
+                # Match account by name (case-insensitive)
+                account_name = entry.get("account_name") or ""
+                account_id = None
+                if account_name:
+                    acct = db.query(PropFirmAccount).filter(
+                        PropFirmAccount.name.ilike(f"%{account_name}%")
+                    ).first()
+                    if acct:
+                        account_id = acct.id
+
+                db.add(LiveTrade(
+                    date=today, pair=pair, direction=direction,
+                    entry_reason=entry_reason,
+                    r_multiple=float(r_multiple),
+                    rule_adherence=bool(adherence),
+                    outcome=outcome,
+                    account_id=account_id,
+                    risk_pct=entry.get("risk_pct"),
+                    net_pl_usd=entry.get("net_pl_usd"),
+                    rule_broken=rule_broken,
+                    rule_broken_description=rule_broken_desc if rule_broken else None,
+                ))
+                trades_created.append({
+                    "type": "live", "pair": pair, "r_multiple": r_multiple,
+                    "account_id": account_id,
+                    "account_matched": account_id is not None,
+                })
+
+        if trades_created:
+            db.commit()
+        result["trades_created"] = trades_created
+        if trades_blocked:
+            result["trades_blocked"] = trades_blocked
+            result["gate_locked_warning"] = (
+                f"GATE LOCKED: {len(trades_blocked)} live trade(s) were NOT logged. "
+                f"Complete {gate['missing']['trades']} more backtests and close the "
+                f"{gate['missing']['adherence_pct_gap']}% adherence gap to unlock live trading."
+            )
+
     return result
 
 
@@ -1166,14 +1254,19 @@ def parse_brain_dump(payload: schemas.ParseRequest, db: Session = Depends(get_db
     updates = apply_parse_updates(db, parsed, date.today())
 
     # Backward-compatible response: keep existing top-level fields, add "updates" object
-    return {
+    response: dict = {
         "summary":             parsed.get("summary") or "Brain dump processed.",
         "advisory":            parsed.get("advisory") or "Character Before Status. Maintain discipline.",
-        "kpi_updates_applied": updates["kpi_updates_applied"],   # legacy field kept
-        "revenue_logged":      updates["revenue_logged"],         # legacy field kept
+        "kpi_updates_applied": updates["kpi_updates_applied"],
+        "revenue_logged":      updates["revenue_logged"],
         "updates":             updates,
         "status":              "ok",
     }
+    # Surface gate-locked warning prominently so the frontend can render it
+    if updates.get("gate_locked_warning"):
+        response["gate_locked_warning"] = updates["gate_locked_warning"]
+        response["status"] = "partial"
+    return response
 
 
 # ── UNIFIED INPUT (routes to parse or chat) ──────────────────
@@ -1226,13 +1319,17 @@ def unified_input(request: schemas.UnifiedInputRequest, db: Session = Depends(ge
         parsed = get_parse_response(text, context)
         updates = apply_parse_updates(db, parsed, date.today())
 
-        return {
+        resp: dict = {
             "type":     "log",
             "summary":  parsed.get("summary") or "Entry logged.",
             "advisory": parsed.get("advisory") or "Character Before Status.",
             "updates":  updates,
             "status":   "ok",
         }
+        if updates.get("gate_locked_warning"):
+            resp["gate_locked_warning"] = updates["gate_locked_warning"]
+            resp["status"] = "partial"
+        return resp
 
 
 # ── PROACTIVE BRIEF ──────────────────────────────────────────
@@ -1462,6 +1559,344 @@ def delete_revenue(revenue_id: int, db: Session = Depends(get_db)):
     db.delete(record)
     db.commit()
     return {"deleted": revenue_id}
+
+
+# ── TRADING MODULE ────────────────────────────────────────────
+
+# ── Helpers ───────────────────────────────────────────────────
+
+def _serialize_prop_account(a: PropFirmAccount) -> dict:
+    days_active = (date.today() - a.start_date).days if a.start_date else 0
+    drawdown_pct = round((a.peak_balance - a.current_balance) / a.peak_balance * 100, 2) if a.peak_balance else 0.0
+    profit_target_usd = a.starting_balance * (a.profit_target_pct / 100)
+    profit_made = a.current_balance - a.starting_balance
+    target_progress_pct = round((profit_made / profit_target_usd) * 100, 1) if profit_target_usd else 0.0
+    gain_pct = round((a.current_balance - a.starting_balance) / a.starting_balance * 100, 2) if a.starting_balance else 0.0
+    return {
+        "id": a.id, "name": a.name, "firm": a.firm,
+        "account_size_usd": a.account_size_usd, "challenge_type": a.challenge_type,
+        "starting_balance": a.starting_balance, "current_balance": a.current_balance,
+        "peak_balance": a.peak_balance,
+        "profit_target_pct": a.profit_target_pct, "max_drawdown_pct": a.max_drawdown_pct,
+        "daily_drawdown_pct": a.daily_drawdown_pct,
+        "start_date": str(a.start_date), "status": a.status, "notes": a.notes,
+        "days_active": days_active,
+        "drawdown_from_peak_pct": drawdown_pct,
+        "gain_pct": gain_pct,
+        "target_progress_pct": target_progress_pct,
+    }
+
+
+def _serialize_backtest(t: BacktestTrade) -> dict:
+    return {
+        "id": t.id, "date": str(t.date), "time_of_day": t.time_of_day,
+        "pair": t.pair, "direction": t.direction, "entry_reason": t.entry_reason,
+        "r_multiple": t.r_multiple, "rule_adherence": t.rule_adherence,
+        "outcome": t.outcome, "notes": t.notes,
+        "created_at": str(t.created_at),
+    }
+
+
+def _serialize_live_trade(t: LiveTrade) -> dict:
+    return {
+        "id": t.id, "date": str(t.date), "time_of_day": t.time_of_day,
+        "pair": t.pair, "direction": t.direction, "entry_reason": t.entry_reason,
+        "r_multiple": t.r_multiple, "rule_adherence": t.rule_adherence,
+        "outcome": t.outcome, "notes": t.notes,
+        "account_id": t.account_id, "risk_pct": t.risk_pct,
+        "net_pl_usd": t.net_pl_usd, "rule_broken": t.rule_broken,
+        "rule_broken_description": t.rule_broken_description,
+        "created_at": str(t.created_at),
+    }
+
+
+def _compute_gate(db: Session) -> dict:
+    """Compute gate status fresh from DB. No caching."""
+    trades_required = 50
+    adherence_required = 90.0
+    all_trades = db.query(BacktestTrade).all()
+    total = len(all_trades)
+    adherent = sum(1 for t in all_trades if t.rule_adherence)
+    adherence_pct = round((adherent / total) * 100, 1) if total else 0.0
+    cleared = total >= trades_required and adherence_pct >= adherence_required
+    return {
+        "total_backtests": total,
+        "adherence_pct": adherence_pct,
+        "trades_required": trades_required,
+        "adherence_required": adherence_required,
+        "status": "CLEARED" if cleared else "LOCKED",
+        "missing": {
+            "trades": max(0, trades_required - total),
+            "adherence_pct_gap": round(max(0.0, adherence_required - adherence_pct), 1),
+        },
+    }
+
+
+def _trade_stats(trades) -> dict:
+    total = len(trades)
+    if not total:
+        return {"total": 0, "win_rate": 0.0, "expectancy_r": 0.0, "total_r": 0.0,
+                "by_pair": {}, "adherence_pct": 0.0, "rule_breaks": 0}
+    wins = sum(1 for t in trades if t.outcome == "win")
+    r_vals = [t.r_multiple for t in trades]
+    by_pair: dict = {}
+    for t in trades:
+        by_pair.setdefault(t.pair, 0)
+        by_pair[t.pair] += 1
+    adherent = sum(1 for t in trades if t.rule_adherence)
+    return {
+        "total": total,
+        "win_rate": round(wins / total * 100, 1),
+        "expectancy_r": round(sum(r_vals) / total, 2),
+        "total_r": round(sum(r_vals), 2),
+        "by_pair": by_pair,
+        "adherence_pct": round(adherent / total * 100, 1),
+        "rule_breaks": total - adherent,
+    }
+
+
+# ── Prop Firm Account CRUD ────────────────────────────────────
+
+@app.get("/trading/accounts")
+def list_accounts(db: Session = Depends(get_db)):
+    accounts = db.query(PropFirmAccount).order_by(PropFirmAccount.created_at.asc()).all()
+    return [_serialize_prop_account(a) for a in accounts]
+
+
+@app.post("/trading/accounts", status_code=201)
+def create_account(payload: schemas.PropFirmAccountCreate, db: Session = Depends(get_db)):
+    data = payload.model_dump()
+    # peak_balance starts equal to current_balance at creation
+    data["peak_balance"] = data["current_balance"]
+    acct = PropFirmAccount(**data)
+    db.add(acct)
+    db.commit()
+    db.refresh(acct)
+    return _serialize_prop_account(acct)
+
+
+@app.patch("/trading/accounts/{account_id}")
+def update_account(account_id: int, payload: schemas.PropFirmAccountPatch, db: Session = Depends(get_db)):
+    acct = db.query(PropFirmAccount).filter(PropFirmAccount.id == account_id).first()
+    if not acct:
+        raise HTTPException(404, "Account not found")
+    updates = payload.model_dump(exclude_none=True)
+    for field, val in updates.items():
+        setattr(acct, field, val)
+    # Auto-update peak_balance if current_balance grew
+    if acct.current_balance > acct.peak_balance:
+        acct.peak_balance = acct.current_balance
+    acct.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(acct)
+    return _serialize_prop_account(acct)
+
+
+@app.delete("/trading/accounts/{account_id}")
+def delete_account(account_id: int, db: Session = Depends(get_db)):
+    """Soft-delete: sets status=withdrawn."""
+    acct = db.query(PropFirmAccount).filter(PropFirmAccount.id == account_id).first()
+    if not acct:
+        raise HTTPException(404, "Account not found")
+    acct.status = "withdrawn"
+    acct.updated_at = datetime.utcnow()
+    db.commit()
+    return {"id": account_id, "status": "withdrawn"}
+
+
+# ── Backtest CRUD ─────────────────────────────────────────────
+
+@app.get("/trading/backtest")
+def list_backtests(db: Session = Depends(get_db)):
+    trades = db.query(BacktestTrade).order_by(BacktestTrade.date.desc(), BacktestTrade.id.desc()).all()
+    return [_serialize_backtest(t) for t in trades]
+
+
+@app.get("/trading/backtest/recent")
+def recent_backtests(n: int = Query(20, ge=1, le=200), db: Session = Depends(get_db)):
+    trades = db.query(BacktestTrade).order_by(BacktestTrade.date.desc(), BacktestTrade.id.desc()).limit(n).all()
+    return [_serialize_backtest(t) for t in trades]
+
+
+@app.post("/trading/backtest", status_code=201)
+def create_backtest(payload: schemas.BacktestTradeCreate, db: Session = Depends(get_db)):
+    trade = BacktestTrade(**payload.model_dump())
+    db.add(trade)
+    db.commit()
+    db.refresh(trade)
+    return _serialize_backtest(trade)
+
+
+@app.patch("/trading/backtest/{trade_id}")
+def update_backtest(trade_id: int, payload: schemas.BacktestTradePatch, db: Session = Depends(get_db)):
+    trade = db.query(BacktestTrade).filter(BacktestTrade.id == trade_id).first()
+    if not trade:
+        raise HTTPException(404, "Backtest trade not found")
+    for field, val in payload.model_dump(exclude_none=True).items():
+        setattr(trade, field, val)
+    db.commit()
+    db.refresh(trade)
+    return _serialize_backtest(trade)
+
+
+@app.delete("/trading/backtest/{trade_id}")
+def delete_backtest(trade_id: int, db: Session = Depends(get_db)):
+    trade = db.query(BacktestTrade).filter(BacktestTrade.id == trade_id).first()
+    if not trade:
+        raise HTTPException(404, "Backtest trade not found")
+    db.delete(trade)
+    db.commit()
+    return {"deleted": trade_id}
+
+
+# ── Gate ──────────────────────────────────────────────────────
+
+@app.get("/trading/gate")
+def get_gate(db: Session = Depends(get_db)):
+    return _compute_gate(db)
+
+
+# ── Live Trades CRUD ──────────────────────────────────────────
+
+@app.get("/trading/live")
+def list_live_trades(db: Session = Depends(get_db)):
+    trades = db.query(LiveTrade).order_by(LiveTrade.date.desc(), LiveTrade.id.desc()).all()
+    return [_serialize_live_trade(t) for t in trades]
+
+
+@app.get("/trading/live/recent")
+def recent_live_trades(n: int = Query(20, ge=1, le=200), db: Session = Depends(get_db)):
+    trades = db.query(LiveTrade).order_by(LiveTrade.date.desc(), LiveTrade.id.desc()).limit(n).all()
+    return [_serialize_live_trade(t) for t in trades]
+
+
+@app.post("/trading/live", status_code=201)
+def create_live_trade(payload: schemas.LiveTradeCreate, db: Session = Depends(get_db)):
+    gate = _compute_gate(db)
+    if gate["status"] == "LOCKED":
+        raise HTTPException(
+            status_code=423,
+            detail={"message": "Backtest gate not cleared. Live trading is locked.", "gate": gate},
+        )
+    data = payload.model_dump()
+    if data.get("rule_broken") and not data.get("rule_broken_description"):
+        raise HTTPException(400, "rule_broken_description is required when rule_broken=True")
+    trade = LiveTrade(**data)
+    db.add(trade)
+    db.commit()
+    db.refresh(trade)
+    return _serialize_live_trade(trade)
+
+
+@app.patch("/trading/live/{trade_id}")
+def update_live_trade(trade_id: int, payload: schemas.LiveTradePatch, db: Session = Depends(get_db)):
+    trade = db.query(LiveTrade).filter(LiveTrade.id == trade_id).first()
+    if not trade:
+        raise HTTPException(404, "Live trade not found")
+    updates = payload.model_dump(exclude_none=True)
+    if updates.get("rule_broken") and not (updates.get("rule_broken_description") or trade.rule_broken_description):
+        raise HTTPException(400, "rule_broken_description is required when rule_broken=True")
+    for field, val in updates.items():
+        setattr(trade, field, val)
+    db.commit()
+    db.refresh(trade)
+    return _serialize_live_trade(trade)
+
+
+@app.delete("/trading/live/{trade_id}")
+def delete_live_trade(trade_id: int, db: Session = Depends(get_db)):
+    trade = db.query(LiveTrade).filter(LiveTrade.id == trade_id).first()
+    if not trade:
+        raise HTTPException(404, "Live trade not found")
+    db.delete(trade)
+    db.commit()
+    return {"deleted": trade_id}
+
+
+# ── Stats ─────────────────────────────────────────────────────
+
+@app.get("/trading/stats/backtest")
+def backtest_stats(db: Session = Depends(get_db)):
+    trades = db.query(BacktestTrade).all()
+    return _trade_stats(trades)
+
+
+@app.get("/trading/stats/live")
+def live_stats(db: Session = Depends(get_db)):
+    trades = db.query(LiveTrade).all()
+    stats = _trade_stats(trades)
+    stats["total_pl_usd"] = round(sum(t.net_pl_usd or 0 for t in trades), 2)
+    return stats
+
+
+# ── Monthly Scoreboard ────────────────────────────────────────
+
+@app.get("/trading/scoreboard/monthly")
+def monthly_scoreboard(month: str = Query(..., regex=r"^\d{4}-\d{2}$"), db: Session = Depends(get_db)):
+    year, mo = int(month[:4]), int(month[5:])
+    from calendar import monthrange
+    _, last_day = monthrange(year, mo)
+    start = date(year, mo, 1)
+    end = date(year, mo, last_day)
+    trades = db.query(LiveTrade).filter(LiveTrade.date >= start, LiveTrade.date <= end).all()
+    net_pl = round(sum(t.net_pl_usd or 0 for t in trades), 2)
+    return {"month": month, "net_pl_usd": net_pl, "trade_count": len(trades)}
+
+
+# ── Unified Ten-K Scoreboard ──────────────────────────────────
+
+@app.get("/scoreboard/ten-k")
+def ten_k_scoreboard(db: Session = Depends(get_db)):
+    target_date = date(2026, 9, 30)
+    days_remaining = max(0, (target_date - date.today()).days)
+
+    ai_revenue = db.query(func.sum(Revenue.amount)).filter(
+        Revenue.date >= TEN_K_START_DATE
+    ).scalar() or 0.0
+
+    trading_pl = db.query(func.sum(LiveTrade.net_pl_usd)).filter(
+        LiveTrade.date >= TEN_K_START_DATE,
+        LiveTrade.net_pl_usd.isnot(None),
+    ).scalar() or 0.0
+
+    total = round(float(ai_revenue) + float(trading_pl), 2)
+
+    # Monthly breakdown
+    from calendar import monthrange
+    breakdown = []
+    # Walk months from TEN_K_START_DATE to today
+    cur = TEN_K_START_DATE.replace(day=1)
+    today_month = date.today().replace(day=1)
+    while cur <= today_month:
+        yr, mo = cur.year, cur.month
+        _, last_day = monthrange(yr, mo)
+        m_start, m_end = date(yr, mo, 1), date(yr, mo, last_day)
+        label = f"{yr}-{mo:02d}"
+
+        ai_mo = float(db.query(func.sum(Revenue.amount)).filter(
+            Revenue.date >= m_start, Revenue.date <= m_end
+        ).scalar() or 0)
+        tr_mo = float(db.query(func.sum(LiveTrade.net_pl_usd)).filter(
+            LiveTrade.date >= m_start, LiveTrade.date <= m_end,
+            LiveTrade.net_pl_usd.isnot(None),
+        ).scalar() or 0)
+        breakdown.append({"month": label, "ai": round(ai_mo, 2), "trading": round(tr_mo, 2),
+                          "total": round(ai_mo + tr_mo, 2)})
+        # Advance one month
+        if mo == 12:
+            cur = date(yr + 1, 1, 1)
+        else:
+            cur = date(yr, mo + 1, 1)
+
+    return {
+        "target_usd": 10000,
+        "target_date": str(target_date),
+        "days_remaining": days_remaining,
+        "total_progress_usd": total,
+        "ai_revenue_usd": round(float(ai_revenue), 2),
+        "trading_pl_usd": round(float(trading_pl), 2),
+        "monthly_breakdown": breakdown,
+    }
 
 
 # ── EXISTING WEEKLY TARGET ENDPOINTS (unchanged) ─────────────

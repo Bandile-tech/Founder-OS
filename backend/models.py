@@ -322,3 +322,70 @@ class WeeklyHealth(Base):
     energy_level         = Column(Integer, nullable=True)   # 1–5
     created_at           = Column(DateTime, default=datetime.utcnow)
     updated_at           = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+# ── TRADING MODULE ───────────────────────────────────────────
+
+class PropFirmAccount(Base):
+    """A prop firm challenge or funded account."""
+    __tablename__ = "prop_firm_accounts"
+
+    id                  = Column(Integer, primary_key=True, index=True)
+    name                = Column(String, nullable=False)
+    firm                = Column(String, nullable=False)
+    account_size_usd    = Column(Float, nullable=False)
+    challenge_type      = Column(String, nullable=False)
+    starting_balance    = Column(Float, nullable=False)
+    current_balance     = Column(Float, nullable=False)
+    peak_balance        = Column(Float, nullable=False)
+    profit_target_pct   = Column(Float, default=8.0)
+    max_drawdown_pct    = Column(Float, default=6.0)
+    daily_drawdown_pct  = Column(Float, nullable=True)
+    start_date          = Column(Date, nullable=False)
+    status              = Column(String, default="active")  # active|passed|blown|withdrawn
+    notes               = Column(Text, nullable=True)
+    created_at          = Column(DateTime, default=datetime.utcnow)
+    updated_at          = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    live_trades = relationship("LiveTrade", back_populates="account")
+
+
+class BacktestTrade(Base):
+    """One backtest trade logged from TradingView replay."""
+    __tablename__ = "backtest_trades"
+
+    id             = Column(Integer, primary_key=True, index=True)
+    date           = Column(Date, nullable=False)
+    time_of_day    = Column(String, nullable=True)
+    pair           = Column(String, nullable=False)
+    direction      = Column(String, nullable=False)     # long|short
+    entry_reason   = Column(String, nullable=True)
+    r_multiple     = Column(Float, nullable=False)
+    rule_adherence = Column(Boolean, nullable=False)
+    outcome        = Column(String, nullable=False)     # win|loss|breakeven
+    notes          = Column(Text, nullable=True)
+    created_at     = Column(DateTime, default=datetime.utcnow)
+
+
+class LiveTrade(Base):
+    """A live or sim trade executed on a prop account."""
+    __tablename__ = "live_trades"
+
+    id                       = Column(Integer, primary_key=True, index=True)
+    date                     = Column(Date, nullable=False)
+    time_of_day              = Column(String, nullable=True)
+    pair                     = Column(String, nullable=False)
+    direction                = Column(String, nullable=False)
+    entry_reason             = Column(String, nullable=True)
+    r_multiple               = Column(Float, nullable=False)
+    rule_adherence           = Column(Boolean, nullable=False)
+    outcome                  = Column(String, nullable=False)
+    notes                    = Column(Text, nullable=True)
+    account_id               = Column(Integer, ForeignKey("prop_firm_accounts.id"), nullable=True)
+    risk_pct                 = Column(Float, nullable=True)
+    net_pl_usd               = Column(Float, nullable=True)
+    rule_broken              = Column(Boolean, default=False)
+    rule_broken_description  = Column(String, nullable=True)
+    created_at               = Column(DateTime, default=datetime.utcnow)
+
+    account = relationship("PropFirmAccount", back_populates="live_trades")
