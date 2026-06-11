@@ -1,21 +1,16 @@
 """
 Migration 003 — Refactor lift tracking out of DailyHealth into LiftLog.
 
-Runs AFTER m002_academic_roadmap (alphabetical ordering enforced by startup hook).
+Runs AFTER m002_academic_roadmap (ordered by startup hook).
 
-Steps
------
-1. Idempotency check: if daily_health no longer has the three lift columns
-   (main_lift, top_set_weight, top_set_reps), migration is already done — skip.
-2. Copy any non-null lift data from daily_health into lift_logs.
-3. Rebuild daily_health without the three lift columns via the safe
-   SQLite table-swap pattern (SQLite < 3.35 does not support DROP COLUMN).
-4. Seed the five default Lift rows — idempotent: only inserts if name
-   is not already present.
+On SQLite: uses the safe table-swap pattern (SQLite < 3.35 does not
+support DROP COLUMN natively).
 
-Run directly:
-    python migrations/m003_lift_log.py
-Or imported and called as run(db) from the startup hook.
+On Postgres: uses ALTER TABLE ... DROP COLUMN IF EXISTS directly.
+
+Idempotency: checks whether the old lift columns still exist before
+doing any destructive work, using database-appropriate introspection.
+Lift seeding is always idempotent (INSERT only if name not present).
 """
 
 import sys
@@ -29,20 +24,87 @@ from database import SessionLocal, engine
 
 
 DEFAULT_LIFTS = [
-    ("Bench Press",     1),
-    ("Pull-ups",        2),
-    ("Squat",           3),
+    ("Bench Press",      1),
+    ("Pull-ups",         2),
+    ("Squat",            3),
     ("Incline DB Press", 4),
-    ("Barbell Row",     5),
+    ("Barbell Row",      5),
 ]
 
 
-def _columns_exist(conn) -> bool:
-    """Return True if the old lift columns are still on daily_health."""
-    result = conn.execute(text("PRAGMA table_info(daily_health)")).fetchall()
-    col_names = {row[1] for row in result}
-    return "main_lift" in col_names
+# ── Dialect helpers ──────────────────────────────────────────
 
+def _dialect(conn) -> str:
+    """Return 'sqlite' or 'postgresql'."""
+    name = conn.dialect.name if hasattr(conn, "dialect") else ""
+    if not name:
+        # fall back via engine
+        try:
+            name = engine.dialect.name
+        except Exception:
+            name = "sqlite"
+    return name
+
+
+def _lift_columns_exist(conn) -> bool:
+    """Return True if the old lift columns are still on daily_health."""
+    dialect = _dialect(conn)
+    if dialect == "postgresql":
+        row = conn.execute(text("""
+            SELECT COUNT(*) FROM information_schema.columns
+            WHERE table_name = 'daily_health'
+              AND column_name = 'main_lift'
+        """)).scalar()
+        return bool(row)
+    else:
+        # SQLite
+        result = conn.execute(text("PRAGMA table_info(daily_health)")).fetchall()
+        col_names = {row[1] for row in result}
+        return "main_lift" in col_names
+
+
+def _drop_lift_columns(conn):
+    """Remove the three old lift columns from daily_health."""
+    dialect = _dialect(conn)
+    if dialect == "postgresql":
+        # Postgres supports DROP COLUMN IF EXISTS natively
+        conn.execute(text(
+            "ALTER TABLE daily_health DROP COLUMN IF EXISTS main_lift"
+        ))
+        conn.execute(text(
+            "ALTER TABLE daily_health DROP COLUMN IF EXISTS top_set_weight"
+        ))
+        conn.execute(text(
+            "ALTER TABLE daily_health DROP COLUMN IF EXISTS top_set_reps"
+        ))
+    else:
+        # SQLite: must rebuild the table without those columns
+        conn.execute(text("""
+            CREATE TABLE daily_health_new (
+                id            INTEGER PRIMARY KEY,
+                date          DATE NOT NULL UNIQUE,
+                sleep_hours   REAL,
+                mobility_done BOOLEAN DEFAULT 0,
+                session_done  BOOLEAN DEFAULT 0,
+                notes         TEXT,
+                created_at    DATETIME,
+                updated_at    DATETIME
+            )
+        """))
+        conn.execute(text("""
+            INSERT INTO daily_health_new
+                (id, date, sleep_hours, mobility_done, session_done,
+                 notes, created_at, updated_at)
+            SELECT
+                id, date, sleep_hours, mobility_done, session_done,
+                notes, created_at, updated_at
+            FROM daily_health
+        """))
+        conn.execute(text("DROP TABLE daily_health"))
+        conn.execute(text("ALTER TABLE daily_health_new RENAME TO daily_health"))
+
+
+# ── Main entry point ─────────────────────────────────────────
 
 def run(db=None):
     own_db = db is None
@@ -53,64 +115,32 @@ def run(db=None):
         conn = db.bind.connect() if hasattr(db, "bind") else engine.connect()
 
         with conn.begin():
-            if not _columns_exist(conn):
-                # Already migrated — only seed lifts if needed.
-                _seed_lifts(conn)
-                return
-
-            # 1. Copy lift data into lift_logs (only rows that have a lift logged)
-            conn.execute(text("""
-                INSERT INTO lift_logs (lift_id, lift_name, date, weight_kg, reps, created_at)
-                SELECT
-                    COALESCE(
-                        (SELECT id FROM lifts WHERE name = dh.main_lift LIMIT 1),
-                        -1
-                    ),
-                    dh.main_lift,
-                    dh.date,
-                    COALESCE(dh.top_set_weight, 0),
-                    COALESCE(dh.top_set_reps, 0),
-                    CURRENT_TIMESTAMP
-                FROM daily_health dh
-                WHERE dh.main_lift IS NOT NULL
-                  AND dh.top_set_weight IS NOT NULL
-            """))
-
-            # 2. Build new daily_health without the three lift columns
-            conn.execute(text("""
-                CREATE TABLE daily_health_new (
-                    id            INTEGER PRIMARY KEY,
-                    date          DATE NOT NULL UNIQUE,
-                    sleep_hours   REAL,
-                    mobility_done BOOLEAN DEFAULT 0,
-                    session_done  BOOLEAN DEFAULT 0,
-                    notes         TEXT,
-                    created_at    DATETIME,
-                    updated_at    DATETIME
-                )
-            """))
-
-            conn.execute(text("""
-                INSERT INTO daily_health_new
-                    (id, date, sleep_hours, mobility_done, session_done,
-                     notes, created_at, updated_at)
-                SELECT
-                    id, date, sleep_hours, mobility_done, session_done,
-                    notes, created_at, updated_at
-                FROM daily_health
-            """))
-
-            conn.execute(text("DROP TABLE daily_health"))
-            conn.execute(text("ALTER TABLE daily_health_new RENAME TO daily_health"))
-
-            # 3. Fix up lift_logs rows that got lift_id = -1 (lift didn't exist yet)
-            #    Those will be resolved after seeding below — re-run update.
+            if _lift_columns_exist(conn):
+                # Copy lift data before dropping columns
+                conn.execute(text("""
+                    INSERT INTO lift_logs
+                        (lift_id, lift_name, date, weight_kg, reps, created_at)
+                    SELECT
+                        COALESCE(
+                            (SELECT id FROM lifts WHERE name = dh.main_lift LIMIT 1),
+                            -1
+                        ),
+                        dh.main_lift,
+                        dh.date,
+                        COALESCE(dh.top_set_weight, 0),
+                        COALESCE(dh.top_set_reps, 0),
+                        CURRENT_TIMESTAMP
+                    FROM daily_health dh
+                    WHERE dh.main_lift IS NOT NULL
+                      AND dh.top_set_weight IS NOT NULL
+                """))
+                _drop_lift_columns(conn)
 
         # Seed default lifts (idempotent)
         with conn.begin():
             _seed_lifts(conn)
 
-        # Fix any lift_logs rows where lift_id was -1 (lift now exists after seed)
+        # Fix any lift_logs rows where lift_id was -1
         with conn.begin():
             conn.execute(text("""
                 UPDATE lift_logs
@@ -137,7 +167,7 @@ def _seed_lifts(conn):
         if not existing:
             conn.execute(
                 text("INSERT INTO lifts (name, sort_order, is_active, created_at) "
-                     "VALUES (:name, :sort, 1, :ts)"),
+                     "VALUES (:name, :sort, TRUE, :ts)"),
                 {"name": name, "sort": sort_order, "ts": datetime.utcnow()}
             )
 

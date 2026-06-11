@@ -120,8 +120,31 @@ async def startup():
         _seed_books_if_empty(db)
         seed_subjects(db)   # m002
         run_m003(db)        # m003 — must run after m002
+        _verify_seed_integrity(db)
     finally:
         db.close()
+
+
+def _verify_seed_integrity(db: Session) -> None:
+    """Log loud warnings if expected seed rows are missing after startup."""
+    subject_count = db.query(Subject).count()
+    lift_count = db.query(Lift).filter(Lift.is_active == True).count()
+
+    if subject_count < 4:
+        print(
+            f"[STARTUP WARNING] Expected 4 seeded subjects, found {subject_count}. "
+            "GET /subjects will return incomplete data. Re-check m002 seed logic."
+        )
+    else:
+        print(f"[startup] Subjects OK: {subject_count} subjects present.")
+
+    if lift_count < 5:
+        print(
+            f"[STARTUP WARNING] Expected 5 default lifts, found {lift_count}. "
+            "GET /health/lifts will return incomplete data. Re-check m003 seed logic."
+        )
+    else:
+        print(f"[startup] Lifts OK: {lift_count} active lifts present.")
 
 
 # ── SCHEDULER — freeze ended week snapshots ──────────────────

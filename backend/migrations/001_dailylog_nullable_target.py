@@ -1,17 +1,17 @@
 """
 Migration 001 — Make DailyLog.weekly_target_id nullable.
 
-SQLite does not support ALTER COLUMN, so this migration:
-  1. Renames the existing table to a backup.
-  2. Creates the new table with the column marked NULL.
-  3. Copies all rows across.
-  4. Drops the backup.
+SQLite does not support ALTER COLUMN, so this migration uses the
+table-swap pattern. On Postgres (and any other non-SQLite engine) the
+ORM model already declares the column nullable, so create_all() builds
+the schema correctly and this migration is a no-op.
 
 Run directly:
     python migrations/001_dailylog_nullable_target.py
 Or import apply() from tests / other scripts.
 """
 
+import os
 import sqlite3
 from pathlib import Path
 
@@ -26,6 +26,12 @@ def _get_conn(db_path: Path | None = None) -> sqlite3.Connection:
 
 
 def apply(db_path: Path | None = None) -> None:
+    # On non-SQLite databases the ORM already creates the correct schema
+    # via create_all(); this migration is SQLite-only.
+    db_url = os.getenv("DATABASE_URL", "sqlite://")
+    if not db_url.startswith("sqlite") and "sqlite" not in db_url:
+        print("Migration 001: non-SQLite database detected — skipping (schema correct via ORM).")
+        return
     conn = _get_conn(db_path)
     cur = conn.cursor()
 
