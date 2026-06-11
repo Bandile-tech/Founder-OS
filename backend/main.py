@@ -1161,6 +1161,7 @@ def apply_parse_updates(db: Session, parsed: dict, today: date) -> dict:
     if parsed.get("trade_logs"):
         trades_created = []
         trades_blocked = []
+        trades_with_defaulted_r = []
         gate = None   # lazy-compute once if a live trade is attempted
 
         for entry in parsed["trade_logs"]:
@@ -1176,9 +1177,14 @@ def apply_parse_updates(db: Session, parsed: dict, today: date) -> dict:
             rule_broken = bool(entry.get("rule_broken"))
             rule_broken_desc = entry.get("rule_broken_description")
 
-            # r_multiple is required for a meaningful trade row
+            # r_multiple missing → default to 1.0 and surface to user (never silently drop)
             if r_multiple is None:
-                continue
+                r_multiple = 1.0
+                trades_with_defaulted_r.append({
+                    "type": trade_type,
+                    "pair": pair,
+                    "note": "r_multiple not provided, defaulted to 1.0",
+                })
 
             if trade_type == "backtest":
                 db.add(BacktestTrade(
@@ -1233,6 +1239,8 @@ def apply_parse_updates(db: Session, parsed: dict, today: date) -> dict:
         if trades_created:
             db.commit()
         result["trades_created"] = trades_created
+        if trades_with_defaulted_r:
+            result["trades_with_defaulted_r"] = trades_with_defaulted_r
         if trades_blocked:
             result["trades_blocked"] = trades_blocked
             result["gate_locked_warning"] = (
