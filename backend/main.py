@@ -16,7 +16,7 @@ from models import (
     AIMemory, Habit, AnnualTarget, KPISnapshot, RoadmapTask,
     BibleEntry, Book, SocialScore, Client, Revenue,
     Subject, Topic, Subtopic,
-    DailyHealth, WeeklyHealth,
+    DailyHealth, WeeklyHealth, Lift, LiftLog,
 )
 from memory_service import get_recent_memories
 from openai_client import (
@@ -105,6 +105,7 @@ def _seed_books_if_empty(db: Session):
 @app.on_event("startup")
 async def startup():
     from migrations.m002_academic_roadmap import seed_subjects
+    from migrations.m003_lift_log import run as run_m003
     db = SessionLocal()
     try:
         load_kpi_state(db)
@@ -113,7 +114,8 @@ async def startup():
         _seed_roadmap_tasks_if_empty(db)
         _seed_bible_if_empty(db)
         _seed_books_if_empty(db)
-        seed_subjects(db)
+        seed_subjects(db)   # m002
+        run_m003(db)        # m003 — must run after m002
     finally:
         db.close()
 
@@ -697,8 +699,6 @@ def weakest_subtopics(limit: int = Query(5, ge=1, le=50), db: Session = Depends(
 
 # ── HEALTH MODULE ────────────────────────────────────────────
 
-LIFT_NAMES = ["Bench Press", "Pull-ups", "Squat", "Incline DB Press", "Barbell Row"]
-
 # Mon=0, Tue=1, Wed=2, Fri=4, Sat=5
 TRAINING_WEEKDAYS = {0, 1, 2, 4, 5}
 
@@ -732,10 +732,31 @@ def _serialize_daily_health(r: DailyHealth) -> dict:
     return {
         "id": r.id, "date": str(r.date),
         "sleep_hours": r.sleep_hours, "mobility_done": r.mobility_done,
-        "session_done": r.session_done, "main_lift": r.main_lift,
-        "top_set_weight": r.top_set_weight, "top_set_reps": r.top_set_reps,
+        "session_done": r.session_done, "notes": r.notes,
+    }
+
+
+def _serialize_lift(r: Lift) -> dict:
+    return {"id": r.id, "name": r.name, "sort_order": r.sort_order, "is_active": r.is_active}
+
+
+def _serialize_lift_log(r: LiftLog) -> dict:
+    return {
+        "id": r.id, "lift_id": r.lift_id, "lift_name": r.lift_name,
+        "date": str(r.date), "weight_kg": r.weight_kg, "reps": r.reps,
         "notes": r.notes,
     }
+
+
+def _get_or_create_lift(db: Session, name: str) -> Lift:
+    """Case-insensitive lookup; creates new active Lift if not found."""
+    lift = db.query(Lift).filter(Lift.name.ilike(name)).first()
+    if not lift:
+        lift = Lift(name=name, sort_order=0, is_active=True)
+        db.add(lift)
+        db.commit()
+        db.refresh(lift)
+    return lift
 
 
 def _serialize_weekly_health(r: WeeklyHealth) -> dict:
@@ -833,26 +854,116 @@ def get_weekly_health_history(weeks: int = Query(8, ge=1, le=52), db: Session = 
 
 @app.get("/health/lifts/progression")
 def get_lift_progression(db: Session = Depends(get_db)):
+    active_lifts = db.query(Lift).filter(Lift.is_active == True).order_by(Lift.sort_order, Lift.name).all()
     results = []
-    for lift in LIFT_NAMES:
-        rows = db.query(DailyHealth).filter(
-            DailyHealth.main_lift == lift,
-            DailyHealth.top_set_weight.isnot(None),
-        ).all()
-        best = None
-        for r in rows:
-            if best is None:
-                best = r
-            elif (r.top_set_weight, r.top_set_reps or 0) > (best.top_set_weight, best.top_set_reps or 0):
-                best = r
+    for lift in active_lifts:
+        logs = db.query(LiftLog).filter(LiftLog.lift_id == lift.id).all()
+        best: LiftLog | None = None
+        for lg in logs:
+            if best is None or (lg.weight_kg, lg.reps) > (best.weight_kg, best.reps):
+                best = lg
         results.append({
-            "lift_name":      lift,
-            "best_weight":    best.top_set_weight if best else None,
-            "best_reps":      best.top_set_reps if best else None,
+            "lift_name":      lift.name,
+            "best_weight":    best.weight_kg if best else None,
+            "best_reps":      best.reps if best else None,
             "best_date":      str(best.date) if best else None,
-            "sessions_logged": len(rows),
+            "sessions_logged": len(logs),
         })
     return results
+
+
+# ── Lift CRUD ─────────────────────────────────────────────────
+
+@app.get("/health/lifts")
+def list_lifts(db: Session = Depends(get_db)):
+    lifts = db.query(Lift).filter(Lift.is_active == True).order_by(Lift.sort_order, Lift.name).all()
+    return [_serialize_lift(l) for l in lifts]
+
+
+@app.post("/health/lifts", status_code=201)
+def create_lift(payload: schemas.LiftCreate, db: Session = Depends(get_db)):
+    existing = db.query(Lift).filter(Lift.name.ilike(payload.name)).first()
+    if existing:
+        raise HTTPException(400, f"Lift '{payload.name}' already exists")
+    lift = Lift(name=payload.name, sort_order=payload.sort_order)
+    db.add(lift)
+    db.commit()
+    db.refresh(lift)
+    return _serialize_lift(lift)
+
+
+@app.patch("/health/lifts/{lift_id}")
+def update_lift(lift_id: int, payload: schemas.LiftPatch, db: Session = Depends(get_db)):
+    lift = db.query(Lift).filter(Lift.id == lift_id).first()
+    if not lift:
+        raise HTTPException(404, "Lift not found")
+    for field, val in payload.model_dump(exclude_none=True).items():
+        setattr(lift, field, val)
+    db.commit()
+    db.refresh(lift)
+    return _serialize_lift(lift)
+
+
+@app.delete("/health/lifts/{lift_id}", status_code=200)
+def deactivate_lift(lift_id: int, db: Session = Depends(get_db)):
+    """Soft-delete: sets is_active=False to preserve historical LiftLog data."""
+    lift = db.query(Lift).filter(Lift.id == lift_id).first()
+    if not lift:
+        raise HTTPException(404, "Lift not found")
+    lift.is_active = False
+    db.commit()
+    return {"id": lift_id, "is_active": False}
+
+
+# ── LiftLog CRUD ──────────────────────────────────────────────
+
+@app.post("/health/lift-logs", status_code=201)
+def create_lift_log(payload: schemas.LiftLogCreate, db: Session = Depends(get_db)):
+    lift = _get_or_create_lift(db, payload.lift_name)
+    log = LiftLog(
+        lift_id=lift.id, lift_name=lift.name,
+        date=payload.date, weight_kg=payload.weight_kg,
+        reps=payload.reps, notes=payload.notes,
+    )
+    db.add(log)
+    db.commit()
+    db.refresh(log)
+    return _serialize_lift_log(log)
+
+
+@app.get("/health/lift-logs/today")
+def get_lift_logs_today(db: Session = Depends(get_db)):
+    logs = db.query(LiftLog).filter(LiftLog.date == date.today()).order_by(LiftLog.id).all()
+    return [_serialize_lift_log(l) for l in logs]
+
+
+@app.get("/health/lift-logs/recent")
+def get_lift_logs_recent(days: int = Query(14, ge=1, le=90), db: Session = Depends(get_db)):
+    cutoff = date.today() - timedelta(days=days - 1)
+    logs = db.query(LiftLog).filter(LiftLog.date >= cutoff).order_by(LiftLog.date.desc(), LiftLog.id).all()
+    return [_serialize_lift_log(l) for l in logs]
+
+
+@app.patch("/health/lift-logs/{log_id}")
+def update_lift_log(log_id: int, payload: schemas.LiftLogPatch, db: Session = Depends(get_db)):
+    log = db.query(LiftLog).filter(LiftLog.id == log_id).first()
+    if not log:
+        raise HTTPException(404, "Lift log entry not found")
+    for field, val in payload.model_dump(exclude_none=True).items():
+        setattr(log, field, val)
+    db.commit()
+    db.refresh(log)
+    return _serialize_lift_log(log)
+
+
+@app.delete("/health/lift-logs/{log_id}", status_code=200)
+def delete_lift_log(log_id: int, db: Session = Depends(get_db)):
+    log = db.query(LiftLog).filter(LiftLog.id == log_id).first()
+    if not log:
+        raise HTTPException(404, "Lift log entry not found")
+    db.delete(log)
+    db.commit()
+    return {"deleted": log_id}
 
 
 # ── SHARED PARSE-APPLICATION HELPER ─────────────────────────
@@ -1008,20 +1119,39 @@ def apply_parse_updates(db: Session, parsed: dict, today: date) -> dict:
         db.commit()
         result["log_entry_created"] = True
 
-    # ── Health updates ────────────────────────────────────────
+    # ── Health updates (daily log fields) ────────────────────
     if parsed.get("health_updates"):
         hu = parsed["health_updates"]
         health_row = _get_or_create_daily_health(db, today)
-        health_fields = ["sleep_hours", "mobility_done", "session_done",
-                         "main_lift", "top_set_weight", "top_set_reps"]
+        daily_fields = ["sleep_hours", "mobility_done", "session_done"]
         changed = False
-        for field in health_fields:
+        for field in daily_fields:
             if hu.get(field) is not None:
                 setattr(health_row, field, hu[field])
                 changed = True
         if changed:
             db.commit()
         result["health_updated"] = changed
+
+    # ── Lift logs from brain dump ─────────────────────────────
+    if parsed.get("lift_logs"):
+        logs_created = []
+        for entry in parsed["lift_logs"]:
+            name = entry.get("lift_name") or ""
+            weight = entry.get("weight_kg")
+            reps = entry.get("reps")
+            if not name or weight is None or reps is None:
+                continue
+            lift = _get_or_create_lift(db, name)
+            log = LiftLog(
+                lift_id=lift.id, lift_name=lift.name,
+                date=today, weight_kg=float(weight), reps=int(reps),
+            )
+            db.add(log)
+            logs_created.append({"lift": lift.name, "weight_kg": float(weight), "reps": int(reps)})
+        if logs_created:
+            db.commit()
+        result["lift_logs_created"] = logs_created
 
     return result
 

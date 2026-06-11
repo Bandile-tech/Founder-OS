@@ -218,9 +218,6 @@ class DailyHealthPatch(BaseModel):
     sleep_hours: Optional[float] = None
     mobility_done: Optional[bool] = None
     session_done: Optional[bool] = None
-    main_lift: Optional[str] = None
-    top_set_weight: Optional[float] = None
-    top_set_reps: Optional[int] = None
     notes: Optional[str] = None
 
 
@@ -229,3 +226,28 @@ class WeeklyHealthPatch(BaseModel):
     protein_target_hit: Optional[bool] = None
     any_lift_progressed: Optional[bool] = None
     energy_level: Optional[int] = None
+
+
+class LiftCreate(BaseModel):
+    name: str
+    sort_order: int = 0
+
+
+class LiftPatch(BaseModel):
+    name: Optional[str] = None
+    sort_order: Optional[int] = None
+    is_active: Optional[bool] = None
+
+
+class LiftLogCreate(BaseModel):
+    lift_name: str
+    date: date
+    weight_kg: float
+    reps: int
+    notes: Optional[str] = None
+
+
+class LiftLogPatch(BaseModel):
+    weight_kg: Optional[float] = None
+    reps: Optional[int] = None
+    notes: Optional[str] = None
