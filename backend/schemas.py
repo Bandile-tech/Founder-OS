@@ -42,16 +42,25 @@ class HabitBulkUpsert(BaseModel):
 
 class AnnualTargetCreate(BaseModel):
     name: str
-    current_value: float = 0
-    target_value: float
-    unit: str = ""
-    category: str = "personal"
-    lower_is_better: bool = False
-    year: int = 2026
+    current_value: Optional[float] = None
+    target_value: Optional[float] = None
+    unit: Optional[str] = None
+    display_value: Optional[str] = None
+    is_complete: bool = False
+    priority: int = 3
+    is_active: bool = True
+    sort_order: int = 0
 
 
 class AnnualTargetUpdate(BaseModel):
-    current_value: float
+    current_value: Optional[float] = None
+    target_value: Optional[float] = None
+    unit: Optional[str] = None
+    display_value: Optional[str] = None
+    is_complete: Optional[bool] = None
+    priority: Optional[int] = None
+    is_active: Optional[bool] = None
+    sort_order: Optional[int] = None
 
 
 class KPIUpdate(BaseModel):
@@ -115,12 +124,55 @@ class BookCreate(BaseModel):
     status: str = "queue"
     page: int = 0
     total_pages: int = 0
+    position: int = 0
+    is_currently_reading: bool = False
 
 
 class BookUpdate(BaseModel):
     status: Optional[str] = None
     page: Optional[int] = None
     total_pages: Optional[int] = None
+    position: Optional[int] = None
+    is_currently_reading: Optional[bool] = None
+
+
+# ── WAR ROOM ──────────────────────────────────────────────────
+
+class DocumentCreate(BaseModel):
+    title: str
+    content: str
+    source_type: str = "paste"
+
+
+class DocumentUpdate(BaseModel):
+    title: Optional[str] = None
+    content: Optional[str] = None
+
+
+class NonNegotiableCreate(BaseModel):
+    key: str
+    label: str
+    sort_order: int = 0
+
+
+class NonNegotiablePatch(BaseModel):
+    label: Optional[str] = None
+    is_active: Optional[bool] = None
+    sort_order: Optional[int] = None
+
+
+class ReadingPlanCreate(BaseModel):
+    name: str
+
+
+class ReadingPlanEntryCreate(BaseModel):
+    ref: str
+    day_number: int
+
+
+class ReadingPlanEntryPatch(BaseModel):
+    done: Optional[bool] = None
+    pushed: Optional[int] = None
 
 
 class SocialScoreUpdate(BaseModel):

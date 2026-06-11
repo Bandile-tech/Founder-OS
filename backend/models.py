@@ -86,19 +86,21 @@ class Habit(Base):
 
 
 class AnnualTarget(Base):
-    """Year-level goals tracked against expected pace."""
+    """Year-level goals. Numeric targets have target_value; descriptive ones use display_value."""
     __tablename__ = "annual_targets"
 
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, nullable=False)
-    current_value = Column(Float, default=0)
-    target_value = Column(Float, nullable=False)
-    unit = Column(String, default="")
-    category = Column(String, default="personal")   # athletics|academics|business|personal
-    lower_is_better = Column(Boolean, default=False)
-    year = Column(Integer, default=2026)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    id            = Column(Integer, primary_key=True, index=True)
+    name          = Column(String, nullable=False)
+    current_value = Column(Float, nullable=True)
+    target_value  = Column(Float, nullable=True)
+    unit          = Column(String, nullable=True)
+    display_value = Column(String, nullable=True)   # for non-numeric / descriptive targets
+    is_complete   = Column(Boolean, default=False)  # only used when target_value is null
+    priority      = Column(Integer, default=3)      # 1=high, 5=low
+    is_active     = Column(Boolean, default=True)
+    sort_order    = Column(Integer, default=0)
+    created_at    = Column(DateTime, default=datetime.utcnow)
+    updated_at    = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 class KPISnapshot(Base):
@@ -163,13 +165,15 @@ class Book(Base):
     """Reading queue — from queue through done."""
     __tablename__ = "books"
 
-    id = Column(Integer, primary_key=True, index=True)
-    title = Column(String, nullable=False)
-    author = Column(String, default="")
-    status = Column(String, default="queue")    # reading|queue|done
-    page = Column(Integer, default=0)
-    total_pages = Column(Integer, default=0)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    id                  = Column(Integer, primary_key=True, index=True)
+    title               = Column(String, nullable=False)
+    author              = Column(String, default="")
+    status              = Column(String, default="queue")    # reading|queue|done
+    page                = Column(Integer, default=0)
+    total_pages         = Column(Integer, default=0)
+    position            = Column(Integer, default=0)         # display order in queue
+    is_currently_reading= Column(Boolean, default=False)
+    created_at          = Column(DateTime, default=datetime.utcnow)
 
 
 class SocialScore(Base):
@@ -389,3 +393,73 @@ class LiveTrade(Base):
     created_at               = Column(DateTime, default=datetime.utcnow)
 
     account = relationship("PropFirmAccount", back_populates="live_trades")
+
+
+# ── WAR ROOM MODULE ──────────────────────────────────────────
+
+class Document(Base):
+    """Doctrine documents — pasted or uploaded context for the AI."""
+    __tablename__ = "documents"
+
+    id          = Column(Integer, primary_key=True, index=True)
+    title       = Column(String, nullable=False)
+    content     = Column(Text, nullable=False)
+    source_type = Column(String, default="paste")   # paste|upload
+    created_at  = Column(DateTime, default=datetime.utcnow)
+    updated_at  = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    chunks = relationship("DocumentChunk", back_populates="document",
+                          cascade="all, delete-orphan", order_by="DocumentChunk.chunk_index")
+
+
+class DocumentChunk(Base):
+    """Fixed-size chunks derived from a Document, used for /context/search."""
+    __tablename__ = "document_chunks"
+
+    id          = Column(Integer, primary_key=True, index=True)
+    document_id = Column(Integer, ForeignKey("documents.id", ondelete="CASCADE"), nullable=False)
+    content     = Column(Text, nullable=False)
+    chunk_index = Column(Integer, nullable=False)
+    created_at  = Column(DateTime, default=datetime.utcnow)
+
+    document = relationship("Document", back_populates="chunks")
+
+
+class NonNegotiable(Base):
+    """User-editable list of daily non-negotiables (replaces hardcoded HABIT_DEFAULTS)."""
+    __tablename__ = "non_negotiables"
+
+    id         = Column(Integer, primary_key=True, index=True)
+    key        = Column(String, nullable=False, unique=True)
+    label      = Column(String, nullable=False)
+    is_active  = Column(Boolean, default=True)
+    sort_order = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class ReadingPlan(Base):
+    """A named reading plan (e.g. 'Bible 2026')."""
+    __tablename__ = "reading_plans"
+
+    id         = Column(Integer, primary_key=True, index=True)
+    name       = Column(String, nullable=False)
+    is_active  = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    entries = relationship("ReadingPlanEntry", back_populates="plan",
+                           cascade="all, delete-orphan", order_by="ReadingPlanEntry.day_number")
+
+
+class ReadingPlanEntry(Base):
+    """One entry in a ReadingPlan (replaces BibleEntry for the plan page)."""
+    __tablename__ = "reading_plan_entries"
+
+    id         = Column(Integer, primary_key=True, index=True)
+    plan_id    = Column(Integer, ForeignKey("reading_plans.id", ondelete="CASCADE"), nullable=False)
+    ref        = Column(String, nullable=False)
+    day_number = Column(Integer, nullable=False)
+    done       = Column(Boolean, default=False)
+    pushed     = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    plan = relationship("ReadingPlan", back_populates="entries")

@@ -787,6 +787,9 @@ tr:hover .td-del{opacity:1}
     </div>
     <div class="nav-group">
       <div class="nav-group-label">System</div>
+      <div class="nav-item" onclick="nav('warroom',this)">
+        <span class="ni">⬡</span> War Room
+      </div>
       <div class="nav-item" onclick="nav('annual',this)">
         <span class="ni">◎</span> Annual Targets
       </div>
@@ -795,11 +798,9 @@ tr:hover .td-del{opacity:1}
       </div>
     </div>
     <div class="nav-phase">
-      <div class="np-label">Current Phase</div>
-      <div class="np-name">Phase 3</div>
-      <div class="np-sub">Athletics Peak · Consolidate</div>
-      <div class="np-next">Next: ISAZ Regionals</div>
-      <div class="np-time" id="regionals-countdown"></div>
+      <div class="np-label">War Room</div>
+      <div class="np-name" id="war-room-status">Doctrine active</div>
+      <div class="np-sub" id="nn-sidebar-count">Loading non-negotiables…</div>
     </div>
   </div>
 
@@ -1088,19 +1089,71 @@ tr:hover .td-del{opacity:1}
       </div>
     </div>
 
+    <!-- ── WAR ROOM ── -->
+    <div class="page" id="p-warroom">
+      <div class="eco-header">
+        <div>
+          <div class="eco-title">War Room</div>
+          <div class="eco-sub">Operating doctrine · Non-negotiables · Context</div>
+        </div>
+      </div>
+
+      <!-- Non-Negotiables panel -->
+      <div class="card">
+        <div class="card-title">
+          <span>Non-Negotiables</span>
+          <span class="badge b-warn" id="wr-nn-badge">Loading…</span>
+        </div>
+        <div id="wr-nn-list"></div>
+        <div style="margin-top:12px;border-top:1px solid #54ACBF14;padding-top:12px">
+          <div style="display:flex;gap:8px">
+            <input class="at-input" id="wr-nn-key" placeholder="key (e.g. cold_shower)" style="max-width:140px">
+            <input class="at-input" id="wr-nn-label" placeholder="Label (displayed in habits)" style="flex:1">
+            <button class="at-add-btn" onclick="addNonNegotiable()">+ Add</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Doctrine documents -->
+      <div class="card">
+        <div class="card-title">
+          <span>Doctrine Documents</span>
+          <span class="badge b-muted" id="wr-doc-count">0 docs</span>
+        </div>
+        <div id="wr-doc-list"></div>
+        <div style="margin-top:12px;border-top:1px solid #54ACBF14;padding-top:12px">
+          <input class="at-input" id="wr-doc-title" placeholder="Document title" style="width:100%;margin-bottom:8px">
+          <textarea id="wr-doc-content" placeholder="Paste doctrine text here…"
+            style="width:100%;min-height:100px;background:#011C40;color:var(--text);border:1px solid #54ACBF22;border-radius:3px;padding:8px;font-family:'IBM Plex Mono',monospace;font-size:9px;resize:vertical;box-sizing:border-box"></textarea>
+          <button class="at-add-btn" style="margin-top:8px" onclick="addDocument()">+ Save Document</button>
+        </div>
+      </div>
+
+      <!-- Context search -->
+      <div class="card">
+        <div class="card-title"><span>Context Search</span></div>
+        <div style="display:flex;gap:8px;margin-bottom:10px">
+          <input class="at-input" id="wr-search-q" placeholder="Search doctrine…" style="flex:1" onkeydown="if(event.key==='Enter')searchContext()">
+          <button class="at-add-btn" onclick="searchContext()">Search</button>
+        </div>
+        <div id="wr-search-results" style="font-size:9px;color:var(--muted)"></div>
+      </div>
+    </div>
+
     <!-- ── ANNUAL TARGETS ── -->
     <div class="page" id="p-annual">
       <div class="eco-header">
-        <div><div class="eco-title">Annual Targets</div><div class="eco-sub">2026 goals · Auto-prioritised if behind schedule</div></div>
+        <div><div class="eco-title">Annual Targets</div><div class="eco-sub">Year goals · Numeric targets show progress bar · Descriptive show status toggle</div></div>
       </div>
       <div class="card">
         <div class="card-title"><span>Add Target</span></div>
         <div class="at-form">
-          <input class="at-input" id="at-name" placeholder="Target name (e.g. Public brand: 1,000 followers)">
-          <input class="at-input" id="at-current" placeholder="Current" type="number" min="0">
-          <input class="at-input" id="at-target" placeholder="Target" type="number" min="1">
-          <button class="at-add-btn" onclick="addAnnualTarget()">+ Add</button>
+          <input class="at-input" id="at-name" placeholder="Target name" style="grid-column:1/-1">
+          <input class="at-input" id="at-current" placeholder="Current value (leave blank for descriptive)">
+          <input class="at-input" id="at-target" placeholder="Target value (leave blank for descriptive)">
+          <button class="at-add-btn" onclick="addAnnualTarget()" style="white-space:nowrap">+ Add</button>
         </div>
+        <div style="font-size:8px;color:var(--muted);margin-top:6px">Tip: fill Target value for a numeric progress target. Leave it blank for a descriptive (done/pending) target — put a status note in Current.</div>
       </div>
       <div id="at-list"></div>
     </div>
@@ -1454,12 +1507,16 @@ async function syncFromBackend() {
     // Map backend field names to frontend conventions
     S.annualTargets = annual.map(a => ({
       id: a.id,
+      is_numeric: a.is_numeric,
+      status: a.status,
+      progress_pct: a.progress_pct,
+      expected_pct: a.expected_pct,
+      display_value: a.display_value,
+      is_complete: a.is_complete,
       name: a.name,
       current: a.current_value,
       target: a.target_value,
       unit: a.unit || "",
-      category: a.category,
-      lowerBetter: a.lower_is_better,
     }));
 
     S.bible = bible;
@@ -1552,6 +1609,7 @@ function renderPage(page){
   else if(page==="health"){renderHealth()}
   else if(page==="academic"){renderAcademicRoadmap()}
   else if(page==="annual"){renderAnnualTargets()}
+  else if(page==="warroom"){renderWarRoom()}
   else if(page==="settings"){renderSettings()}
   else if(page==="business"){renderBusiness()}
   else if(page==="trading"){renderTrading()}
@@ -1687,7 +1745,7 @@ function renderTodos(){
     if(!t.done){
       const linked=S.annualTargets.find(a=>t.text.toLowerCase().includes(a.name.toLowerCase().split(" ")[0]));
       if(linked){
-        const pct=linked.lowerBetter?kpiPct(linked):(linked.current/linked.target*100);
+        const pct=linked.progress_pct??(linked.target!=null?(linked.current/linked.target*100):0);
         const expectedPct=getYearPct()*100;
         if(pct<expectedPct-20)t.urgent=true;
       }
@@ -1817,80 +1875,93 @@ function getYearPct(){
   return(new Date()-start)/(end-start);
 }
 
-function atScheduleStatus(at){
-  const pct=at.lowerBetter
-    ?Math.max(0,Math.min(100,((at.value||at.current)*0.15-(at.current-at.target))/((at.value||at.current)*0.15)*100))
-    :(at.current/at.target*100);
-  const expected=getYearPct()*100;
-  const gap=pct-expected;
-  if(gap>10)return{label:"Ahead",cls:"b-suc"};
-  if(gap>-10)return{label:"On Track",cls:"b-glow"};
-  if(gap>-25)return{label:"Behind",cls:"b-warn"};
+function atStatusBadge(at){
+  const s=at.status||"on_track";
+  if(s==="ahead"||s==="done")return{label:s==="done"?"Done":"Ahead",cls:"b-suc"};
+  if(s==="on_track")return{label:"On Track",cls:"b-glow"};
+  if(s==="behind")return{label:"Behind",cls:"b-warn"};
+  if(s==="pending")return{label:"Pending",cls:"b-muted"};
   return{label:"Critical",cls:"b-danger"};
 }
 
 function renderAnnualDash(){
   const el=document.getElementById("at-dash");
-  if(!S.annualTargets.length){el.innerHTML=`<div style="font-size:9px;color:var(--muted)">No annual targets set. Go to Annual Targets page.</div>`;return}
+  if(!S.annualTargets.length){el.innerHTML=`<div style="font-size:9px;color:var(--muted)">No annual targets. Add on Annual Targets page.</div>`;return}
   el.innerHTML=S.annualTargets.map(at=>{
-    const pct=at.lowerBetter?kpiPct(at):Math.min(100,(at.current/at.target*100));
-    const st=atScheduleStatus(at);
-    return`<div class="at-row">
-      <div style="flex:1;min-width:0">
-        <div class="at-name">${at.name}</div>
-        <div style="margin-top:4px"><div class="pbar"><div class="pfill ${pfClass(pct)}" style="width:${pct}%"></div></div></div>
-      </div>
-      <div class="at-vals">${at.current} / ${at.target} ${at.unit||""}</div>
-      <span class="badge ${st.cls} at-schedule">${st.label}</span>
-    </div>`;
+    const st=atStatusBadge(at);
+    if(at.is_numeric!==false&&at.target!=null){
+      const pct=at.progress_pct??Math.min(100,(at.current/at.target*100));
+      return`<div class="at-row">
+        <div style="flex:1;min-width:0">
+          <div class="at-name">${at.name}</div>
+          <div style="margin-top:4px"><div class="pbar"><div class="pfill ${pfClass(pct)}" style="width:${pct}%"></div></div></div>
+        </div>
+        <div class="at-vals">${at.current??0} / ${at.target} ${at.unit||""}</div>
+        <span class="badge ${st.cls} at-schedule">${st.label}</span>
+      </div>`;
+    } else {
+      return`<div class="at-row">
+        <div style="flex:1;min-width:0"><div class="at-name">${at.name}</div>
+          <div style="font-size:9px;color:var(--muted);margin-top:2px">${at.display_value||"Descriptive target"}</div>
+        </div>
+        <span class="badge ${at.is_complete?"b-suc":"b-muted"}">${at.is_complete?"Done":"Pending"}</span>
+      </div>`;
+    }
   }).join("");
 }
 
 function renderAnnualTargets(){
   const el=document.getElementById("at-list");
-  if(!S.annualTargets.length){el.innerHTML=`<div class="card" style="font-size:9px;color:var(--muted)">No targets yet.</div>`;return}
+  if(!S.annualTargets.length){el.innerHTML=`<div class="card" style="font-size:9px;color:var(--muted)">No targets yet. Add one below.</div>`;return}
+  const expected=Math.round(getYearPct()*100);
   el.innerHTML=S.annualTargets.map(at=>{
-    const pct=at.lowerBetter?kpiPct(at):Math.min(100,(at.current/at.target*100));
-    const st=atScheduleStatus(at);
-    const expected=Math.round(getYearPct()*100);
+    const st=atStatusBadge(at);
+    const isNumeric=at.is_numeric!==false&&at.target!=null;
+    const pct=isNumeric?(at.progress_pct??Math.min(100,(at.current/at.target*100))):0;
     return`<div class="card">
       <div class="card-title">
         <span>${at.name}</span>
         <div style="display:flex;gap:6px">
           <span class="badge ${st.cls}">${st.label}</span>
-          <span class="badge b-muted">${Math.round(pct)}% done</span>
+          ${isNumeric?`<span class="badge b-muted">${Math.round(pct)}%</span>`:""}
         </div>
       </div>
+      ${isNumeric?`
       <div style="margin-bottom:8px">
-        <div class="pbar" style="height:6px">
-          <div class="pfill ${pfClass(pct)}" style="width:${pct}%"></div>
-        </div>
+        <div class="pbar" style="height:6px"><div class="pfill ${pfClass(pct)}" style="width:${pct}%"></div></div>
         <div style="display:flex;justify-content:space-between;margin-top:4px;font-size:8px;color:var(--muted)">
-          <span>${at.current} / ${at.target} ${at.unit||""}</span>
-          <span>Year ${expected}% elapsed · Need ${Math.round(expected)}% progress</span>
+          <span>${at.current??0} / ${at.target} ${at.unit||""}</span>
+          <span>Year ${expected}% elapsed</span>
         </div>
       </div>
       <div style="display:flex;gap:8px">
         <input class="at-input" id="up-${at.id}" placeholder="Update current value" type="number" style="max-width:180px">
         <button class="at-add-btn" onclick="updateAT('${at.id}')">Update</button>
         <button class="at-add-btn" style="background:var(--danger);border-color:var(--danger);margin-left:auto" onclick="deleteAT('${at.id}')">Delete</button>
-      </div>
+      </div>`:`
+      <div style="font-size:9px;color:var(--muted);margin-bottom:8px">${at.display_value||""}</div>
+      <div style="display:flex;gap:8px">
+        <button class="at-add-btn" onclick="toggleATComplete('${at.id}',${!at.is_complete})">${at.is_complete?"Mark Pending":"Mark Done"}</button>
+        <button class="at-add-btn" style="background:var(--danger);border-color:var(--danger);margin-left:auto" onclick="deleteAT('${at.id}')">Delete</button>
+      </div>`}
     </div>`;
   }).join("");
 }
 
 async function addAnnualTarget(){
   const name=document.getElementById("at-name").value.trim();
-  const cur=parseFloat(document.getElementById("at-current").value)||0;
-  const tgt=parseFloat(document.getElementById("at-target").value);
-  if(!name||!tgt){alert("Fill name and target.");return}
+  const cur=document.getElementById("at-current").value;
+  const tgt=document.getElementById("at-target").value;
+  if(!name){alert("Target name required.");return}
+  const body={name};
+  if(tgt){body.target_value=parseFloat(tgt);body.current_value=parseFloat(cur)||0;}
+  else{body.display_value=cur||name;}
   try{
-    const r=await fetch(`${API_BASE}/annual-targets`,{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({name,current_value:cur,target_value:tgt,unit:"",category:"personal",lower_is_better:false,year:2026})});
-    if(r.ok){const d=await r.json();S.annualTargets.push({id:d.id,name,current:cur,target:tgt,unit:"",category:"personal",lowerBetter:false});}
+    const r=await fetch(`${API_BASE}/annual-targets`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    if(r.ok){const d=await r.json();S.annualTargets.push({id:d.id,name,current:body.current_value??null,target:body.target_value??null,unit:"",display_value:body.display_value||null,is_complete:false,is_numeric:!!body.target_value,status:"on_track",progress_pct:0,expected_pct:Math.round(getYearPct()*100)});}
     else throw new Error();
   }catch{
-    S.annualTargets.push({id:"at-"+uid(),name,current:cur,target:tgt,unit:"",category:"personal",lowerBetter:false});
+    S.annualTargets.push({id:"at-"+uid(),name,current:body.current_value??null,target:body.target_value??null,unit:"",display_value:body.display_value||null,is_complete:false,is_numeric:!!body.target_value,status:"on_track",progress_pct:0,expected_pct:Math.round(getYearPct()*100)});
   }
   document.getElementById("at-name").value="";
   document.getElementById("at-current").value="";
@@ -1906,10 +1977,18 @@ async function updateAT(id){
   const at=S.annualTargets.find(a=>String(a.id)===String(id));
   if(!at)return;
   at.current=val;
-  try{await fetch(`${API_BASE}/annual-targets/${id}`,{method:"PATCH",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({current_value:val})});}catch{}
+  try{await fetch(`${API_BASE}/annual-targets/${id}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({current_value:val})});}catch{}
   addLog(`Annual target updated: ${at.name} → ${val}`);
   saveState();renderAnnualTargets();checkUrgentAlerts();
+}
+
+async function toggleATComplete(id,val){
+  const at=S.annualTargets.find(a=>String(a.id)===String(id));
+  if(!at)return;
+  at.is_complete=val;
+  at.status=val?"done":"pending";
+  try{await fetch(`${API_BASE}/annual-targets/${id}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({is_complete:val})});}catch{}
+  saveState();renderAnnualTargets();
 }
 
 async function deleteAT(id){
@@ -1917,6 +1996,128 @@ async function deleteAT(id){
   try{await fetch(`${API_BASE}/annual-targets/${id}`,{method:"DELETE"});}catch{}
   S.annualTargets=S.annualTargets.filter(a=>String(a.id)!==String(id));
   saveState();renderAnnualTargets();
+}
+
+/* ═══════════════════════════════════════════════════
+   WAR ROOM
+═══════════════════════════════════════════════════ */
+let _wr = {nonNeg:[], docs:[]};
+
+async function renderWarRoom(){
+  // Fetch live data
+  try{
+    const [nns, docs] = await Promise.all([
+      fetch(`${API_BASE}/non-negotiables`).then(r=>r.json()),
+      fetch(`${API_BASE}/documents`).then(r=>r.json()),
+    ]);
+    _wr.nonNeg = nns;
+    _wr.docs   = docs;
+  }catch(e){console.warn("War Room fetch failed",e);}
+
+  // Non-Negotiables
+  const nnEl=document.getElementById("wr-nn-list");
+  const nnBadge=document.getElementById("wr-nn-badge");
+  if(!_wr.nonNeg.length){
+    nnEl.innerHTML=`<div style="font-size:9px;color:var(--muted)">No non-negotiables yet. Add below.</div>`;
+    nnBadge.textContent="0 items";
+  } else {
+    nnBadge.textContent=`${_wr.nonNeg.filter(n=>n.is_active).length} active`;
+    nnEl.innerHTML=_wr.nonNeg.map(n=>`
+      <div class="eco-row" style="align-items:center">
+        <div class="nn-dot ${n.is_active?"dot-done":"dot-undone"}" style="flex-shrink:0;cursor:pointer" onclick="toggleNN(${n.id},${!n.is_active})"></div>
+        <span style="flex:1;${!n.is_active?"color:var(--muted);text-decoration:line-through":""}">${escHtml(n.label)}</span>
+        <span style="font-size:8px;color:var(--muted);margin-right:8px">${escHtml(n.key)}</span>
+        <button class="at-add-btn" style="background:var(--danger);border-color:var(--danger);font-size:8px;padding:2px 6px" onclick="deleteNN(${n.id})">✕</button>
+      </div>`).join("");
+  }
+
+  // Update sidebar status
+  const activeCount=_wr.nonNeg.filter(n=>n.is_active).length;
+  const sidebarSub=document.getElementById("nn-sidebar-count");
+  if(sidebarSub) sidebarSub.textContent=`${activeCount} non-negotiable${activeCount!==1?"s":""}`;
+
+  // Documents
+  const docEl=document.getElementById("wr-doc-list");
+  const docBadge=document.getElementById("wr-doc-count");
+  docBadge.textContent=`${_wr.docs.length} doc${_wr.docs.length!==1?"s":""}`;
+  if(!_wr.docs.length){
+    docEl.innerHTML=`<div style="font-size:9px;color:var(--muted)">No doctrine documents yet.</div>`;
+  } else {
+    docEl.innerHTML=_wr.docs.map(d=>`
+      <div class="eco-row" style="align-items:flex-start;flex-direction:column;padding:8px 0">
+        <div style="display:flex;width:100%;align-items:center;gap:8px">
+          <span style="flex:1;font-size:10px;font-weight:600">${escHtml(d.title)}</span>
+          <span class="badge b-muted">${d.chunk_count} chunk${d.chunk_count!==1?"s":""}</span>
+          <button class="at-add-btn" style="background:var(--danger);border-color:var(--danger);font-size:8px;padding:2px 6px" onclick="deleteDoc(${d.id})">✕</button>
+        </div>
+        <div style="font-size:8px;color:var(--muted);margin-top:2px">${escHtml(d.created_at?.slice(0,10)||"")}</div>
+      </div>`).join("");
+  }
+}
+
+async function addNonNegotiable(){
+  const key=document.getElementById("wr-nn-key").value.trim().replace(/\s+/g,"_");
+  const label=document.getElementById("wr-nn-label").value.trim();
+  if(!key||!label){alert("Key and label required.");return}
+  try{
+    const r=await fetch(`${API_BASE}/non-negotiables`,{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({key,label,sort_order:_wr.nonNeg.length})});
+    if(!r.ok)throw new Error(await r.text());
+    document.getElementById("wr-nn-key").value="";
+    document.getElementById("wr-nn-label").value="";
+    renderWarRoom();
+  }catch(e){alert("Failed: "+e.message);}
+}
+
+async function toggleNN(id, active){
+  try{
+    await fetch(`${API_BASE}/non-negotiables/${id}`,{method:"PATCH",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({is_active:active})});
+    renderWarRoom();
+  }catch{}
+}
+
+async function deleteNN(id){
+  if(!confirm("Remove this non-negotiable?"))return;
+  try{await fetch(`${API_BASE}/non-negotiables/${id}`,{method:"DELETE"});}catch{}
+  renderWarRoom();
+}
+
+async function addDocument(){
+  const title=document.getElementById("wr-doc-title").value.trim();
+  const content=document.getElementById("wr-doc-content").value.trim();
+  if(!title||!content){alert("Title and content required.");return}
+  try{
+    const r=await fetch(`${API_BASE}/documents`,{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({title,content,source_type:"paste"})});
+    if(!r.ok)throw new Error(await r.text());
+    document.getElementById("wr-doc-title").value="";
+    document.getElementById("wr-doc-content").value="";
+    renderWarRoom();
+  }catch(e){alert("Failed: "+e.message);}
+}
+
+async function deleteDoc(id){
+  if(!confirm("Delete this document?"))return;
+  try{await fetch(`${API_BASE}/documents/${id}`,{method:"DELETE"});}catch{}
+  renderWarRoom();
+}
+
+async function searchContext(){
+  const q=document.getElementById("wr-search-q").value.trim();
+  if(!q)return;
+  const el=document.getElementById("wr-search-results");
+  el.textContent="Searching…";
+  try{
+    const r=await fetch(`${API_BASE}/context/search?q=${encodeURIComponent(q)}`);
+    const d=await r.json();
+    if(!d.results?.length){el.textContent="No results.";return}
+    el.innerHTML=d.results.map(c=>`
+      <div style="border:1px solid #54ACBF22;border-radius:3px;padding:8px;margin-bottom:6px">
+        <div style="font-size:8px;color:var(--muted);margin-bottom:4px">Doc #${c.document_id} · chunk ${c.chunk_index}</div>
+        <div style="line-height:1.5">${escHtml(c.content.slice(0,300))}${c.content.length>300?"…":""}</div>
+      </div>`).join("");
+  }catch(e){el.textContent="Search failed.";}
 }
 
 /* ═══════════════════════════════════════════════════
@@ -2021,18 +2222,26 @@ async function addBibleEntry(){
   saveState();renderBible();
 }
 
+async function toggleCurrentlyReading(id){
+  const b=S.books.find(x=>x.id===id);
+  if(!b)return;
+  b.is_currently_reading=!b.is_currently_reading;
+  saveState();renderBooks();
+  try{await fetch(`${API_BASE}/books/${id}/currently-reading`,{method:"PATCH"});}catch{}
+}
+
 function renderBooks(){
   const cls={reading:"bs-reading",queue:"bs-queue",done:"bs-done"};
-  const active=S.books.filter(b=>b.status==="reading").length;
+  const active=S.books.filter(b=>b.status==="reading"||b.is_currently_reading).length;
   document.getElementById("books-card").innerHTML=`
-    <div class="card-title"><span>Reading Queue</span><span class="badge b-glow">${active} reading</span></div>
+    <div class="card-title"><span>Reading Queue</span><span class="badge b-glow">${active} active</span></div>
     `+S.books.map(b=>{
       const total=b.total_pages||b.total||0;
       const pct=total>0?Math.round(b.page/total*100):0;
       return`<div class="book-row">
         <div style="flex:1;min-width:0">
-          <div class="bk-title">${b.title}</div>
-          <div class="bk-author">${b.author||""}</div>
+          <div class="bk-title">${escHtml(b.title)}${b.is_currently_reading?` <span class="badge b-glow" style="font-size:7px;vertical-align:middle">NOW</span>`:""}</div>
+          <div class="bk-author">${escHtml(b.author||"")}</div>
           ${total>0?`<div style="margin-top:5px;display:flex;align-items:center;gap:8px">
             <div style="width:100px"><div class="pbar"><div class="pfill ${pfClass(pct)}" style="width:${pct}%"></div></div></div>
             <span style="font-size:8px;color:var(--muted)">${b.page}/${total}p</span>
@@ -2042,6 +2251,7 @@ function renderBooks(){
         </div>
         <div style="display:flex;flex-direction:column;align-items:flex-end;gap:5px">
           <span class="bk-status ${cls[b.status]}">${b.status}</span>
+          <button class="at-add-btn" style="font-size:8px;padding:2px 6px;${b.is_currently_reading?"background:var(--glow);border-color:var(--glow)":""}" onclick="toggleCurrentlyReading(${b.id})">${b.is_currently_reading?"★ Now":"☆ Now"}</button>
           <select class="at-input" style="font-size:9px;padding:2px 5px;width:90px" onchange="updateBookStatus(${b.id},this.value)">
             <option value="queue" ${b.status==="queue"?"selected":""}>queue</option>
             <option value="reading" ${b.status==="reading"?"selected":""}>reading</option>

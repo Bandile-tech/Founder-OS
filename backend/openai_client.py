@@ -299,22 +299,20 @@ def get_radar_scores(context: dict) -> dict:
         client_score = min(15, active_count * 15)
         business = round(rev_score + pipeline_score + client_score)
     else:
-        biz_targets = [a for a in annual if a.get("category") == "business"]
-        if biz_targets:
-            biz_scores = []
-            for a in biz_targets:
-                if a.get("lower_is_better"):
-                    pct = kpi_pct({"value": a["current"], "target": a["target"], "lower_is_better": True})
-                else:
-                    pct = min(100, (a["current"] / max(a["target"], 1)) * 100)
-                biz_scores.append(pct)
+        # Radar only uses numeric annual targets (target is not None)
+        numeric_targets = [a for a in annual if a.get("target") is not None and a.get("current") is not None]
+        if numeric_targets:
+            biz_scores = [min(100, (a["current"] / max(a["target"], 1e-9)) * 100) for a in numeric_targets]
             business = round(sum(biz_scores) / len(biz_scores))
         else:
             business = 10  # baseline — just started
 
     # SKILLS (CS50P + Python roadmap)
     python_target = next((a for a in annual if "cs50" in a.get("name", "").lower() or "python" in a.get("name", "").lower()), None)
-    skills = round((python_target["current"] / max(python_target["target"], 1)) * 100) if python_target else 15
+    if python_target and python_target.get("target") and python_target.get("current") is not None:
+        skills = round((python_target["current"] / max(python_target["target"], 1e-9)) * 100)
+    else:
+        skills = 15
 
     # SOCIAL (manual for now — default moderate)
     # Will be driven by a dedicated social score input later
