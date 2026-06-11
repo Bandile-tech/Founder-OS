@@ -645,16 +645,21 @@ class TestParseTradeLogs:
         assert lt.account_id is not None
         db.close()
 
-    def test_brain_dump_skips_trade_log_without_r_multiple(self):
+    def test_brain_dump_defaults_r_multiple_when_missing(self):
+        """null r_multiple must default to 1.0 and be created, not silently dropped."""
         payload = _fake_parse_response({
             "trade_logs": [{"type": "backtest", "pair": "EURUSD", "direction": "long",
-                            "outcome": "win", "adherence": True}]  # no r_multiple
+                            "outcome": "win", "adherence": True}]  # no r_multiple key
         })
         with patch("main.get_parse_response", return_value=payload):
-            client.post("/parse", json={"text": "vague trade mention"})
+            resp = client.post("/parse", json={"text": "vague trade mention"})
+        data = resp.json()
         db = _db()
-        assert db.query(models.BacktestTrade).count() == 0
+        bt = db.query(models.BacktestTrade).first()
+        assert bt is not None, "BacktestTrade was silently dropped — should have defaulted r_multiple to 1.0"
+        assert bt.r_multiple == 1.0
         db.close()
+        assert len(data.get("updates", {}).get("trades_with_defaulted_r", [])) == 1
 
     def test_brain_dump_multiple_trade_logs_in_one_parse(self):
         payload = _fake_parse_response({
@@ -777,3 +782,57 @@ class TestMixedCategoryExtraction:
         # Habit must still be saved despite trade being blocked
         assert self._habit_done("scripture_prayer") is True, \
             "scripture_prayer dropped — collateral damage from gate block"
+
+    def test_live_trade_with_null_r_multiple_defaulted_not_dropped_gate_locked(self):
+        """
+        Live trade with r_multiple=None (e.g. user wrote '+$50' not '+2R').
+        Gate is LOCKED. The trade must be blocked (gate warning), NOT silently
+        skipped — trades_with_defaulted_r must record the default, and the
+        gate check must still run.
+        """
+        self._seed_habits()
+        payload = _fake_parse_response({
+            "trade_logs": [
+                {"type": "live", "pair": "EURUSD", "direction": "long",
+                 "r_multiple": None, "outcome": "win", "adherence": True,
+                 "net_pl_usd": 50}
+            ],
+        })
+        # Gate LOCKED (no backtests seeded)
+        with patch("main.get_parse_response", return_value=payload):
+            resp = client.post("/input", json={"text": "Logged a live trade EURUSD long +$50 all rules followed", "session_id": "test-null-r-live"})
+        assert resp.status_code == 200
+        data = resp.json()
+        # Must NOT be silently ok — gate check must have run
+        assert data["status"] == "partial", \
+            "status should be partial (gate LOCKED), not ok — null r_multiple was silently dropped"
+        assert "gate_locked_warning" in data, "gate_locked_warning missing"
+        db = _db()
+        assert db.query(models.LiveTrade).count() == 0, "LiveTrade must NOT be created when gate LOCKED"
+        db.close()
+        # r_multiple default must be surfaced
+        assert len(data["updates"].get("trades_with_defaulted_r", [])) == 1, \
+            "trades_with_defaulted_r not populated for null r_multiple"
+
+    def test_backtest_with_null_r_multiple_defaulted_not_dropped(self):
+        """
+        Backtest trade with r_multiple=None. Must be saved with r_multiple=1.0
+        and surfaced in trades_with_defaulted_r. Must NOT be silently skipped.
+        """
+        payload = _fake_parse_response({
+            "trade_logs": [
+                {"type": "backtest", "pair": "GBPUSD", "direction": "short",
+                 "r_multiple": None, "outcome": "win", "adherence": True}
+            ],
+        })
+        with patch("main.get_parse_response", return_value=payload):
+            resp = client.post("/input", json={"text": "Did a backtest GBPUSD short, went well", "session_id": "test-null-r-bt"})
+        assert resp.status_code == 200
+        data = resp.json()
+        db = _db()
+        bt = db.query(models.BacktestTrade).first()
+        assert bt is not None, "BacktestTrade was silently dropped when r_multiple=None"
+        assert bt.r_multiple == 1.0, f"Expected r_multiple=1.0 default, got {bt.r_multiple}"
+        db.close()
+        assert len(data["updates"].get("trades_with_defaulted_r", [])) == 1, \
+            "trades_with_defaulted_r not populated for null r_multiple backtest"
