@@ -18,6 +18,7 @@ from models import (
     Subject, Topic, Subtopic,
     DailyHealth, WeeklyHealth, Lift, LiftLog,
     PropFirmAccount, BacktestTrade, LiveTrade,
+    Document, DocumentChunk, NonNegotiable, ReadingPlan, ReadingPlanEntry,
 )
 from memory_service import get_recent_memories
 from openai_client import (
@@ -75,23 +76,6 @@ def load_kpi_state(db: Session):
 
 
 # ── STARTUP ──────────────────────────────────────────────────
-BIBLE_PLAN = [
-    "Genesis 1–2", "Genesis 3–5", "Proverbs 1", "Proverbs 2", "Psalm 1",
-    "Matthew 5–7", "Romans 8", "Proverbs 3", "Acts 1–2", "John 1",
-    "Proverbs 4", "Psalm 23", "Luke 15", "Proverbs 5", "1 Corinthians 13",
-    "Proverbs 6", "Psalm 91", "John 3", "Proverbs 7", "Acts 4–5",
-]
-
-def _seed_bible_if_empty(db: Session):
-    if db.query(BibleEntry).count() == 0:
-        today = date.today()
-        for i, ref in enumerate(BIBLE_PLAN):
-            entry_date = today - timedelta(days=7) + timedelta(days=i)
-            done = entry_date < today
-            db.add(BibleEntry(ref=ref, date=entry_date, done=done, pushed=0))
-        db.commit()
-
-
 BOOK_DEFAULTS_DATA = [
     ("The Almanack of Naval Ravikant", "Naval Ravikant", "reading", 67, 240),
     ("Zero to One", "Peter Thiel", "queue", 0, 195),
@@ -110,16 +94,17 @@ def _seed_books_if_empty(db: Session):
 async def startup():
     from migrations.m002_academic_roadmap import seed_subjects
     from migrations.m003_lift_log import run as run_m003
+    from migrations.m004_warroom import run as run_m004
     db = SessionLocal()
     try:
         load_kpi_state(db)
         _seed_habits_if_empty(db)
-        _seed_annual_targets_if_empty(db)
         _seed_roadmap_tasks_if_empty(db)
-        _seed_bible_if_empty(db)
         _seed_books_if_empty(db)
         seed_subjects(db)   # m002
         run_m003(db)        # m003 — must run after m002
+        run_m004(db)        # m004 — war room schema migration
+        _seed_non_negotiables_if_empty(db)
         _verify_seed_integrity(db)
     finally:
         db.close()
@@ -186,17 +171,15 @@ def _seed_habits_if_empty(db: Session):
             db.add(Habit(key=key, label=label, done=False, date=today))
         db.commit()
 
-def _seed_annual_targets_if_empty(db: Session):
-    if db.query(AnnualTarget).count() == 0:
-        defaults = [
-            AnnualTarget(name="Public brand followers", current_value=0,  target_value=1000, unit="followers", category="business"),
-            AnnualTarget(name="AI services revenue",    current_value=0,  target_value=2000, unit="USD",       category="business"),
-            AnnualTarget(name="400m personal best",     current_value=55.99, target_value=48.0, unit="s",     category="athletics", lower_is_better=True),
-            AnnualTarget(name="CS50P completion",       current_value=15, target_value=100,  unit="%",        category="business"),
-        ]
-        for d in defaults:
-            db.add(d)
+
+def _seed_non_negotiables_if_empty(db: Session):
+    """Seed NonNegotiable rows from HABIT_DEFAULTS if the table is empty."""
+    from models import NonNegotiable
+    if db.query(NonNegotiable).count() == 0:
+        for i, (key, label) in enumerate(HABIT_DEFAULTS):
+            db.add(NonNegotiable(key=key, label=label, is_active=True, sort_order=i))
         db.commit()
+
 
 ROADMAP_DEFAULTS = [
     # Sprint
@@ -324,42 +307,64 @@ def habit_streak(key: str, db: Session = Depends(get_db)):
 
 
 # ── ANNUAL TARGETS ───────────────────────────────────────────
-@app.get("/annual-targets")
-def get_annual_targets(year: int = 2026, db: Session = Depends(get_db)):
-    targets = db.query(AnnualTarget).filter(AnnualTarget.year == year).all()
-    year_pct = _year_pct()
-    result = []
-    for t in targets:
+
+def _serialize_annual_target(t: AnnualTarget, year_pct: float) -> dict:
+    is_numeric = t.target_value is not None
+    if is_numeric:
         pct = _at_progress_pct(t)
         expected = year_pct * 100
         gap = pct - expected
-        if gap > 10:   status = "ahead"
+        if gap > 10:    status = "ahead"
         elif gap > -10: status = "on_track"
         elif gap > -25: status = "behind"
         else:           status = "critical"
-        result.append({
-            "id": t.id,
-            "name": t.name,
-            "current_value": t.current_value,
-            "target_value": t.target_value,
-            "unit": t.unit,
-            "category": t.category,
-            "lower_is_better": t.lower_is_better,
-            "year": t.year,
-            "progress_pct": round(pct),
-            "expected_pct": round(expected),
-            "status": status,
-        })
-    return result
+    else:
+        pct = 100 if t.is_complete else 0
+        expected = year_pct * 100
+        status = "done" if t.is_complete else "pending"
+    return {
+        "id":            t.id,
+        "name":          t.name,
+        "current_value": t.current_value,
+        "target_value":  t.target_value,
+        "unit":          t.unit,
+        "display_value": t.display_value,
+        "is_complete":   t.is_complete,
+        "is_numeric":    is_numeric,
+        "priority":      t.priority,
+        "is_active":     t.is_active,
+        "sort_order":    t.sort_order,
+        "progress_pct":  round(pct),
+        "expected_pct":  round(expected),
+        "status":        status,
+    }
+
+
+@app.get("/annual-targets")
+def get_annual_targets(db: Session = Depends(get_db)):
+    targets = (db.query(AnnualTarget)
+               .filter(AnnualTarget.is_active == True)
+               .order_by(AnnualTarget.sort_order, AnnualTarget.id)
+               .all())
+    year_pct = _year_pct()
+    return [_serialize_annual_target(t, year_pct) for t in targets]
+
+
+@app.get("/annual-targets/all")
+def get_all_annual_targets(db: Session = Depends(get_db)):
+    """Returns all targets including inactive ones."""
+    targets = db.query(AnnualTarget).order_by(AnnualTarget.sort_order, AnnualTarget.id).all()
+    year_pct = _year_pct()
+    return [_serialize_annual_target(t, year_pct) for t in targets]
 
 
 @app.post("/annual-targets")
 def create_annual_target(payload: schemas.AnnualTargetCreate, db: Session = Depends(get_db)):
-    t = AnnualTarget(**payload.dict())
+    t = AnnualTarget(**payload.model_dump())
     db.add(t)
     db.commit()
     db.refresh(t)
-    return {"id": t.id, "name": t.name}
+    return _serialize_annual_target(t, _year_pct())
 
 
 @app.patch("/annual-targets/{target_id}")
@@ -367,10 +372,11 @@ def update_annual_target(target_id: int, payload: schemas.AnnualTargetUpdate, db
     t = db.query(AnnualTarget).filter(AnnualTarget.id == target_id).first()
     if not t:
         raise HTTPException(404, "Annual target not found")
-    t.current_value = payload.current_value
+    for field, val in payload.model_dump(exclude_none=True).items():
+        setattr(t, field, val)
     t.updated_at = datetime.utcnow()
     db.commit()
-    return {"id": t.id, "current_value": t.current_value}
+    return _serialize_annual_target(t, _year_pct())
 
 
 @app.delete("/annual-targets/{target_id}")
@@ -441,9 +447,11 @@ def get_radar(db: Session = Depends(get_db)):
     """Compute radar domain scores from live system data."""
     habits_today = {h.key: h.done for h in db.query(Habit).filter(Habit.date == date.today()).all()}
     annual = [
-        {"name": t.name, "current": t.current_value, "target": t.target_value,
-         "category": t.category, "lower_is_better": t.lower_is_better}
-        for t in db.query(AnnualTarget).filter(AnnualTarget.year == date.today().year).all()
+        {"name": t.name, "current": t.current_value, "target": t.target_value}
+        for t in db.query(AnnualTarget).filter(
+            AnnualTarget.is_active == True,
+            AnnualTarget.target_value != None,
+        ).all()
     ]
 
     # Bible streak from habits
@@ -1414,9 +1422,6 @@ def chat_endpoint(request: schemas.ChatRequest, db: Session = Depends(get_db)):
 @app.get("/bible")
 def get_bible(db: Session = Depends(get_db)):
     entries = db.query(BibleEntry).order_by(BibleEntry.date.asc()).all()
-    if not entries:
-        _seed_bible_if_empty(db)
-        entries = db.query(BibleEntry).order_by(BibleEntry.date.asc()).all()
     return [{"id": e.id, "ref": e.ref, "date": str(e.date), "done": e.done, "pushed": e.pushed} for e in entries]
 
 
@@ -1456,23 +1461,31 @@ def bible_streak_endpoint(db: Session = Depends(get_db)):
 
 
 # ── BOOKS ─────────────────────────────────────────────────────
+
+def _serialize_book(b: Book) -> dict:
+    return {
+        "id": b.id, "title": b.title, "author": b.author, "status": b.status,
+        "page": b.page, "total_pages": b.total_pages,
+        "position": b.position, "is_currently_reading": b.is_currently_reading,
+    }
+
+
 @app.get("/books")
 def get_books(db: Session = Depends(get_db)):
-    books = db.query(Book).order_by(Book.created_at.asc()).all()
+    books = db.query(Book).order_by(Book.position.asc(), Book.created_at.asc()).all()
     if not books:
         _seed_books_if_empty(db)
-        books = db.query(Book).order_by(Book.created_at.asc()).all()
-    return [{"id": b.id, "title": b.title, "author": b.author, "status": b.status,
-             "page": b.page, "total_pages": b.total_pages} for b in books]
+        books = db.query(Book).order_by(Book.position.asc(), Book.created_at.asc()).all()
+    return [_serialize_book(b) for b in books]
 
 
 @app.post("/books")
 def add_book(payload: schemas.BookCreate, db: Session = Depends(get_db)):
-    book = Book(**payload.dict())
+    book = Book(**payload.model_dump())
     db.add(book)
     db.commit()
     db.refresh(book)
-    return {"id": book.id, "title": book.title}
+    return _serialize_book(book)
 
 
 @app.patch("/books/{book_id}")
@@ -1480,14 +1493,31 @@ def update_book(book_id: int, payload: schemas.BookUpdate, db: Session = Depends
     book = db.query(Book).filter(Book.id == book_id).first()
     if not book:
         raise HTTPException(404, "Book not found")
-    if payload.status is not None:
-        book.status = payload.status
-    if payload.page is not None:
-        book.page = payload.page
-    if payload.total_pages is not None:
-        book.total_pages = payload.total_pages
+    for field, val in payload.model_dump(exclude_none=True).items():
+        setattr(book, field, val)
     db.commit()
-    return {"id": book.id, "status": book.status, "page": book.page}
+    return _serialize_book(book)
+
+
+@app.patch("/books/{book_id}/currently-reading")
+def toggle_currently_reading(book_id: int, db: Session = Depends(get_db)):
+    book = db.query(Book).filter(Book.id == book_id).first()
+    if not book:
+        raise HTTPException(404, "Book not found")
+    book.is_currently_reading = not book.is_currently_reading
+    db.commit()
+    return _serialize_book(book)
+
+
+@app.post("/books/reorder")
+def reorder_books(order: List[int], db: Session = Depends(get_db)):
+    """Accepts a list of book IDs in the desired display order."""
+    for pos, book_id in enumerate(order):
+        book = db.query(Book).filter(Book.id == book_id).first()
+        if book:
+            book.position = pos
+    db.commit()
+    return {"reordered": len(order)}
 
 
 @app.delete("/books/{book_id}")
@@ -1498,6 +1528,230 @@ def delete_book(book_id: int, db: Session = Depends(get_db)):
     db.delete(book)
     db.commit()
     return {"deleted": book_id}
+
+
+# ── WAR ROOM — DOCUMENTS ─────────────────────────────────────
+
+CHUNK_SIZE = 800  # characters per chunk
+
+def _chunk_text(text: str, size: int = CHUNK_SIZE) -> list[str]:
+    """Split text into overlapping chunks for retrieval."""
+    words = text.split()
+    chunks, buf = [], []
+    char_count = 0
+    for word in words:
+        buf.append(word)
+        char_count += len(word) + 1
+        if char_count >= size:
+            chunks.append(" ".join(buf))
+            buf = buf[-(size // 10):]   # 10% overlap
+            char_count = sum(len(w) + 1 for w in buf)
+    if buf:
+        chunks.append(" ".join(buf))
+    return chunks or [text]
+
+
+def _rebuild_chunks(doc: Document, db: Session):
+    for old in list(doc.chunks):
+        db.delete(old)
+    for i, chunk_text in enumerate(_chunk_text(doc.content)):
+        db.add(DocumentChunk(document_id=doc.id, content=chunk_text, chunk_index=i))
+
+
+@app.get("/documents")
+def list_documents(db: Session = Depends(get_db)):
+    docs = db.query(Document).order_by(Document.created_at.desc()).all()
+    return [{"id": d.id, "title": d.title, "source_type": d.source_type,
+             "created_at": str(d.created_at), "chunk_count": len(d.chunks)} for d in docs]
+
+
+@app.post("/documents", status_code=201)
+def create_document(payload: schemas.DocumentCreate, db: Session = Depends(get_db)):
+    doc = Document(title=payload.title, content=payload.content, source_type=payload.source_type)
+    db.add(doc)
+    db.flush()
+    _rebuild_chunks(doc, db)
+    db.commit()
+    db.refresh(doc)
+    return {"id": doc.id, "title": doc.title, "chunk_count": len(doc.chunks)}
+
+
+@app.get("/documents/{doc_id}")
+def get_document(doc_id: int, db: Session = Depends(get_db)):
+    doc = db.query(Document).filter(Document.id == doc_id).first()
+    if not doc:
+        raise HTTPException(404, "Document not found")
+    return {"id": doc.id, "title": doc.title, "content": doc.content,
+            "source_type": doc.source_type, "created_at": str(doc.created_at),
+            "chunks": [{"index": c.chunk_index, "content": c.content} for c in doc.chunks]}
+
+
+@app.patch("/documents/{doc_id}")
+def update_document(doc_id: int, payload: schemas.DocumentUpdate, db: Session = Depends(get_db)):
+    doc = db.query(Document).filter(Document.id == doc_id).first()
+    if not doc:
+        raise HTTPException(404, "Document not found")
+    if payload.title is not None:
+        doc.title = payload.title
+    if payload.content is not None:
+        doc.content = payload.content
+        _rebuild_chunks(doc, db)
+    doc.updated_at = datetime.utcnow()
+    db.commit()
+    return {"id": doc.id, "title": doc.title, "chunk_count": len(doc.chunks)}
+
+
+@app.delete("/documents/{doc_id}")
+def delete_document(doc_id: int, db: Session = Depends(get_db)):
+    doc = db.query(Document).filter(Document.id == doc_id).first()
+    if not doc:
+        raise HTTPException(404, "Document not found")
+    db.delete(doc)
+    db.commit()
+    return {"deleted": doc_id}
+
+
+# ── WAR ROOM — NON-NEGOTIABLES ────────────────────────────────
+
+@app.get("/non-negotiables")
+def list_non_negotiables(db: Session = Depends(get_db)):
+    rows = db.query(NonNegotiable).order_by(NonNegotiable.sort_order, NonNegotiable.id).all()
+    return [{"id": r.id, "key": r.key, "label": r.label,
+             "is_active": r.is_active, "sort_order": r.sort_order} for r in rows]
+
+
+@app.post("/non-negotiables", status_code=201)
+def create_non_negotiable(payload: schemas.NonNegotiableCreate, db: Session = Depends(get_db)):
+    existing = db.query(NonNegotiable).filter(NonNegotiable.key == payload.key).first()
+    if existing:
+        raise HTTPException(400, f"Key '{payload.key}' already exists")
+    nn = NonNegotiable(**payload.model_dump())
+    db.add(nn)
+    db.commit()
+    db.refresh(nn)
+    return {"id": nn.id, "key": nn.key, "label": nn.label}
+
+
+@app.patch("/non-negotiables/{nn_id}")
+def update_non_negotiable(nn_id: int, payload: schemas.NonNegotiablePatch, db: Session = Depends(get_db)):
+    nn = db.query(NonNegotiable).filter(NonNegotiable.id == nn_id).first()
+    if not nn:
+        raise HTTPException(404, "Non-negotiable not found")
+    for field, val in payload.model_dump(exclude_none=True).items():
+        setattr(nn, field, val)
+    db.commit()
+    return {"id": nn.id, "key": nn.key, "label": nn.label, "is_active": nn.is_active}
+
+
+@app.delete("/non-negotiables/{nn_id}")
+def delete_non_negotiable(nn_id: int, db: Session = Depends(get_db)):
+    nn = db.query(NonNegotiable).filter(NonNegotiable.id == nn_id).first()
+    if not nn:
+        raise HTTPException(404, "Non-negotiable not found")
+    db.delete(nn)
+    db.commit()
+    return {"deleted": nn_id}
+
+
+# ── WAR ROOM — READING PLAN ───────────────────────────────────
+
+@app.get("/reading-plans")
+def list_reading_plans(db: Session = Depends(get_db)):
+    plans = db.query(ReadingPlan).order_by(ReadingPlan.id.asc()).all()
+    return [{"id": p.id, "name": p.name, "is_active": p.is_active,
+             "entry_count": len(p.entries),
+             "done_count": sum(1 for e in p.entries if e.done)} for p in plans]
+
+
+@app.post("/reading-plans", status_code=201)
+def create_reading_plan(payload: schemas.ReadingPlanCreate, db: Session = Depends(get_db)):
+    plan = ReadingPlan(name=payload.name)
+    db.add(plan)
+    db.commit()
+    db.refresh(plan)
+    return {"id": plan.id, "name": plan.name}
+
+
+@app.get("/reading-plans/{plan_id}/entries")
+def get_reading_plan_entries(plan_id: int, db: Session = Depends(get_db)):
+    plan = db.query(ReadingPlan).filter(ReadingPlan.id == plan_id).first()
+    if not plan:
+        raise HTTPException(404, "Reading plan not found")
+    return {"id": plan.id, "name": plan.name, "is_active": plan.is_active,
+            "entries": [{"id": e.id, "ref": e.ref, "day_number": e.day_number,
+                         "done": e.done, "pushed": e.pushed} for e in plan.entries]}
+
+
+@app.post("/reading-plans/{plan_id}/entries", status_code=201)
+def add_reading_plan_entry(plan_id: int, payload: schemas.ReadingPlanEntryCreate, db: Session = Depends(get_db)):
+    plan = db.query(ReadingPlan).filter(ReadingPlan.id == plan_id).first()
+    if not plan:
+        raise HTTPException(404, "Reading plan not found")
+    entry = ReadingPlanEntry(plan_id=plan_id, ref=payload.ref, day_number=payload.day_number)
+    db.add(entry)
+    db.commit()
+    db.refresh(entry)
+    return {"id": entry.id, "ref": entry.ref, "day_number": entry.day_number}
+
+
+@app.patch("/reading-plans/entries/{entry_id}")
+def update_reading_plan_entry(entry_id: int, payload: schemas.ReadingPlanEntryPatch, db: Session = Depends(get_db)):
+    entry = db.query(ReadingPlanEntry).filter(ReadingPlanEntry.id == entry_id).first()
+    if not entry:
+        raise HTTPException(404, "Entry not found")
+    if payload.done is not None:
+        entry.done = payload.done
+    if payload.pushed is not None:
+        entry.pushed = payload.pushed
+    db.commit()
+    return {"id": entry.id, "done": entry.done, "pushed": entry.pushed}
+
+
+@app.patch("/reading-plans/entries/{entry_id}/toggle")
+def toggle_reading_plan_entry(entry_id: int, db: Session = Depends(get_db)):
+    entry = db.query(ReadingPlanEntry).filter(ReadingPlanEntry.id == entry_id).first()
+    if not entry:
+        raise HTTPException(404, "Entry not found")
+    entry.done = not entry.done
+    db.commit()
+    return {"id": entry.id, "done": entry.done}
+
+
+# ── WAR ROOM — CONTEXT ────────────────────────────────────────
+
+@app.get("/context/core")
+def get_core_context(db: Session = Depends(get_db)):
+    """Returns all active doctrine documents as a single context block."""
+    docs = db.query(Document).order_by(Document.created_at.asc()).all()
+    nns = db.query(NonNegotiable).filter(NonNegotiable.is_active == True).order_by(NonNegotiable.sort_order).all()
+    targets = db.query(AnnualTarget).filter(AnnualTarget.is_active == True).order_by(AnnualTarget.sort_order).all()
+    return {
+        "documents": [{"id": d.id, "title": d.title, "content": d.content} for d in docs],
+        "non_negotiables": [{"key": n.key, "label": n.label} for n in nns],
+        "annual_targets": [
+            {"name": t.name, "current_value": t.current_value, "target_value": t.target_value,
+             "unit": t.unit, "display_value": t.display_value, "is_complete": t.is_complete}
+            for t in targets
+        ],
+    }
+
+
+@app.get("/context/search")
+def search_context(q: str, db: Session = Depends(get_db)):
+    """Keyword search across document chunks."""
+    if not q or len(q) < 2:
+        raise HTTPException(400, "Query too short")
+    q_lower = q.lower()
+    chunks = db.query(DocumentChunk).all()
+    results = []
+    for chunk in chunks:
+        if q_lower in chunk.content.lower():
+            results.append({
+                "document_id": chunk.document_id,
+                "chunk_index": chunk.chunk_index,
+                "content": chunk.content,
+            })
+    return {"query": q, "results": results[:20]}
 
 
 # ── SOCIAL SCORE ──────────────────────────────────────────────
@@ -2228,13 +2482,10 @@ def _year_pct() -> float:
 
 
 def _at_progress_pct(t: AnnualTarget) -> float:
-    if t.lower_is_better:
-        if t.current_value <= 0:
-            return 0
-        gap = t.current_value * 0.15
-        d = t.current_value - t.target_value
-        return max(0, min(100, ((gap - d) / gap) * 100))
-    return min(100, (t.current_value / max(t.target_value, 1)) * 100)
+    """Percentage progress for a numeric annual target. Descriptive targets skip this."""
+    if t.target_value is None or t.current_value is None:
+        return 0.0
+    return min(100.0, (t.current_value / max(t.target_value, 1e-9)) * 100)
 
 
 # 1. Get the path to your frontend folder
