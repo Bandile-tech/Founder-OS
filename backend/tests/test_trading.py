@@ -670,3 +670,110 @@ class TestParseTradeLogs:
         db = _db()
         assert db.query(models.BacktestTrade).count() == 2
         db.close()
+
+
+# ── REGRESSION: mixed-category brain dump extraction ─────────────────────────
+
+class TestMixedCategoryExtraction:
+    """
+    Regression tests for the 'collateral damage' bug where GPT dropping
+    habits_done when trade_logs is present caused legitimate updates to be lost.
+    These tests mock get_parse_response to simulate the CORRECT full extraction
+    the prompt fix is intended to produce — verifying that apply_parse_updates()
+    applies ALL categories in a single call regardless of which others are present.
+    """
+
+    def _seed_habits(self):
+        from datetime import date as _date
+        db = _db()
+        DEFAULTS = [
+            ("scripture_prayer", "Scripture & Prayer (pre-5:20am)"),
+            ("ironing",          "Clothes ironed night before"),
+            ("python_session",   "Python / Aether (20:30-21:30)"),
+            ("sprint_training",  "Sprint training"),
+            ("academics",        "Academic study block"),
+        ]
+        today = _date.today()
+        for key, label in DEFAULTS:
+            db.add(models.Habit(key=key, label=label, done=False, date=today))
+        db.commit()
+        db.close()
+
+    def _habit_done(self, key: str) -> bool:
+        from datetime import date as _date
+        db = _db()
+        h = db.query(models.Habit).filter(
+            models.Habit.key == key,
+            models.Habit.date == _date.today(),
+        ).first()
+        val = h.done if h else None
+        db.close()
+        return val
+
+    def test_habit_and_backtest_both_applied(self):
+        """scripture_prayer AND a backtest trade are both applied in one parse call."""
+        self._seed_habits()
+        payload = _fake_parse_response({
+            "habits_done": ["scripture_prayer"],
+            "trade_logs": [
+                {"type": "backtest", "pair": "EURUSD", "direction": "long",
+                 "r_multiple": 2.0, "outcome": "win", "adherence": True}
+            ],
+        })
+        with patch("main.get_parse_response", return_value=payload):
+            resp = client.post("/input", json={"text": "Did scripture today and logged a backtest EURUSD long +2R all rules followed", "session_id": "test-mixed-1"})
+        assert resp.status_code == 200
+        data = resp.json()
+        # Both categories must appear in the updates
+        assert any(h["key"] == "scripture_prayer" for h in data["updates"]["habits_updated"]), \
+            "scripture_prayer not in habits_updated"
+        db = _db()
+        assert db.query(models.BacktestTrade).count() == 1, "BacktestTrade not created"
+        db.close()
+        assert self._habit_done("scripture_prayer") is True, "scripture_prayer not marked done in DB"
+
+    def test_revenue_and_backtest_both_applied(self):
+        """Revenue entry AND a backtest trade are both applied in one parse call."""
+        payload = _fake_parse_response({
+            "revenue_updates": [{"amount": 500, "source": "Wamu's Bakes & Cakes", "client": None}],
+            "trade_logs": [
+                {"type": "backtest", "pair": "GBPUSD", "direction": "short",
+                 "r_multiple": 1.5, "outcome": "win", "adherence": True}
+            ],
+        })
+        with patch("main.get_parse_response", return_value=payload):
+            resp = client.post("/input", json={"text": "Earned K500 from Wamu's and logged a backtest GBPUSD short +1.5R", "session_id": "test-mixed-2"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["updates"]["revenue_logged"]) == 1, "revenue_logged missing"
+        assert data["updates"]["revenue_logged"][0]["amount"] == 500
+        db = _db()
+        assert db.query(models.BacktestTrade).count() == 1, "BacktestTrade not created"
+        db.close()
+
+    def test_habit_and_blocked_live_trade_habit_still_persists(self):
+        """When a live trade is gate-blocked, the habit in the same dump must still be saved."""
+        self._seed_habits()
+        payload = _fake_parse_response({
+            "habits_done": ["scripture_prayer"],
+            "trade_logs": [
+                {"type": "live", "pair": "EURUSD", "direction": "long",
+                 "r_multiple": 1.0, "outcome": "win", "adherence": True,
+                 "net_pl_usd": 50}
+            ],
+        })
+        # Gate is LOCKED (no backtests seeded)
+        with patch("main.get_parse_response", return_value=payload):
+            resp = client.post("/input", json={"text": "Did scripture and live EURUSD long +$50", "session_id": "test-mixed-3"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "partial", "Expected partial status when gate LOCKED"
+        assert "gate_locked_warning" in data, "gate_locked_warning missing from response"
+        # Live trade must be blocked
+        assert len(data["updates"].get("trades_blocked", [])) == 1
+        db = _db()
+        assert db.query(models.LiveTrade).count() == 0, "LiveTrade must NOT be created when gate LOCKED"
+        db.close()
+        # Habit must still be saved despite trade being blocked
+        assert self._habit_done("scripture_prayer") is True, \
+            "scripture_prayer dropped — collateral damage from gate block"
