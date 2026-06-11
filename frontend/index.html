@@ -619,6 +619,11 @@ body{
   font-size:11px;width:28px;height:28px;cursor:pointer;
 }
 .health-energy-btn.he-active{background:var(--glow);border-color:var(--glow);color:#011C40;font-weight:700}
+.health-log-row{display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid #54ACBF11}
+.health-log-lift{font-size:11px;color:var(--text);flex:1}
+.health-log-set{font-size:11px;color:var(--glow);white-space:nowrap}
+.health-log-del{background:transparent;border:none;color:var(--muted);cursor:pointer;font-size:10px;padding:0 2px}
+.health-log-del:hover{color:var(--danger)}
 
 .ar-btn-sm{
   background:transparent;border:1px solid #54ACBF33;
@@ -1878,48 +1883,43 @@ async function addBook(){
 /* ═══════════════════════════════════════════════════
    HEALTH PAGE
 ═══════════════════════════════════════════════════ */
-const LIFT_NAMES=["Bench Press","Pull-ups","Squat","Incline DB Press","Barbell Row"];
 let _healthHistOpen=false;
+let _manageLiftOpen=false;
+let _liftAddOpen=false;
+let _availableLifts=[];   // cached from GET /health/lifts
 
 async function renderHealth(){
-  // Fetch fresh data every render
   try{
-    const [daily,weekly,lifts]=await Promise.all([
+    const [daily,weekly,progression,availLifts,todayLogs]=await Promise.all([
       fetch(`${API_BASE}/health/daily/today`).then(r=>r.json()),
       fetch(`${API_BASE}/health/weekly/current`).then(r=>r.json()),
       fetch(`${API_BASE}/health/lifts/progression`).then(r=>r.json()),
+      fetch(`${API_BASE}/health/lifts`).then(r=>r.json()),
+      fetch(`${API_BASE}/health/lift-logs/today`).then(r=>r.json()),
     ]);
     S.health={daily,weekly};
-    _renderDailyCard(daily);
+    _availableLifts=availLifts;
+    _renderDailyCard(daily,todayLogs);
     _renderWeeklyCard(weekly);
-    _renderLiftsPanel(lifts);
+    _renderLiftsPanel(progression);
     if(_healthHistOpen)_loadHealthHistory();
   }catch(e){console.error("Health render failed",e);}
 }
 
-function _renderDailyCard(d){
-  const today=new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"});
-  document.getElementById("health-daily-date").textContent=today;
-  const sessionFields=d.session_done?`
-    <div class="health-field-row" style="margin-top:8px">
-      <label class="health-lbl">Main Lift</label>
-      <select class="health-sel" onchange="patchDaily('main_lift',this.value)">
-        <option value="">— select —</option>
-        ${LIFT_NAMES.map(n=>`<option value="${n}"${d.main_lift===n?" selected":""}>${n}</option>`).join("")}
-      </select>
-    </div>
-    <div class="health-field-row" style="margin-top:8px">
-      <label class="health-lbl">Top Set</label>
-      <div style="display:flex;gap:6px;align-items:center">
-        <input class="health-num" type="number" min="0" step="2.5" placeholder="kg"
-          value="${d.top_set_weight??""}"
-          onchange="patchDaily('top_set_weight',parseFloat(this.value)||null)">
-        <span style="color:var(--muted);font-size:11px">×</span>
-        <input class="health-num" type="number" min="0" step="1" placeholder="reps"
-          value="${d.top_set_reps??""}"
-          onchange="patchDaily('top_set_reps',parseInt(this.value)||null)">
-      </div>
-    </div>`:"";
+function _renderDailyCard(d,todayLogs){
+  const todayLabel=new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long"});
+  document.getElementById("health-daily-date").textContent=todayLabel;
+
+  const logRows=(todayLogs||[]).map(l=>
+    `<div class="health-log-row" id="llrow-${l.id}">
+      <span class="health-log-lift">${l.lift_name}</span>
+      <span class="health-log-set">${l.weight_kg}kg × ${l.reps}</span>
+      <button class="health-log-del" onclick="deleteLiftLog(${l.id})">✕</button>
+    </div>`
+  ).join("");
+
+  const liftOptions=_availableLifts.map(l=>`<option value="${l.name}">${l.name}</option>`).join("");
+
   document.getElementById("health-daily-body").innerHTML=`
     <div class="health-field-row">
       <label class="health-lbl">Sleep</label>
@@ -1939,7 +1939,38 @@ function _renderDailyCard(d){
         ${d.session_done?"YES":"REST DAY"}
       </button>
     </div>
-    ${sessionFields}`;
+
+    <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:10px">
+      <div style="font-size:9px;color:var(--muted);letter-spacing:0.1em;text-transform:uppercase;margin-bottom:6px">Today's Lifts</div>
+      <div id="health-lift-logs">${logRows||'<div style="font-size:10px;color:var(--muted)">No lifts logged yet.</div>'}</div>
+      <button class="ar-btn-sm" style="margin-top:8px" onclick="toggleLiftAddForm()"
+        id="health-add-lift-btn">+ Log a lift</button>
+      <div id="health-lift-add-form" style="display:none;margin-top:8px">
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          <select class="health-sel" id="lift-add-name">
+            <option value="">— lift —</option>
+            ${liftOptions}
+          </select>
+          <input class="health-num" id="lift-add-weight" type="number" min="0" step="2.5" placeholder="kg">
+          <input class="health-num" id="lift-add-reps"   type="number" min="0" step="1"   placeholder="reps">
+          <button class="health-tog htog-on" onclick="submitLiftLog()">Save</button>
+          <button class="ar-btn-sm" onclick="toggleLiftAddForm()">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-top:12px">
+      <button class="ar-btn-sm" onclick="toggleManageLifts()" id="health-manage-btn">Manage lifts</button>
+      <div id="health-manage-lifts" style="display:none;margin-top:8px">
+        <div id="health-lift-list"></div>
+        <div id="health-new-lift-row" style="margin-top:8px;display:flex;gap:6px;align-items:center">
+          <input class="health-num" id="new-lift-name" placeholder="New lift name" style="width:160px">
+          <button class="health-tog htog-on" onclick="addNewLift()">+ Add</button>
+        </div>
+      </div>
+    </div>`;
+
+  if(_manageLiftOpen)_renderLiftList();
 }
 
 function _renderWeeklyCard(w){
@@ -1978,14 +2009,33 @@ function _renderWeeklyCard(w){
 }
 
 function _renderLiftsPanel(lifts){
+  if(!lifts||!lifts.length){
+    document.getElementById("health-lifts-body").innerHTML=
+      '<div style="font-size:10px;color:var(--muted)">No lifts tracked yet.</div>';
+    return;
+  }
   document.getElementById("health-lifts-body").innerHTML=lifts.map(l=>{
     const best=l.best_weight!=null?`${l.best_weight}kg × ${l.best_reps??'?'} reps`:"No data";
-    const sub=l.best_date?`${l.sessions_logged} session${l.sessions_logged!==1?"s":""} · last ${l.best_date}`:`${l.sessions_logged} sessions`;
+    const cnt=l.sessions_logged;
+    const sub=l.best_date
+      ?`${cnt} session${cnt!==1?"s":""} · last ${l.best_date}`
+      :`${cnt} sessions`;
     return`<div class="kpi-row"><div class="kpi-head">
       <span>${l.lift_name}</span>
       <span class="kpi-v" style="color:var(--glow)">${best}</span>
     </div><div style="font-size:9px;color:var(--muted);margin-top:2px">${sub}</div></div>`;
   }).join("");
+}
+
+function _renderLiftList(){
+  const el=document.getElementById("health-lift-list");
+  if(!el)return;
+  el.innerHTML=_availableLifts.map(l=>
+    `<div style="display:flex;align-items:center;gap:8px;margin-bottom:5px">
+      <span style="font-size:11px;color:var(--text);flex:1">${l.name}</span>
+      <button class="ar-btn-sm" onclick="deactivateLift(${l.id})">Deactivate</button>
+    </div>`
+  ).join("")||'<div style="font-size:10px;color:var(--muted)">No active lifts.</div>';
 }
 
 async function patchDaily(field,value){
@@ -1995,7 +2045,8 @@ async function patchDaily(field,value){
     const r=await fetch(`${API_BASE}/health/daily/${today}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
     const d=await r.json();
     S.health.daily=d;
-    _renderDailyCard(d);
+    const logs=await fetch(`${API_BASE}/health/lift-logs/today`).then(r=>r.json());
+    _renderDailyCard(d,logs);
     renderKPIs();
   }catch(e){console.error("patchDaily failed",e);}
 }
@@ -2011,6 +2062,80 @@ async function patchWeekly(field,value){
     _renderWeeklyCard(w);
     renderKPIs();
   }catch(e){console.error("patchWeekly failed",e);}
+}
+
+function toggleLiftAddForm(){
+  _liftAddOpen=!_liftAddOpen;
+  document.getElementById("health-lift-add-form").style.display=_liftAddOpen?"flex":"none";
+  document.getElementById("health-add-lift-btn").textContent=_liftAddOpen?"Cancel":"+ Log a lift";
+}
+
+async function submitLiftLog(){
+  const name=document.getElementById("lift-add-name").value;
+  const weight=parseFloat(document.getElementById("lift-add-weight").value);
+  const reps=parseInt(document.getElementById("lift-add-reps").value);
+  if(!name||isNaN(weight)||isNaN(reps))return;
+  const today=new Date().toISOString().slice(0,10);
+  try{
+    await fetch(`${API_BASE}/health/lift-logs`,{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({lift_name:name,date:today,weight_kg:weight,reps})
+    });
+    _liftAddOpen=false;
+    // Refresh daily card and progression panel
+    const [d,logs,progression]=await Promise.all([
+      fetch(`${API_BASE}/health/daily/today`).then(r=>r.json()),
+      fetch(`${API_BASE}/health/lift-logs/today`).then(r=>r.json()),
+      fetch(`${API_BASE}/health/lifts/progression`).then(r=>r.json()),
+    ]);
+    _renderDailyCard(d,logs);
+    _renderLiftsPanel(progression);
+  }catch(e){console.error("submitLiftLog failed",e);}
+}
+
+async function deleteLiftLog(id){
+  try{
+    await fetch(`${API_BASE}/health/lift-logs/${id}`,{method:"DELETE"});
+    const [logs,progression]=await Promise.all([
+      fetch(`${API_BASE}/health/lift-logs/today`).then(r=>r.json()),
+      fetch(`${API_BASE}/health/lifts/progression`).then(r=>r.json()),
+    ]);
+    const d=S.health&&S.health.daily;
+    if(d){_renderDailyCard(d,logs);}
+    _renderLiftsPanel(progression);
+  }catch(e){console.error("deleteLiftLog failed",e);}
+}
+
+function toggleManageLifts(){
+  _manageLiftOpen=!_manageLiftOpen;
+  document.getElementById("health-manage-lifts").style.display=_manageLiftOpen?"block":"none";
+  document.getElementById("health-manage-btn").textContent=_manageLiftOpen?"Hide lifts":"Manage lifts";
+  if(_manageLiftOpen)_renderLiftList();
+}
+
+async function addNewLift(){
+  const name=(document.getElementById("new-lift-name").value||"").trim();
+  if(!name)return;
+  try{
+    const r=await fetch(`${API_BASE}/health/lifts`,{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({name})
+    });
+    if(!r.ok){console.warn("Lift already exists or error");return;}
+    _availableLifts=await fetch(`${API_BASE}/health/lifts`).then(r=>r.json());
+    document.getElementById("new-lift-name").value="";
+    _renderLiftList();
+  }catch(e){console.error("addNewLift failed",e);}
+}
+
+async function deactivateLift(id){
+  try{
+    await fetch(`${API_BASE}/health/lifts/${id}`,{method:"DELETE"});
+    _availableLifts=await fetch(`${API_BASE}/health/lifts`).then(r=>r.json());
+    _renderLiftList();
+    const progression=await fetch(`${API_BASE}/health/lifts/progression`).then(r=>r.json());
+    _renderLiftsPanel(progression);
+  }catch(e){console.error("deactivateLift failed",e);}
 }
 
 function toggleHealthHistory(){

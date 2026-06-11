@@ -268,20 +268,46 @@ class Subtopic(Base):
 # ── HEALTH MODULE ────────────────────────────────────────────
 
 class DailyHealth(Base):
-    """One row per calendar day. Captures sleep, mobility, and the main lift."""
+    """One row per calendar day. Captures sleep and mobility; lifts are in LiftLog."""
     __tablename__ = "daily_health"
 
-    id              = Column(Integer, primary_key=True, index=True)
-    date            = Column(Date, nullable=False, unique=True)
-    sleep_hours     = Column(Float, nullable=True)
-    mobility_done   = Column(Boolean, default=False)
-    session_done    = Column(Boolean, default=False)
-    main_lift       = Column(String, nullable=True)
-    top_set_weight  = Column(Float, nullable=True)
-    top_set_reps    = Column(Integer, nullable=True)
-    notes           = Column(Text, nullable=True)
-    created_at      = Column(DateTime, default=datetime.utcnow)
-    updated_at      = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    id            = Column(Integer, primary_key=True, index=True)
+    date          = Column(Date, nullable=False, unique=True)
+    sleep_hours   = Column(Float, nullable=True)
+    mobility_done = Column(Boolean, default=False)
+    session_done  = Column(Boolean, default=False)
+    notes         = Column(Text, nullable=True)
+    created_at    = Column(DateTime, default=datetime.utcnow)
+    updated_at    = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class Lift(Base):
+    """User-editable list of tracked compound lifts."""
+    __tablename__ = "lifts"
+
+    id         = Column(Integer, primary_key=True, index=True)
+    name       = Column(String, nullable=False, unique=True)
+    sort_order = Column(Integer, default=0)
+    is_active  = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    logs = relationship("LiftLog", back_populates="lift", cascade="all, delete-orphan")
+
+
+class LiftLog(Base):
+    """One row per logged set. Multiple rows per day allowed."""
+    __tablename__ = "lift_logs"
+
+    id         = Column(Integer, primary_key=True, index=True)
+    lift_id    = Column(Integer, ForeignKey("lifts.id"), nullable=False)
+    lift_name  = Column(String, nullable=False)          # denormalised for fast queries
+    date       = Column(Date, nullable=False)
+    weight_kg  = Column(Float, nullable=False)
+    reps       = Column(Integer, nullable=False)
+    notes      = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    lift = relationship("Lift", back_populates="logs")
 
 
 class WeeklyHealth(Base):

@@ -147,14 +147,14 @@ Schema:
   "health_updates": {{
     "sleep_hours": number_or_null,
     "mobility_done": true_or_null,
-    "session_done": true_or_null,
-    "main_lift": "Bench Press|Pull-ups|Squat|Incline DB Press|Barbell Row|null",
-    "top_set_weight": number_or_null,
-    "top_set_reps": integer_or_null
-  }}
+    "session_done": true_or_null
+  }},
+  "lift_logs": [
+    {{"lift_name": "string", "weight_kg": number, "reps": integer}}
+  ]
 }}
 
-Health extraction rules: extract sleep_hours from phrases like "slept 7 hours". Set mobility_done=true if mobility/stretching mentioned. Set session_done=true if a training session is mentioned. Extract main_lift and top_set_weight/reps from lift descriptions like "80kg x 5 on bench". Omit health_updates key entirely if no health content found.
+Health extraction rules: extract sleep_hours from phrases like "slept 7 hours". Set mobility_done=true if mobility/stretching mentioned. Set session_done=true if a training session is mentioned. For lifts, populate lift_logs array — one entry per lift mentioned. lift_name is the exact lift name (e.g. "Bench Press", "Deadlift", "Squat"). If a new lift name is mentioned that isn't in the known list, include it anyway — the system will auto-create it. Omit health_updates key entirely if no health content found. Omit lift_logs key entirely if no lifts mentioned.
 
 Today is {today}. Return valid JSON only."""
 
