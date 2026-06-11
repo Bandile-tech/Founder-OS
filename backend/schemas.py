@@ -251,3 +251,91 @@ class LiftLogPatch(BaseModel):
     weight_kg: Optional[float] = None
     reps: Optional[int] = None
     notes: Optional[str] = None
+
+
+# ── TRADING MODULE ─────────────────────────────────────────────
+
+class PropFirmAccountCreate(BaseModel):
+    name: str
+    firm: str
+    account_size_usd: float
+    challenge_type: str
+    starting_balance: float
+    current_balance: float
+    profit_target_pct: float = 8.0
+    max_drawdown_pct: float = 6.0
+    daily_drawdown_pct: Optional[float] = None
+    start_date: date
+    status: str = "active"
+    notes: Optional[str] = None
+
+
+class PropFirmAccountPatch(BaseModel):
+    name: Optional[str] = None
+    firm: Optional[str] = None
+    account_size_usd: Optional[float] = None
+    challenge_type: Optional[str] = None
+    current_balance: Optional[float] = None
+    profit_target_pct: Optional[float] = None
+    max_drawdown_pct: Optional[float] = None
+    daily_drawdown_pct: Optional[float] = None
+    status: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class BacktestTradeCreate(BaseModel):
+    date: date
+    time_of_day: Optional[str] = None
+    pair: str
+    direction: str
+    entry_reason: Optional[str] = None
+    r_multiple: float
+    rule_adherence: bool
+    outcome: str
+    notes: Optional[str] = None
+
+
+class BacktestTradePatch(BaseModel):
+    date: Optional[date] = None
+    time_of_day: Optional[str] = None
+    pair: Optional[str] = None
+    direction: Optional[str] = None
+    entry_reason: Optional[str] = None
+    r_multiple: Optional[float] = None
+    rule_adherence: Optional[bool] = None
+    outcome: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class LiveTradeCreate(BaseModel):
+    date: date
+    time_of_day: Optional[str] = None
+    pair: str
+    direction: str
+    entry_reason: Optional[str] = None
+    r_multiple: float
+    rule_adherence: bool
+    outcome: str
+    notes: Optional[str] = None
+    account_id: Optional[int] = None
+    risk_pct: Optional[float] = None
+    net_pl_usd: Optional[float] = None
+    rule_broken: bool = False
+    rule_broken_description: Optional[str] = None
+
+
+class LiveTradePatch(BaseModel):
+    date: Optional[date] = None
+    time_of_day: Optional[str] = None
+    pair: Optional[str] = None
+    direction: Optional[str] = None
+    entry_reason: Optional[str] = None
+    r_multiple: Optional[float] = None
+    rule_adherence: Optional[bool] = None
+    outcome: Optional[str] = None
+    notes: Optional[str] = None
+    account_id: Optional[int] = None
+    risk_pct: Optional[float] = None
+    net_pl_usd: Optional[float] = None
+    rule_broken: Optional[bool] = None
+    rule_broken_description: Optional[str] = None

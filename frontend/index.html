@@ -625,6 +625,50 @@ body{
 .health-log-del{background:transparent;border:none;color:var(--muted);cursor:pointer;font-size:10px;padding:0 2px}
 .health-log-del:hover{color:var(--danger)}
 
+/* ── TRADING DESK ─────────────────────────────────────────── */
+.td-gate-card{border-radius:6px;padding:14px 16px;margin-bottom:0;border:1px solid}
+.td-gate-locked{border-color:var(--danger);background:#FF243610}
+.td-gate-cleared{border-color:var(--success);background:#00FF8810}
+.td-gate-status{font-family:'Syne',sans-serif;font-size:18px;font-weight:800;letter-spacing:0.06em;margin-bottom:4px}
+.td-gate-status.locked{color:var(--danger)}
+.td-gate-status.cleared{color:var(--success)}
+.td-gate-meta{font-size:10px;color:var(--muted);letter-spacing:0.06em}
+.td-chip{font-size:9px;letter-spacing:0.08em;padding:3px 8px;border-radius:3px;border:1px solid var(--muted);background:transparent;color:var(--muted);cursor:pointer;transition:all .15s}
+.td-chip-on,.td-chip:hover{border-color:var(--glow);color:var(--glow)}
+.td-table{width:100%;border-collapse:collapse;font-size:10px}
+.td-table th{text-align:left;color:var(--muted);letter-spacing:0.08em;padding:3px 6px;border-bottom:1px solid #54ACBF22;font-weight:400}
+.td-table td{padding:4px 6px;border-bottom:1px solid #54ACBF11;color:var(--text);vertical-align:middle}
+.td-table tr:hover td{background:#54ACBF08}
+.td-r-pos{color:var(--success);font-weight:600}
+.td-r-neg{color:var(--danger);font-weight:600}
+.td-r-be{color:var(--muted)}
+.td-adh-y{color:var(--success)}
+.td-adh-n{color:var(--danger)}
+.td-win{color:var(--success)}
+.td-loss{color:var(--danger)}
+.td-be{color:var(--muted)}
+.td-stats-row{display:flex;gap:16px;flex-wrap:wrap;padding:8px 0;border-top:1px solid #54ACBF22;font-size:10px;color:var(--muted)}
+.td-stats-val{color:var(--text);font-weight:600}
+.td-del{background:transparent;border:none;color:var(--muted);cursor:pointer;font-size:10px;padding:0 2px;opacity:0}
+tr:hover .td-del{opacity:1}
+.td-del:hover{color:var(--danger)}
+.td-acct-card{border:1px solid var(--success);border-radius:6px;padding:12px;font-size:10px}
+.td-acct-card.amber{border-color:var(--warn)}
+.td-acct-card.red-border{border-color:var(--danger)}
+.td-acct-card.grey{border-color:var(--muted);opacity:0.7}
+.td-acct-name{font-family:'Syne',sans-serif;font-size:13px;font-weight:700;color:var(--text)}
+.td-acct-sub{color:var(--muted);margin-bottom:8px}
+.td-acct-row{display:flex;justify-content:space-between;padding:2px 0}
+.td-acct-lbl{color:var(--muted)}
+.td-acct-val{color:var(--text);font-weight:600}
+.td-acct-status{margin-top:8px;font-size:9px;letter-spacing:0.12em;font-weight:700}
+.td-acct-status.active{color:var(--success)}
+.td-acct-status.passed{color:var(--glow)}
+.td-acct-status.blown{color:var(--danger)}
+.td-acct-status.withdrawn{color:var(--muted)}
+.tenk-bar-wrap{background:#54ACBF18;border-radius:4px;height:8px;overflow:hidden;margin:6px 0}
+.tenk-bar-fill{height:100%;background:var(--success);border-radius:4px;transition:width .4s}
+
 .ar-btn-sm{
   background:transparent;border:1px solid #54ACBF33;
   color:var(--muted);font-family:'IBM Plex Mono',monospace;
@@ -737,6 +781,9 @@ body{
       <div class="nav-item" onclick="nav('business',this)">
         <span class="ni">◈</span> Aether Command
       </div>
+      <div class="nav-item" onclick="nav('trading',this)">
+        <span class="ni">💹</span> Trading Desk
+      </div>
     </div>
     <div class="nav-group">
       <div class="nav-group-label">System</div>
@@ -838,6 +885,12 @@ body{
         </div>
         <div class="dash-right">
 
+          <!-- $10K SCOREBOARD -->
+          <div class="card">
+            <div class="card-title"><span>$10K September Target</span><span class="badge b-glow" id="tenk-days-badge">— days</span></div>
+            <div id="tenk-progress-display"><div style="font-size:9px;color:var(--muted)">Loading…</div></div>
+          </div>
+
           <!-- PERFORMANCE KPIs -->
           <div class="card">
             <div class="card-title"><span>Performance KPIs</span><span class="badge b-glow">Live</span></div>
@@ -845,6 +898,8 @@ body{
             <div id="kpi-health"></div>
             <div class="sec-head" style="margin-top:10px">Academics</div>
             <div id="kpi-acad"></div>
+            <div class="sec-head" style="margin-top:10px">Trading</div>
+            <div id="kpi-trading"></div>
           </div>
 
           <!-- DAILY NON-NEGOTIABLES -->
@@ -1088,6 +1143,134 @@ body{
       </div>
     </div>
 
+    <!-- ── TRADING DESK ── -->
+    <div class="page" id="p-trading">
+      <div class="eco-header">
+        <div><div class="eco-title">Trading Desk</div><div class="eco-sub">ICT Methodology · EURUSD &amp; GBPUSD · 10K Framework</div></div>
+      </div>
+
+      <!-- SECTION 1: GATE STATUS -->
+      <div id="trading-gate-card"></div>
+
+      <!-- SECTION 2: BACKTEST LOG -->
+      <div class="card" style="margin-top:10px">
+        <div class="card-title"><span>Backtest Log</span><span class="badge b-glow" id="bt-count-badge">0 trades</span></div>
+        <!-- Inline add form -->
+        <div id="bt-add-form" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:10px">
+          <input class="at-input" id="bt-date"    type="date"   style="width:120px">
+          <input class="at-input" id="bt-time"    type="text"   placeholder="Time (e.g. 07:45)" style="width:130px">
+          <select class="health-sel" id="bt-pair" style="width:100px">
+            <option value="EURUSD">EURUSD</option>
+            <option value="GBPUSD">GBPUSD</option>
+            <option value="other">Other</option>
+          </select>
+          <select class="health-sel" id="bt-dir" style="width:80px">
+            <option value="long">Long</option>
+            <option value="short">Short</option>
+          </select>
+          <input class="at-input" id="bt-r"       type="number" step="0.1"  placeholder="R (e.g. 1.5)" style="width:100px">
+          <select class="health-sel" id="bt-adh" style="width:80px">
+            <option value="true">Adh ✓</option>
+            <option value="false">Adh ✗</option>
+          </select>
+          <select class="health-sel" id="bt-outcome" style="width:90px">
+            <option value="win">Win</option>
+            <option value="loss">Loss</option>
+            <option value="breakeven">BE</option>
+          </select>
+          <input class="at-input" id="bt-reason"  type="text"   placeholder="Entry reason (MSS, FVG…)" style="flex:1;min-width:200px">
+          <button class="at-add-btn" onclick="submitBacktest()">+ Log</button>
+        </div>
+        <!-- Filter chips -->
+        <div id="bt-filter-chips" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
+          <button class="td-chip td-chip-on" data-filter="all"     onclick="setBtFilter('all',this)">All</button>
+          <button class="td-chip"            data-filter="EURUSD"  onclick="setBtFilter('EURUSD',this)">EURUSD</button>
+          <button class="td-chip"            data-filter="GBPUSD"  onclick="setBtFilter('GBPUSD',this)">GBPUSD</button>
+          <button class="td-chip"            data-filter="adh-y"   onclick="setBtFilter('adh-y',this)">Adh ✓</button>
+          <button class="td-chip"            data-filter="adh-n"   onclick="setBtFilter('adh-n',this)">Adh ✗</button>
+        </div>
+        <!-- Trade table -->
+        <div id="bt-table" style="overflow-x:auto">
+          <table class="td-table"><thead><tr>
+            <th>Date</th><th>Time</th><th>Pair</th><th>Dir</th><th>Reason</th>
+            <th>R</th><th>Adh</th><th>Outcome</th><th></th>
+          </tr></thead><tbody id="bt-rows"></tbody></table>
+        </div>
+        <!-- Stats -->
+        <div id="bt-stats" style="margin-top:10px"></div>
+      </div>
+
+      <!-- SECTION 3: LIVE TRADES -->
+      <div class="card" style="margin-top:10px">
+        <div class="card-title"><span>Live Trades</span><span class="badge" id="lt-gate-badge" style="background:var(--danger);color:#fff">GATE LOCKED</span></div>
+        <div id="lt-add-form" style="display:flex;flex-wrap:wrap;gap:6px;align-items:flex-start;margin-bottom:10px">
+          <input class="at-input" id="lt-date"    type="date"   style="width:120px">
+          <input class="at-input" id="lt-time"    type="text"   placeholder="Time" style="width:110px">
+          <select class="health-sel" id="lt-account" style="width:140px"><option value="">No account</option></select>
+          <select class="health-sel" id="lt-pair" style="width:100px">
+            <option value="EURUSD">EURUSD</option>
+            <option value="GBPUSD">GBPUSD</option>
+            <option value="other">Other</option>
+          </select>
+          <select class="health-sel" id="lt-dir" style="width:80px">
+            <option value="long">Long</option>
+            <option value="short">Short</option>
+          </select>
+          <input class="at-input" id="lt-r"       type="number" step="0.1"  placeholder="R" style="width:80px">
+          <select class="health-sel" id="lt-adh" style="width:80px">
+            <option value="true">Adh ✓</option>
+            <option value="false">Adh ✗</option>
+          </select>
+          <select class="health-sel" id="lt-outcome" style="width:90px">
+            <option value="win">Win</option>
+            <option value="loss">Loss</option>
+            <option value="breakeven">BE</option>
+          </select>
+          <input class="at-input" id="lt-risk"    type="number" step="0.1"  placeholder="Risk %" style="width:85px">
+          <input class="at-input" id="lt-pl"      type="number" step="1"    placeholder="P/L $"  style="width:90px">
+          <input class="at-input" id="lt-reason"  type="text"   placeholder="Entry reason" style="flex:1;min-width:180px">
+          <div style="display:flex;align-items:center;gap:6px;width:100%">
+            <label style="font-size:10px;color:var(--muted)">Rule broken?</label>
+            <button class="td-chip" id="lt-rule-toggle" onclick="toggleRuleBreak()" data-on="false">No</button>
+            <input class="at-input" id="lt-rule-desc" placeholder="Describe rule break (required if Yes)" style="flex:1;display:none">
+          </div>
+          <button class="at-add-btn" id="lt-submit-btn" onclick="submitLiveTrade()">+ Log Live Trade</button>
+        </div>
+        <div id="lt-table" style="overflow-x:auto">
+          <table class="td-table"><thead><tr>
+            <th>Date</th><th>Time</th><th>Account</th><th>Pair</th><th>Dir</th>
+            <th>R</th><th>Adh</th><th>Outcome</th><th>Risk%</th><th>P/L $</th><th></th>
+          </tr></thead><tbody id="lt-rows"></tbody></table>
+        </div>
+        <div id="lt-stats" style="margin-top:10px"></div>
+      </div>
+
+      <!-- SECTION 4: PROP FIRM ACCOUNTS -->
+      <div class="card" style="margin-top:10px">
+        <div class="card-title">
+          <span>Prop Firm Accounts</span>
+          <button class="ar-btn-sm" onclick="toggleAddAccount()">+ Add Account</button>
+        </div>
+        <div id="td-add-account-form" style="display:none;margin-bottom:10px">
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:6px;margin-bottom:6px">
+            <input class="at-input" id="pa-name"        placeholder="Account name">
+            <input class="at-input" id="pa-firm"        placeholder="Firm (e.g. Blue Guardian)">
+            <input class="at-input" id="pa-type"        placeholder="Challenge type">
+            <input class="at-input" id="pa-size" type="number" placeholder="Account size $">
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr auto;gap:6px">
+            <input class="at-input" id="pa-balance" type="number" placeholder="Starting balance $">
+            <input class="at-input" id="pa-profit-tgt" type="number" placeholder="Profit target %" value="8">
+            <input class="at-input" id="pa-max-dd"     type="number" placeholder="Max drawdown %"  value="6">
+            <input class="at-input" id="pa-start-date" type="date">
+            <button class="at-add-btn" onclick="submitAccount()">+ Add</button>
+          </div>
+        </div>
+        <div id="td-accounts-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:10px"></div>
+        <div id="td-accounts-summary" style="margin-top:10px;font-size:10px;color:var(--muted)"></div>
+      </div>
+    </div>
+
     <!-- ── SETTINGS ── -->
     <div class="page" id="p-settings">
       <div class="eco-header">
@@ -1226,7 +1409,7 @@ const API_BASE = "https://founder-os-backend-f6qn.onrender.com";
 
 async function syncFromBackend() {
   try {
-    const [kpisRaw, habits, todos, annual, bible, books, socialRaw, acadProgress, healthDaily, healthWeekly] = await Promise.all([
+    const [kpisRaw, habits, todos, annual, bible, books, socialRaw, acadProgress, healthDaily, healthWeekly, tenkRaw, gateRaw] = await Promise.all([
       fetch(`${API_BASE}/kpis`).then(r => r.json()),
       fetch(`${API_BASE}/habits`).then(r => r.json()),
       fetch(`${API_BASE}/todos`).then(r => r.json()),
@@ -1237,6 +1420,8 @@ async function syncFromBackend() {
       fetch(`${API_BASE}/subjects/progress`).then(r => r.json()),
       fetch(`${API_BASE}/health/daily/today`).then(r => r.json()),
       fetch(`${API_BASE}/health/weekly/current`).then(r => r.json()),
+      fetch(`${API_BASE}/scoreboard/ten-k`).then(r => r.json()).catch(()=>null),
+      fetch(`${API_BASE}/trading/gate`).then(r => r.json()).catch(()=>null),
     ]);
 
     // kpisRaw is a dict keyed by kpi key
@@ -1255,6 +1440,10 @@ async function syncFromBackend() {
 
     // Store live health data for dashboard KPI panel
     S.health = { daily: healthDaily, weekly: healthWeekly };
+
+    // Store trading data for dashboard panels
+    if (tenkRaw) S.tenk = tenkRaw;
+    if (gateRaw) S.gate = gateRaw;
 
     habits.forEach(h => {
       if (S.habits[h.key]) S.habits[h.key].done = h.done;
@@ -1365,6 +1554,7 @@ function renderPage(page){
   else if(page==="annual"){renderAnnualTargets()}
   else if(page==="settings"){renderSettings()}
   else if(page==="business"){renderBusiness()}
+  else if(page==="trading"){renderTrading()}
 }
 
 /* ═══════════════════════════════════════════════════
@@ -1442,6 +1632,41 @@ function renderKPIs(){
     mkRow("Mobility",mobVal,d&&d.mobility_done)+
     mkRow("Session",sessVal,d&&d.session_done)+
     mkRow("Energy this week",energyVal,w&&w.energy_level>=4);
+
+  // Trading mini-panel
+  const gate=S.gate;
+  const el=document.getElementById("kpi-trading");
+  if(!el)return;
+  if(!gate){el.innerHTML=`<div style="font-size:9px;color:var(--muted)">No trading data.</div>`;return;}
+  const gateColor=gate.status==="CLEARED"?"var(--success)":"var(--danger)";
+  el.innerHTML=
+    `<div class="kpi-row"><div class="kpi-head"><span>Gate</span><span class="kpi-v" style="color:${gateColor};font-weight:700">${gate.status}</span></div></div>`+
+    mkRow("Backtests logged",gate.total_backtests+" / 50",gate.total_backtests>=50)+
+    mkRow("Adherence",gate.adherence_pct+"%",gate.adherence_pct>=90);
+
+  // $10K scoreboard
+  renderTenkDash();
+}
+
+function renderTenkDash(){
+  const t=S.tenk;
+  const el=document.getElementById("tenk-progress-display");
+  const badge=document.getElementById("tenk-days-badge");
+  if(!t||!el)return;
+  if(badge)badge.textContent=t.days_remaining+" days";
+  const pct=Math.min(100,(t.total_progress_usd/t.target_usd)*100);
+  el.innerHTML=`
+    <div style="font-size:20px;font-family:'Syne',sans-serif;font-weight:800;color:var(--success)">
+      $${t.total_progress_usd.toLocaleString(undefined,{maximumFractionDigits:0})}
+      <span style="font-size:12px;color:var(--muted);font-family:'IBM Plex Mono',monospace;font-weight:400"> / $10,000</span>
+    </div>
+    <div style="font-size:9px;color:var(--muted);margin:2px 0 6px">
+      AI: $${t.ai_revenue_usd.toLocaleString(undefined,{maximumFractionDigits:0})} &nbsp;·&nbsp;
+      Trading: $${t.trading_pl_usd.toLocaleString(undefined,{maximumFractionDigits:0})}
+    </div>
+    <div class="tenk-bar-wrap"><div class="tenk-bar-fill" style="width:${pct}%"></div></div>
+    <div style="font-size:9px;color:var(--muted);margin-top:4px">${pct.toFixed(1)}% of target</div>
+  `;
 }
 
 function kpiRow(k){
@@ -3256,6 +3481,325 @@ async function addRevenue(){
 async function deleteRevenue(id){
   try{await fetch(`${API_BASE}/revenue/${id}`,{method:"DELETE"});}catch{}
   renderBusiness();
+}
+
+/* ═══════════════════════════════════════════════════
+   TRADING DESK
+═══════════════════════════════════════════════════ */
+let _tdBacktests=[];
+let _tdLiveTrades=[];
+let _tdAccounts=[];
+let _tdGate=null;
+let _btFilter="all";
+let _ltRuleOn=false;
+
+// Pre-fill today's date in forms when page opens
+function _tdSetDates(){
+  const t=todayStr();
+  const bf=document.getElementById("bt-date");
+  const lf=document.getElementById("lt-date");
+  if(bf&&!bf.value)bf.value=t;
+  if(lf&&!lf.value)lf.value=t;
+  const pad=document.getElementById("pa-start-date");
+  if(pad&&!pad.value)pad.value=t;
+}
+
+async function renderTrading(){
+  _tdSetDates();
+  try{
+    [_tdGate,_tdBacktests,_tdLiveTrades,_tdAccounts]=await Promise.all([
+      fetch(`${API_BASE}/trading/gate`).then(r=>r.json()),
+      fetch(`${API_BASE}/trading/backtest`).then(r=>r.json()),
+      fetch(`${API_BASE}/trading/live`).then(r=>r.json()),
+      fetch(`${API_BASE}/trading/accounts`).then(r=>r.json()),
+    ]);
+    // Update global cache for dashboard mini-panel
+    S.gate=_tdGate;
+  }catch(e){console.warn("Trading fetch failed",e);}
+  _renderGateCard();
+  _renderBtTable();
+  _renderBtStats();
+  _renderLtTable();
+  _renderLtStats();
+  _renderAccountsGrid();
+  _populateLtAccountDropdown();
+}
+
+function _renderGateCard(){
+  const g=_tdGate;if(!g)return;
+  const locked=g.status==="LOCKED";
+  const el=document.getElementById("trading-gate-card");
+  if(!el)return;
+  el.innerHTML=`<div class="td-gate-card ${locked?"td-gate-locked":"td-gate-cleared"}">
+    <div class="td-gate-status ${locked?"locked":"cleared"}">${locked?"⚠ GATE: LOCKED":"✓ GATE: CLEARED"}</div>
+    <div class="td-gate-meta">
+      ${g.total_backtests}/50 backtests &nbsp;·&nbsp; ${g.adherence_pct}% adherence
+      ${locked?`<br>Need: ${g.missing.trades} more trades${g.missing.adherence_pct_gap>0?" · "+g.missing.adherence_pct_gap+"% adherence gap":""}`:
+               `<br>Live trading authorised`}
+    </div>
+  </div>`;
+
+  // Update badge and button on live trades section
+  const badge=document.getElementById("lt-gate-badge");
+  if(badge){badge.textContent=g.status;badge.style.background=locked?"var(--danger)":"var(--success)";}
+  const btn=document.getElementById("lt-submit-btn");
+  if(btn){
+    btn.disabled=locked;
+    btn.title=locked?"Backtest gate not cleared":"Log live trade";
+    btn.style.opacity=locked?"0.4":"1";
+  }
+  // Update backtest count badge
+  const bb=document.getElementById("bt-count-badge");
+  if(bb)bb.textContent=g.total_backtests+" trades";
+}
+
+function setBtFilter(f,el){
+  _btFilter=f;
+  document.querySelectorAll("#bt-filter-chips .td-chip").forEach(c=>c.classList.remove("td-chip-on"));
+  el.classList.add("td-chip-on");
+  _renderBtTable();
+}
+
+function _filteredBt(){
+  if(_btFilter==="all")return _tdBacktests;
+  if(_btFilter==="adh-y")return _tdBacktests.filter(t=>t.rule_adherence);
+  if(_btFilter==="adh-n")return _tdBacktests.filter(t=>!t.rule_adherence);
+  return _tdBacktests.filter(t=>t.pair===_btFilter);
+}
+
+function _rClass(r){return r>0?"td-r-pos":r<0?"td-r-neg":"td-r-be";}
+function _outcomeClass(o){return o==="win"?"td-win":o==="loss"?"td-loss":"td-be";}
+
+function _renderBtTable(){
+  const trades=_filteredBt();
+  const tbody=document.getElementById("bt-rows");
+  if(!tbody)return;
+  if(!trades.length){tbody.innerHTML=`<tr><td colspan="9" style="color:var(--muted);font-size:9px;padding:8px">No backtests yet. Log your first trade above.</td></tr>`;return;}
+  tbody.innerHTML=trades.slice(0,50).map(t=>`<tr>
+    <td>${t.date}</td>
+    <td>${t.time_of_day||"—"}</td>
+    <td>${t.pair}</td>
+    <td>${t.direction}</td>
+    <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${t.entry_reason||""}">${t.entry_reason||"—"}</td>
+    <td class="${_rClass(t.r_multiple)}">${t.r_multiple>0?"+":""}${t.r_multiple}R</td>
+    <td class="${t.rule_adherence?"td-adh-y":"td-adh-n"}">${t.rule_adherence?"✓":"✗"}</td>
+    <td class="${_outcomeClass(t.outcome)}">${t.outcome.toUpperCase()}</td>
+    <td><button class="td-del" onclick="deleteBt(${t.id})">✕</button></td>
+  </tr>`).join("");
+}
+
+function _renderBtStats(){
+  const el=document.getElementById("bt-stats");if(!el)return;
+  const trades=_tdBacktests;
+  if(!trades.length){el.innerHTML="";return;}
+  const total=trades.length;
+  const wins=trades.filter(t=>t.outcome==="win").length;
+  const totalR=trades.reduce((s,t)=>s+t.r_multiple,0);
+  const adh=trades.filter(t=>t.rule_adherence).length;
+  el.innerHTML=`<div class="td-stats-row">
+    <span>Total: <span class="td-stats-val">${total}</span></span>
+    <span>Win rate: <span class="td-stats-val">${total?Math.round(wins/total*100):0}%</span></span>
+    <span>Expectancy: <span class="td-stats-val">${total?(totalR/total).toFixed(2):0}R</span></span>
+    <span>Total R: <span class="td-stats-val ${totalR>=0?"td-r-pos":"td-r-neg"}">${totalR>=0?"+":""}${totalR.toFixed(1)}R</span></span>
+    <span>Adherence: <span class="td-stats-val">${total?Math.round(adh/total*100):0}% (${total-adh} breaks)</span></span>
+  </div>`;
+}
+
+function _renderLtTable(){
+  const trades=_tdLiveTrades;
+  const tbody=document.getElementById("lt-rows");if(!tbody)return;
+  if(!trades.length){tbody.innerHTML=`<tr><td colspan="11" style="color:var(--muted);font-size:9px;padding:8px">No live trades yet.</td></tr>`;return;}
+  tbody.innerHTML=trades.slice(0,50).map(t=>`<tr>
+    <td>${t.date}</td>
+    <td>${t.time_of_day||"—"}</td>
+    <td>${_acctNameById(t.account_id)||"—"}</td>
+    <td>${t.pair}</td>
+    <td>${t.direction}</td>
+    <td class="${_rClass(t.r_multiple)}">${t.r_multiple>0?"+":""}${t.r_multiple}R</td>
+    <td class="${t.rule_adherence?"td-adh-y":"td-adh-n"}">${t.rule_adherence?"✓":"✗"}</td>
+    <td class="${_outcomeClass(t.outcome)}">${t.outcome.toUpperCase()}</td>
+    <td>${t.risk_pct!=null?t.risk_pct+"%":"—"}</td>
+    <td class="${t.net_pl_usd>=0?"td-r-pos":"td-r-neg"}">${t.net_pl_usd!=null?"$"+t.net_pl_usd.toFixed(0):"—"}</td>
+    <td><button class="td-del" onclick="deleteLt(${t.id})">✕</button></td>
+  </tr>`).join("");
+}
+
+function _renderLtStats(){
+  const el=document.getElementById("lt-stats");if(!el)return;
+  const trades=_tdLiveTrades;
+  if(!trades.length){el.innerHTML="";return;}
+  const total=trades.length;
+  const wins=trades.filter(t=>t.outcome==="win").length;
+  const totalR=trades.reduce((s,t)=>s+t.r_multiple,0);
+  const totalPL=trades.reduce((s,t)=>s+(t.net_pl_usd||0),0);
+  el.innerHTML=`<div class="td-stats-row">
+    <span>Total: <span class="td-stats-val">${total}</span></span>
+    <span>Win rate: <span class="td-stats-val">${Math.round(wins/total*100)}%</span></span>
+    <span>Total R: <span class="td-stats-val ${totalR>=0?"td-r-pos":"td-r-neg"}">${totalR>=0?"+":""}${totalR.toFixed(1)}R</span></span>
+    <span>Total P/L: <span class="td-stats-val ${totalPL>=0?"td-r-pos":"td-r-neg"}">${totalPL>=0?"$+":"$"}${totalPL.toFixed(0)}</span></span>
+  </div>`;
+}
+
+function _acctNameById(id){
+  if(!id)return null;
+  const a=_tdAccounts.find(a=>a.id===id);
+  return a?a.name:null;
+}
+
+function _populateLtAccountDropdown(){
+  const sel=document.getElementById("lt-account");if(!sel)return;
+  const active=_tdAccounts.filter(a=>a.status==="active");
+  sel.innerHTML=`<option value="">No account</option>`+
+    active.map(a=>`<option value="${a.id}">${a.name}</option>`).join("");
+}
+
+function _renderAccountsGrid(){
+  const el=document.getElementById("td-accounts-grid");if(!el)return;
+  const all=_tdAccounts.filter(a=>a.status!=="withdrawn"||_tdAccounts.length<=2);
+  if(!all.length){el.innerHTML=`<div style="font-size:9px;color:var(--muted)">No accounts yet.</div>`;return;}
+  el.innerHTML=all.map(a=>{
+    // Border color based on drawdown vs max_drawdown
+    const ddRatio=a.max_drawdown_pct>0?a.drawdown_from_peak_pct/a.max_drawdown_pct:0;
+    let cardClass="td-acct-card";
+    if(a.status!=="active")cardClass+=" grey";
+    else if(ddRatio>0.8)cardClass+=" red-border";
+    else if(ddRatio>0.5)cardClass+=" amber";
+    return`<div class="${cardClass}">
+      <div style="display:flex;justify-content:space-between;align-items:start">
+        <div>
+          <div class="td-acct-name">${a.name}</div>
+          <div class="td-acct-sub">$${a.account_size_usd.toLocaleString()} · ${a.challenge_type} · Day ${a.days_active}</div>
+        </div>
+        <button class="td-del" style="opacity:1;font-size:11px" onclick="softDeleteAccount(${a.id})">✕</button>
+      </div>
+      <div class="td-acct-row"><span class="td-acct-lbl">Balance</span><span class="td-acct-val">$${a.current_balance.toFixed(0)} (${a.gain_pct>=0?"+":""}${a.gain_pct}%)</span></div>
+      <div class="td-acct-row"><span class="td-acct-lbl">Drawdown</span><span class="td-acct-val" style="color:${ddRatio>0.5?"var(--warn)":ddRatio>0.8?"var(--danger)":"var(--text)"}">${a.drawdown_from_peak_pct}% from peak</span></div>
+      <div class="td-acct-row"><span class="td-acct-lbl">Target</span><span class="td-acct-val">${Math.max(0,a.target_progress_pct).toFixed(0)}% of ${a.profit_target_pct}% goal</span></div>
+      <div class="td-acct-status ${a.status}">STATUS: ${a.status.toUpperCase()}</div>
+    </div>`;
+  }).join("");
+
+  const totalFunded=_tdAccounts.filter(a=>a.status==="active").reduce((s,a)=>s+a.account_size_usd,0);
+  const summary=document.getElementById("td-accounts-summary");
+  if(summary)summary.textContent=`Total funded capital: $${totalFunded.toLocaleString()}`;
+}
+
+// ── Form actions ──────────────────────────────────────────
+
+async function submitBacktest(){
+  const date=document.getElementById("bt-date").value||todayStr();
+  const time=document.getElementById("bt-time").value||null;
+  const pair=document.getElementById("bt-pair").value;
+  const dir=document.getElementById("bt-dir").value;
+  const r=parseFloat(document.getElementById("bt-r").value);
+  const adh=document.getElementById("bt-adh").value==="true";
+  const outcome=document.getElementById("bt-outcome").value;
+  const reason=document.getElementById("bt-reason").value.trim()||null;
+  if(isNaN(r)){alert("Enter an R-multiple.");return;}
+  try{
+    const resp=await fetch(`${API_BASE}/trading/backtest`,{method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({date,time_of_day:time,pair,direction:dir,r_multiple:r,
+        rule_adherence:adh,outcome,entry_reason:reason})});
+    if(!resp.ok){const e=await resp.json();alert(e.detail||"Error");return;}
+    document.getElementById("bt-reason").value="";
+    document.getElementById("bt-r").value="";
+    renderTrading();
+  }catch(e){alert("Backend offline.");}
+}
+
+async function deleteBt(id){
+  if(!confirm("Delete this backtest?"))return;
+  await fetch(`${API_BASE}/trading/backtest/${id}`,{method:"DELETE"});
+  renderTrading();
+}
+
+function toggleRuleBreak(){
+  _ltRuleOn=!_ltRuleOn;
+  const btn=document.getElementById("lt-rule-toggle");
+  const inp=document.getElementById("lt-rule-desc");
+  if(btn){btn.textContent=_ltRuleOn?"Yes":"No";btn.classList.toggle("td-chip-on",_ltRuleOn);}
+  if(inp)inp.style.display=_ltRuleOn?"block":"none";
+}
+
+async function submitLiveTrade(){
+  if(_tdGate&&_tdGate.status==="LOCKED"){
+    alert("GATE LOCKED: Complete 50 backtests with ≥90% adherence before logging live trades.");
+    return;
+  }
+  const date=document.getElementById("lt-date").value||todayStr();
+  const time=document.getElementById("lt-time").value||null;
+  const acctId=parseInt(document.getElementById("lt-account").value)||null;
+  const pair=document.getElementById("lt-pair").value;
+  const dir=document.getElementById("lt-dir").value;
+  const r=parseFloat(document.getElementById("lt-r").value);
+  const adh=document.getElementById("lt-adh").value==="true";
+  const outcome=document.getElementById("lt-outcome").value;
+  const risk=parseFloat(document.getElementById("lt-risk").value)||null;
+  const pl=parseFloat(document.getElementById("lt-pl").value)||null;
+  const reason=document.getElementById("lt-reason").value.trim()||null;
+  const ruleDesc=_ltRuleOn?(document.getElementById("lt-rule-desc").value.trim()||null):null;
+  if(isNaN(r)){alert("Enter an R-multiple.");return;}
+  if(_ltRuleOn&&!ruleDesc){alert("Describe the rule break.");return;}
+  try{
+    const resp=await fetch(`${API_BASE}/trading/live`,{method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({date,time_of_day:time,pair,direction:dir,r_multiple:r,
+        rule_adherence:adh,outcome,entry_reason:reason,account_id:acctId,
+        risk_pct:risk,net_pl_usd:pl,rule_broken:_ltRuleOn,
+        rule_broken_description:ruleDesc})});
+    if(resp.status===423){
+      const e=await resp.json();
+      const g=e.detail?.gate||{};
+      alert(`GATE LOCKED\n${g.total_backtests||0}/50 backtests · ${g.adherence_pct||0}% adherence\nMissing: ${g.missing?.trades||0} trades · ${g.missing?.adherence_pct_gap||0}% adherence gap`);
+      return;
+    }
+    if(!resp.ok){const e=await resp.json();alert(e.detail||"Error");return;}
+    document.getElementById("lt-reason").value="";
+    document.getElementById("lt-r").value="";
+    document.getElementById("lt-risk").value="";
+    document.getElementById("lt-pl").value="";
+    renderTrading();
+  }catch(e){alert("Backend offline.");}
+}
+
+async function deleteLt(id){
+  if(!confirm("Delete this live trade?"))return;
+  await fetch(`${API_BASE}/trading/live/${id}`,{method:"DELETE"});
+  renderTrading();
+}
+
+function toggleAddAccount(){
+  const f=document.getElementById("td-add-account-form");
+  if(f)f.style.display=f.style.display==="none"?"block":"none";
+}
+
+async function submitAccount(){
+  const name=document.getElementById("pa-name").value.trim();
+  const firm=document.getElementById("pa-firm").value.trim();
+  const type=document.getElementById("pa-type").value.trim();
+  const size=parseFloat(document.getElementById("pa-size").value)||0;
+  const bal=parseFloat(document.getElementById("pa-balance").value)||size;
+  const ptgt=parseFloat(document.getElementById("pa-profit-tgt").value)||8;
+  const mdd=parseFloat(document.getElementById("pa-max-dd").value)||6;
+  const startDate=document.getElementById("pa-start-date").value||todayStr();
+  if(!name||!firm){alert("Name and firm are required.");return;}
+  try{
+    const resp=await fetch(`${API_BASE}/trading/accounts`,{method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({name,firm,account_size_usd:size,challenge_type:type||"Instant Funded",
+        starting_balance:bal,current_balance:bal,profit_target_pct:ptgt,
+        max_drawdown_pct:mdd,start_date:startDate,status:"active"})});
+    if(!resp.ok){const e=await resp.json();alert(e.detail||"Error");return;}
+    document.getElementById("td-add-account-form").style.display="none";
+    renderTrading();
+  }catch(e){alert("Backend offline.");}
+}
+
+async function softDeleteAccount(id){
+  if(!confirm("Mark account as withdrawn?"))return;
+  await fetch(`${API_BASE}/trading/accounts/${id}`,{method:"DELETE"});
+  renderTrading();
 }
 
 /* ═══════════════════════════════════════════════════
