@@ -721,6 +721,36 @@ tr:hover .td-del{opacity:1}
 }
 
 /* ═══════════════════════════════════════════════════
+   MOBILE SIDEBAR DRAWER
+═══════════════════════════════════════════════════ */
+#hamburger{
+  display:none;background:none;border:none;color:var(--text);
+  font-size:18px;cursor:pointer;padding:4px 8px;line-height:1;
+  flex-shrink:0;margin-right:8px;
+}
+#nav-backdrop{
+  display:none;position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:199;
+}
+@media(max-width:768px){
+  #hamburger{display:block}
+  #nav{
+    position:fixed;top:0;left:0;height:100%;z-index:200;
+    transform:translateX(-100%);transition:transform 250ms ease;
+    width:280px;
+  }
+  #nav.sidebar--open{transform:translateX(0)}
+  #nav.sidebar--open ~ * #nav-backdrop,
+  body.sidebar--open #nav-backdrop{display:block}
+  #app{overflow:hidden}
+  #main-content{width:100%;margin-left:0}
+}
+@media(min-width:769px){
+  #nav{transform:none!important;position:static}
+  #nav-backdrop{display:none!important}
+  #hamburger{display:none!important}
+}
+
+/* ═══════════════════════════════════════════════════
    ANIMATIONS
 ═══════════════════════════════════════════════════ */
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}
@@ -735,6 +765,7 @@ tr:hover .td-del{opacity:1}
 <!-- ═══ HEADER ═══ -->
 <div id="header">
   <div style="display:flex;align-items:center">
+    <button id="hamburger" aria-label="Open menu" onclick="toggleSidebar()">☰</button>
     <div class="h-logo">Founder OS</div>
     <div class="h-sub">v2 · Bandile Masocha · Trident College</div>
   </div>
@@ -744,6 +775,9 @@ tr:hover .td-del{opacity:1}
     <div class="online"></div>
   </div>
 </div>
+
+<!-- ═══ NAV BACKDROP ═══ -->
+<div id="nav-backdrop" onclick="closeSidebar()"></div>
 
 <!-- ═══ APP ═══ -->
 <div id="app">
@@ -1615,7 +1649,22 @@ function nav(page,el){
   const pg=document.getElementById("p-"+page);
   if(pg){pg.classList.add("active");pg.classList.add("fade-up");setTimeout(()=>pg.classList.remove("fade-up"),300)}
   renderPage(page);
+  closeSidebar();
 }
+
+function toggleSidebar(){
+  const nav=document.getElementById("nav");
+  const bd=document.getElementById("nav-backdrop");
+  const open=nav.classList.toggle("sidebar--open");
+  bd.style.display=open?"block":"none";
+}
+function closeSidebar(){
+  document.getElementById("nav").classList.remove("sidebar--open");
+  document.getElementById("nav-backdrop").style.display="none";
+}
+window.addEventListener("resize",()=>{
+  if(window.innerWidth>=769)closeSidebar();
+});
 
 function renderPage(page){
   if(page==="dashboard"){renderDash();fetchAndRenderRadar();renderConversationHistory();if(_recentActOpen)renderRecentActivity()}
