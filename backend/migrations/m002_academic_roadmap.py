@@ -112,6 +112,7 @@ def seed_subjects(db=None) -> None:
             print(f"[seed] seeded subject '{name}' with {len(topics)} topics")
 
         db.commit()
+        print("[m002] Academic subject seed complete (dialect-agnostic ORM path).")
     finally:
         if close_after:
             db.close()

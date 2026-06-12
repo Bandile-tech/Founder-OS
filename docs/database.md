@@ -155,5 +155,19 @@ Migrations live in `backend/migrations/`:
 | `001_dailylog_nullable_target.py` | Makes `weekly_target_id` nullable | Yes — skips on non-SQLite (ORM baseline is already correct) |
 | `m002_academic_roadmap.py` | Seeds 4 A-level subjects + topics | Yes — pure SQLAlchemy ORM |
 | `m003_lift_log.py` | Moves lift columns out of `daily_health`; seeds 5 default lifts | Yes — uses `information_schema` on Postgres, `PRAGMA` on SQLite |
+| `m004_warroom.py` | War Room schema: annual_targets rebuilt; books adds position/is_currently_reading | Yes — each Postgres DDL step runs in its own SAVEPOINT to prevent transaction-abort cascade |
 
 All migrations are idempotent. Restarting the service is safe.
+
+### Schema validator
+
+`_validate_schema(engine)` runs in the startup event **after** all migrations complete. It queries `information_schema` (Postgres) or `PRAGMA table_info` (SQLite) for every ORM-declared table and raises `RuntimeError` immediately if any column is missing. This catches migration failures before they turn into cryptic runtime errors.
+
+---
+
+## Postgres CI — TODO
+
+> The test suite always runs against in-memory SQLite (`conftest.py`).  
+> Dialect-specific migration bugs (e.g. Postgres transaction-abort cascade from a failed ALTER inside a shared transaction) are invisible until the first production deploy.
+>
+> **Future work**: configure a second pytest run in CI that provisions an ephemeral Postgres instance (Docker or GitHub Actions `postgres` service) and runs the full test suite with `DATABASE_URL=postgresql://...`.  This would have caught the m004 books column failure before it hit Supabase.

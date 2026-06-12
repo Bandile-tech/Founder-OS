@@ -104,10 +104,58 @@ async def startup():
         seed_subjects(db)   # m002
         run_m003(db)        # m003 — must run after m002
         run_m004(db)        # m004 — war room schema migration
+        _validate_schema(engine)   # raises if any ORM column is absent from the live DB
         _seed_non_negotiables_if_empty(db)
         _verify_seed_integrity(db)
     finally:
         db.close()
+
+
+def _validate_schema(db_engine) -> None:
+    """
+    Confirm every ORM-declared column exists in the live database.
+
+    Runs after all migrations complete.  If any column is missing it raises
+    RuntimeError immediately — this is preferable to a cryptic AttributeError
+    or silent wrong query result later.
+
+    Uses information_schema on Postgres and PRAGMA table_info on SQLite.
+    Tables with zero live columns are skipped (they may not have been created
+    yet, which create_all() handles elsewhere).
+    """
+    from sqlalchemy import text as _text
+    is_postgres = db_engine.dialect.name == "postgresql"
+    missing: dict[str, list[str]] = {}
+
+    with db_engine.connect() as conn:
+        for table in models.Base.metadata.sorted_tables:
+            tbl = table.name
+            if is_postgres:
+                rows = conn.execute(_text(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_schema = 'public' AND table_name = :t"
+                ), {"t": tbl}).fetchall()
+            else:
+                rows = conn.execute(_text(f"PRAGMA table_info({tbl})")).fetchall()
+
+            if not rows:
+                # Table not yet created — create_all() will handle it
+                continue
+
+            db_cols = {r[0] for r in rows} if is_postgres else {r[1] for r in rows}
+            orm_cols = {col.name for col in table.columns}
+            drift = orm_cols - db_cols
+            if drift:
+                missing[tbl] = sorted(drift)
+
+    if missing:
+        lines = "\n".join(f"  {tbl}: {cols}" for tbl, cols in missing.items())
+        raise RuntimeError(
+            f"Schema drift detected — run the relevant migration before "
+            f"starting the server:\n{lines}"
+        )
+
+    print("[startup] Schema OK: all ORM columns present in live database.")
 
 
 def _verify_seed_integrity(db: Session) -> None:
