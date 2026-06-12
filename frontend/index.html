@@ -1398,14 +1398,8 @@ const DEFAULT_STATE = {
     sprint_training:{label:"Sprint training",done:false},
     academics:{label:"Academic study block (18:00–20:00)",done:false},
   },
-  bible:[
-    {ref:"Proverbs 27",done:true,date:"2026-04-25"},
-    {ref:"Acts 3–4",done:true,date:"2026-04-26"},
-    {ref:"Proverbs 28",done:false,date:"2026-04-27",pushed:0},
-    {ref:"Romans 8",done:false,date:"2026-04-28",pushed:0},
-    {ref:"Proverbs 29",done:false,date:"2026-04-29",pushed:0},
-    {ref:"Acts 5–6",done:false,date:"2026-04-30",pushed:0},
-  ],
+  bible:[], // legacy BibleEntry — kept for backward compat; frontend now uses readingPlans
+  readingPlans:[],
   books:[
     {title:"The Almanack of Naval Ravikant",author:"Nivi & Naval",status:"reading",page:67,total:240},
     {title:"Zero to One",author:"Peter Thiel",status:"queue",page:0,total:195},
@@ -1462,12 +1456,12 @@ const API_BASE = "https://founder-os-backend-f6qn.onrender.com";
 
 async function syncFromBackend() {
   try {
-    const [kpisRaw, habits, todos, annual, bible, books, socialRaw, acadProgress, healthDaily, healthWeekly, tenkRaw, gateRaw] = await Promise.all([
+    const [kpisRaw, habits, todos, annual, readingPlans, books, socialRaw, acadProgress, healthDaily, healthWeekly, tenkRaw, gateRaw] = await Promise.all([
       fetch(`${API_BASE}/kpis`).then(r => r.json()),
       fetch(`${API_BASE}/habits`).then(r => r.json()),
       fetch(`${API_BASE}/todos`).then(r => r.json()),
       fetch(`${API_BASE}/annual-targets`).then(r => r.json()),
-      fetch(`${API_BASE}/bible`).then(r => r.json()),
+      fetch(`${API_BASE}/reading-plans`).then(r => r.json()),
       fetch(`${API_BASE}/books`).then(r => r.json()),
       fetch(`${API_BASE}/social-score`).then(r => r.json()),
       fetch(`${API_BASE}/subjects/progress`).then(r => r.json()),
@@ -1519,7 +1513,7 @@ async function syncFromBackend() {
       unit: a.unit || "",
     }));
 
-    S.bible = bible;
+    S.readingPlans = readingPlans;
     S.books = books;
     S.social = socialRaw.value || 50;
 
@@ -1604,7 +1598,7 @@ function renderPage(page){
   // else if(page==="brain"){renderAgentAlerts()}
   // else if(page==="log"){renderLog()}
   else if(page==="timetable"){renderTimetable()}
-  else if(page==="bible"){renderBible()}
+  else if(page==="bible"){renderReadingPlan()}
   else if(page==="books"){renderBooks()}
   else if(page==="health"){renderHealth()}
   else if(page==="academic"){renderAcademicRoadmap()}
@@ -2191,54 +2185,144 @@ function addTimetableSlot(){
   saveState();renderTimetable();
 }
 
-function renderBible(){
-  // Compute streak from sorted done entries
-  const sorted=[...S.bible].filter(b=>b.done).map(b=>b.date).sort().reverse();
-  let streak=0,check=todayStr();
-  for(const d of sorted){if(d===check){streak++;const dt=new Date(check);dt.setDate(dt.getDate()-1);check=dt.toISOString().slice(0,10);}else break;}
-  document.getElementById("bible-streak").textContent=streak;
+function renderReadingPlan(){
+  // Update streak display (legacy: count consecutive days with any mark-today; just show active plan count for now)
+  const activePlans=S.readingPlans.filter(p=>p.is_active);
+  document.getElementById("bible-streak").textContent=activePlans.length;
 
-  const doneCount=S.bible.filter(b=>b.done).length;
-  document.getElementById("bible-card").innerHTML=`
-    <div class="card-title"><span>Reading Plan</span><span class="badge b-glow">${doneCount}/${S.bible.length} read</span></div>
-    `+S.bible.map(b=>`
-    <div class="eco-row">
-      <div class="nn-dot ${b.done?"dot-done":"dot-undone"}" style="flex-shrink:0;cursor:pointer" onclick="toggleBibleEntry(${b.id})"></div>
-      <span style="${b.done?"text-decoration:line-through;color:var(--muted)":""}">${b.ref}</span>
-      <span class="eco-date" style="margin-left:auto">${b.date}</span>
-      ${b.pushed>0?`<span class="eco-pushed">+${b.pushed}d</span>`:""}
-    </div>`).join("")+`
-    <div style="margin-top:14px;border-top:1px solid #54ACBF14;padding-top:12px">
-      <div class="card-title" style="margin-bottom:8px"><span>Add Reading</span></div>
-      <div style="display:flex;gap:8px">
-        <input class="at-input" id="bible-ref" placeholder="e.g. Proverbs 8" style="flex:1">
-        <input class="at-input" id="bible-date" type="date" value="${todayStr()}" style="max-width:140px">
-        <button class="at-add-btn" onclick="addBibleEntry()">+ Add</button>
+  let _archiveOpen=false;
+
+  function _buildHtml(){
+    const active=S.readingPlans.filter(p=>p.is_active);
+    const archived=S.readingPlans.filter(p=>!p.is_active);
+
+    const planCards=active.length===0
+      ?`<div style="color:var(--muted);font-size:10px;padding:8px 0">No active plans — add one below.</div>`
+      :active.map(p=>{
+        const daysStr=p.days_remaining!=null
+          ?(p.days_remaining>0?`${p.days_remaining}d left`:(p.days_remaining===0?"Due today":"Overdue"))
+          :"No end date";
+        return`<div style="border:1px solid #54ACBF22;border-radius:6px;padding:10px 12px;margin-bottom:10px">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+            <div>
+              <div style="font-size:11px;font-weight:600;color:var(--text)">${escHtml(p.name)}</div>
+              <div style="font-size:9px;color:var(--glow);margin-top:3px">${escHtml(p.current_book||"—")} · Ch.${p.current_chapter}</div>
+              <div style="font-size:9px;color:var(--muted);margin-top:2px">${p.daily_target_chapters} ch/day · ${daysStr}</div>
+              ${p.notes?`<div style="font-size:9px;color:var(--muted);margin-top:4px;font-style:italic">${escHtml(p.notes)}</div>`:""}
+            </div>
+            <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end;flex-shrink:0">
+              <button class="at-add-btn" style="font-size:8px;padding:3px 7px" onclick="markTodayReading(${p.id})">✓ Today</button>
+              <button class="at-add-btn" style="font-size:8px;padding:3px 7px" onclick="editReadingPlan(${p.id})">Edit</button>
+              <button class="at-add-btn" style="font-size:8px;padding:3px 7px;background:var(--danger);border-color:var(--danger)" onclick="archiveReadingPlan(${p.id})">Archive</button>
+            </div>
+          </div>
+        </div>`;
+      }).join("");
+
+    const archivedSection=archived.length===0?"":
+      `<div style="margin-top:14px">
+        <div style="cursor:pointer;font-size:9px;color:var(--muted);letter-spacing:0.1em;user-select:none" onclick="toggleRpArchive()">
+          ${_archiveOpen?"▼":"▶"} ARCHIVED PLANS (${archived.length})
+        </div>
+        <div id="rp-archived-list" style="display:${_archiveOpen?"block":"none"};margin-top:8px">
+          ${archived.map(p=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #54ACBF10">
+            <span style="font-size:10px;color:var(--muted)">${escHtml(p.name)} — ${escHtml(p.current_book||"—")} Ch.${p.current_chapter}</span>
+          </div>`).join("")}
+        </div>
+      </div>`;
+
+    return`
+      <div class="card-title"><span>Reading Plans</span><span class="badge b-glow">${active.length} active</span></div>
+      ${planCards}
+      <div style="margin-top:14px;border-top:1px solid #54ACBF14;padding-top:12px">
+        <div class="card-title" style="margin-bottom:8px"><span>+ Add Plan</span></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+          <input class="at-input" id="rp-name" placeholder="Plan name (e.g. Bible 2026)">
+          <input class="at-input" id="rp-book" placeholder="Current book (e.g. Genesis)">
+        </div>
+        <div style="display:grid;grid-template-columns:80px 80px 1fr 1fr auto;gap:8px">
+          <input class="at-input" id="rp-chapter" placeholder="Ch." type="number" min="1" value="1">
+          <input class="at-input" id="rp-daily" placeholder="Daily" type="number" min="1" value="1">
+          <input class="at-input" id="rp-start" type="date" value="${todayStr()}">
+          <input class="at-input" id="rp-end" type="date" placeholder="End date (optional)">
+          <button class="at-add-btn" onclick="addReadingPlan()">+ Add</button>
+        </div>
+        <input class="at-input" id="rp-notes" placeholder="Notes (optional)" style="width:100%;margin-top:8px;box-sizing:border-box">
       </div>
-    </div>`;
+      ${archivedSection}`;
+  }
+
+  document.getElementById("bible-card").innerHTML=_buildHtml();
+
+  window.toggleRpArchive=function(){
+    _archiveOpen=!_archiveOpen;
+    document.getElementById("bible-card").innerHTML=_buildHtml();
+  };
 }
 
-async function toggleBibleEntry(id){
-  const entry=S.bible.find(b=>b.id===id);
-  if(!entry)return;
-  entry.done=!entry.done;
-  if(entry.done)addLog(`Bible: ${entry.ref} ✓`,"system");
-  saveState();renderBible();
-  try{await fetch(`${API_BASE}/bible/${id}/toggle`,{method:"PATCH"});}catch{}
-}
-
-async function addBibleEntry(){
-  const ref=document.getElementById("bible-ref").value.trim();
-  const dt=document.getElementById("bible-date").value;
-  if(!ref||!dt)return;
+async function markTodayReading(id){
   try{
-    const r=await fetch(`${API_BASE}/bible`,{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({ref,date:dt})});
-    if(r.ok){const e=await r.json();S.bible.push({id:e.id,ref,date:dt,done:false,pushed:0});}
-    else throw new Error();
-  }catch{S.bible.push({id:uid(),ref,date:dt,done:false,pushed:0});}
-  document.getElementById("bible-ref").value="";
-  saveState();renderBible();
+    const r=await fetch(`${API_BASE}/reading-plans/${id}/mark-today`,{method:"POST"});
+    if(!r.ok)throw new Error();
+    const updated=await r.json();
+    S.readingPlans=S.readingPlans.map(p=>p.id===id?updated:p);
+    saveState();renderReadingPlan();
+    addLog(`Reading: marked today complete`,"system");
+  }catch{addLog("Mark today failed","system");}
+}
+
+async function archiveReadingPlan(id){
+  if(!confirm("Archive this plan?"))return;
+  try{
+    const r=await fetch(`${API_BASE}/reading-plans/${id}`,{method:"DELETE"});
+    if(!r.ok)throw new Error();
+    S.readingPlans=S.readingPlans.map(p=>p.id===id?{...p,is_active:false,status:"archived"}:p);
+    saveState();renderReadingPlan();
+  }catch{addLog("Archive failed","system");}
+}
+
+async function editReadingPlan(id){
+  const p=S.readingPlans.find(x=>x.id===id);
+  if(!p)return;
+  const book=prompt("Current book:",p.current_book||"");
+  if(book===null)return;
+  const ch=parseInt(prompt("Current chapter:",p.current_chapter)||p.current_chapter);
+  if(isNaN(ch))return;
+  try{
+    const r=await fetch(`${API_BASE}/reading-plans/${id}`,{method:"PATCH",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({current_book:book,current_chapter:ch})});
+    if(!r.ok)throw new Error();
+    const updated=await r.json();
+    S.readingPlans=S.readingPlans.map(p=>p.id===id?updated:p);
+    saveState();renderReadingPlan();
+  }catch{addLog("Edit failed","system");}
+}
+
+async function addReadingPlan(){
+  const name=document.getElementById("rp-name").value.trim();
+  const current_book=document.getElementById("rp-book").value.trim();
+  const current_chapter=parseInt(document.getElementById("rp-chapter").value)||1;
+  const daily_target_chapters=parseInt(document.getElementById("rp-daily").value)||1;
+  const start_date=document.getElementById("rp-start").value||todayStr();
+  const target_completion_date=document.getElementById("rp-end").value||null;
+  const notes=document.getElementById("rp-notes").value.trim();
+  if(!name)return;
+  try{
+    const r=await fetch(`${API_BASE}/reading-plans`,{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({name,current_book,current_chapter,daily_target_chapters,start_date,target_completion_date,notes})});
+    if(!r.ok)throw new Error();
+    const plan=await r.json();
+    S.readingPlans.push(plan);
+  }catch{
+    // offline fallback — add locally with temp id
+    S.readingPlans.push({id:uid(),name,current_book,current_chapter,daily_target_chapters,
+      start_date,target_completion_date,notes,is_active:true,status:"active",days_remaining:null,entry_count:0,done_count:0});
+  }
+  ["rp-name","rp-book","rp-notes","rp-end"].forEach(x=>{document.getElementById(x).value="";});
+  document.getElementById("rp-chapter").value="1";
+  document.getElementById("rp-daily").value="1";
+  saveState();renderReadingPlan();
+  // TODO: integrate bible_progress with /reading-plans in next session
 }
 
 async function toggleCurrentlyReading(id){
@@ -2252,12 +2336,18 @@ async function toggleCurrentlyReading(id){
 function renderBooks(){
   const cls={reading:"bs-reading",queue:"bs-queue",done:"bs-done"};
   const active=S.books.filter(b=>b.status==="reading"||b.is_currently_reading).length;
+  const sorted=[...S.books].sort((a,b)=>(a.position??0)-(b.position??0));
   document.getElementById("books-card").innerHTML=`
     <div class="card-title"><span>Reading Queue</span><span class="badge b-glow">${active} active</span></div>
-    `+S.books.map(b=>{
+    `+sorted.map((b,i)=>{
       const total=b.total_pages||b.total||0;
       const pct=total>0?Math.round(b.page/total*100):0;
-      return`<div class="book-row">
+      const isFirst=i===0, isLast=i===sorted.length-1;
+      return`<div class="book-row" style="display:flex;align-items:flex-start;gap:6px">
+        <div style="display:flex;flex-direction:column;gap:2px;padding-top:2px">
+          <button class="at-add-btn" style="font-size:10px;padding:1px 5px;line-height:1;${isFirst?"opacity:0.3;cursor:default":""}" onclick="${isFirst?"":` reorderBook(${b.id},'up')`}" ${isFirst?"disabled":""}>▲</button>
+          <button class="at-add-btn" style="font-size:10px;padding:1px 5px;line-height:1;${isLast?"opacity:0.3;cursor:default":""}" onclick="${isLast?"":` reorderBook(${b.id},'down')`}" ${isLast?"disabled":""}>▼</button>
+        </div>
         <div style="flex:1;min-width:0">
           <div class="bk-title">${escHtml(b.title)}${b.is_currently_reading?` <span class="badge b-glow" style="font-size:7px;vertical-align:middle">NOW</span>`:""}</div>
           <div class="bk-author">${escHtml(b.author||"")}</div>
@@ -2290,6 +2380,31 @@ function renderBooks(){
         <button class="at-add-btn" onclick="addBook()">+ Add</button>
       </div>
     </div>`;
+}
+
+async function reorderBook(id, direction){
+  const sorted=[...S.books].sort((a,b)=>(a.position??0)-(b.position??0));
+  const idx=sorted.findIndex(b=>b.id===id);
+  if(idx<0)return;
+  const swapIdx=direction==="up"?idx-1:idx+1;
+  if(swapIdx<0||swapIdx>=sorted.length)return;
+  // Swap positions
+  const tmp=sorted[idx].position??idx;
+  sorted[idx].position=sorted[swapIdx].position??swapIdx;
+  sorted[swapIdx].position=tmp;
+  // Normalise to 0-based sequential positions
+  sorted.sort((a,b)=>(a.position??0)-(b.position??0));
+  sorted.forEach((b,i)=>{b.position=i;});
+  const order=sorted.map(b=>b.id);
+  try{
+    const r=await fetch(`${API_BASE}/books/reorder`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(order)});
+    if(!r.ok)throw new Error();
+    S.books=sorted;
+    saveState();renderBooks();
+  }catch{
+    addLog("Reorder failed — retrying sync","system");
+    await syncFromBackend();
+  }
 }
 
 async function updateBookPage(id,val){
@@ -2326,9 +2441,9 @@ async function addBook(){
   try{
     const r=await fetch(`${API_BASE}/books`,{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({title,author,status:"queue",page,total_pages})});
-    if(r.ok){const d=await r.json();S.books.push({id:d.id,title,author,status:"queue",page,total_pages});}
+    if(r.ok){const d=await r.json();S.books.push({id:d.id,title:d.title,author:d.author,status:d.status,page:d.page,total_pages:d.total_pages,position:d.position,is_currently_reading:d.is_currently_reading});}
     else throw new Error();
-  }catch{S.books.push({id:uid(),title,author,status:"queue",page,total_pages});}
+  }catch{const maxPos=S.books.reduce((m,b)=>Math.max(m,b.position??0),0);S.books.push({id:uid(),title,author,status:"queue",page,total_pages,position:maxPos+1,is_currently_reading:false});}
   ["bk-title","bk-author","bk-page","bk-total"].forEach(x=>{document.getElementById(x).value="";});
   addLog(`Book added: ${title.slice(0,40)}`);
   saveState();renderBooks();

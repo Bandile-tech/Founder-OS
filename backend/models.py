@@ -441,10 +441,16 @@ class ReadingPlan(Base):
     """A named reading plan (e.g. 'Bible 2026')."""
     __tablename__ = "reading_plans"
 
-    id         = Column(Integer, primary_key=True, index=True)
-    name       = Column(String, nullable=False)
-    is_active  = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    id                     = Column(Integer, primary_key=True, index=True)
+    name                   = Column(String, nullable=False)
+    is_active              = Column(Boolean, default=True)
+    created_at             = Column(DateTime, default=datetime.utcnow)
+    current_book           = Column(String, default="")
+    current_chapter        = Column(Integer, default=1)
+    daily_target_chapters  = Column(Integer, default=1)
+    start_date             = Column(Date, nullable=True)
+    target_completion_date = Column(Date, nullable=True)
+    notes                  = Column(String, default="")
 
     entries = relationship("ReadingPlanEntry", back_populates="plan",
                            cascade="all, delete-orphan", order_by="ReadingPlanEntry.day_number")

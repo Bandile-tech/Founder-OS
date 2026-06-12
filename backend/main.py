@@ -104,6 +104,8 @@ async def startup():
         seed_subjects(db)   # m002
         run_m003(db)        # m003 — must run after m002
         run_m004(db)        # m004 — war room schema migration
+        from migrations.m005_reading_plan_schema import run as run_m005
+        run_m005(db)        # m005 — reading plan columns + book position backfill
         _validate_schema(engine)   # raises if any ORM column is absent from the live DB
         _seed_non_negotiables_if_empty(db)
         _verify_seed_integrity(db)
@@ -1552,7 +1554,10 @@ def get_books(db: Session = Depends(get_db)):
 
 @app.post("/books")
 def add_book(payload: schemas.BookCreate, db: Session = Depends(get_db)):
-    book = Book(**payload.model_dump())
+    max_pos = db.query(func.max(Book.position)).scalar() or 0
+    data = payload.model_dump()
+    data["position"] = max_pos + 1
+    book = Book(**data)
     db.add(book)
     db.commit()
     db.refresh(book)
@@ -1726,21 +1731,73 @@ def delete_non_negotiable(nn_id: int, db: Session = Depends(get_db)):
 
 # ── WAR ROOM — READING PLAN ───────────────────────────────────
 
+def _serialize_reading_plan(p: ReadingPlan) -> dict:
+    from datetime import date as _date
+    today = _date.today()
+    days_remaining = None
+    if p.target_completion_date:
+        days_remaining = (p.target_completion_date - today).days
+    return {
+        "id": p.id,
+        "name": p.name,
+        "is_active": p.is_active,
+        "status": "active" if p.is_active else "archived",
+        "current_book": p.current_book or "",
+        "current_chapter": p.current_chapter or 1,
+        "daily_target_chapters": p.daily_target_chapters or 1,
+        "start_date": str(p.start_date) if p.start_date else None,
+        "target_completion_date": str(p.target_completion_date) if p.target_completion_date else None,
+        "days_remaining": days_remaining,
+        "notes": p.notes or "",
+        "entry_count": len(p.entries),
+        "done_count": sum(1 for e in p.entries if e.done),
+    }
+
+
 @app.get("/reading-plans")
 def list_reading_plans(db: Session = Depends(get_db)):
     plans = db.query(ReadingPlan).order_by(ReadingPlan.id.asc()).all()
-    return [{"id": p.id, "name": p.name, "is_active": p.is_active,
-             "entry_count": len(p.entries),
-             "done_count": sum(1 for e in p.entries if e.done)} for p in plans]
+    return [_serialize_reading_plan(p) for p in plans]
 
 
 @app.post("/reading-plans", status_code=201)
 def create_reading_plan(payload: schemas.ReadingPlanCreate, db: Session = Depends(get_db)):
-    plan = ReadingPlan(name=payload.name)
+    plan = ReadingPlan(**payload.model_dump())
     db.add(plan)
     db.commit()
     db.refresh(plan)
-    return {"id": plan.id, "name": plan.name}
+    return _serialize_reading_plan(plan)
+
+
+@app.patch("/reading-plans/{plan_id}")
+def update_reading_plan(plan_id: int, payload: schemas.ReadingPlanUpdate, db: Session = Depends(get_db)):
+    plan = db.query(ReadingPlan).filter(ReadingPlan.id == plan_id).first()
+    if not plan:
+        raise HTTPException(404, "Reading plan not found")
+    for field, val in payload.model_dump(exclude_none=True).items():
+        setattr(plan, field, val)
+    db.commit()
+    return _serialize_reading_plan(plan)
+
+
+@app.delete("/reading-plans/{plan_id}")
+def archive_reading_plan(plan_id: int, db: Session = Depends(get_db)):
+    plan = db.query(ReadingPlan).filter(ReadingPlan.id == plan_id).first()
+    if not plan:
+        raise HTTPException(404, "Reading plan not found")
+    plan.is_active = False
+    db.commit()
+    return {"archived": plan_id}
+
+
+@app.post("/reading-plans/{plan_id}/mark-today")
+def mark_today_reading(plan_id: int, db: Session = Depends(get_db)):
+    plan = db.query(ReadingPlan).filter(ReadingPlan.id == plan_id).first()
+    if not plan:
+        raise HTTPException(404, "Reading plan not found")
+    plan.current_chapter = (plan.current_chapter or 1) + (plan.daily_target_chapters or 1)
+    db.commit()
+    return _serialize_reading_plan(plan)
 
 
 @app.get("/reading-plans/{plan_id}/entries")
