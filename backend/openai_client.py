@@ -142,6 +142,11 @@ Correct output includes BOTH:
   "habits_done": ["scripture_prayer"]
   "trade_logs": [{{"type": "live", "pair": "EURUSD", "direction": "long", "net_pl_usd": 50, "adherence": true, "outcome": "win", "r_multiple": 1.0}}]
 
+READING RULE: When the user says they read or started reading a book, populate reading_updates — do NOT add to todos_add.
+Input: "read 12 week year"
+Correct output: "reading_updates": [{{"title_fragment": "12 week year"}}]
+Wrong output: "todos_add": [{{"text": "read 12 week year"}}]
+
 Example:
 Input: "Earned K500 from Wamu's and logged a backtest GBPUSD short +1.5R"
 Correct output includes BOTH:
@@ -157,6 +162,7 @@ Schema:
   "roadmap_complete": ["roadmap-task-id"],
   "habits_done": ["scripture_prayer|ironing|python_session|sprint_training|academics"],
   "annual_updates": [{{"name_fragment": "string", "current": number}}],
+  "reading_updates": [{{"title_fragment": "string"}}],
   "revenue_updates": [{{"amount": number, "source": "string", "client": "name-or-null"}}],
   "log_entry": "short log message",
   "advisory": "1-2 sentence strategic insight or null",
@@ -212,6 +218,7 @@ Today is {today}. Return valid JSON only."""
             "roadmap_complete": [],
             "habits_done": [],
             "annual_updates": [],
+            "reading_updates": [],
             "revenue_updates": [],
             "log_entry": "Brain dump parse failed",
             "advisory": None

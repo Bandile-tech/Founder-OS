@@ -12,6 +12,7 @@ Covers:
 
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -329,3 +330,86 @@ class TestBooksNewFields:
         r = client.patch(f"/books/{bid}", json={"position": 5})
         assert r.status_code == 200
         assert r.json()["position"] == 5
+
+
+# ════════════════════════════════════════════════════════════════
+# 7. Brain dump reading_updates routing
+# ════════════════════════════════════════════════════════════════
+
+def _fake_reading_parse(title_fragment: str) -> dict:
+    return {
+        "summary": "started reading",
+        "kpi_updates": [],
+        "todos_add": [],
+        "todos_complete": [],
+        "roadmap_complete": [],
+        "habits_done": [],
+        "annual_updates": [],
+        "reading_updates": [{"title_fragment": title_fragment}],
+        "revenue_updates": [],
+        "log_entry": "reading session",
+        "advisory": None,
+    }
+
+
+class TestReadingUpdatesBrainDump:
+
+    def _add_book(self, title):
+        r = client.post("/books", json={"title": title, "author": "Author", "status": "queue"})
+        assert r.status_code == 200
+        return r.json()["id"]
+
+    def test_reading_update_sets_is_currently_reading(self):
+        self._add_book("The 12 Week Year")
+        payload = _fake_reading_parse("12 week year")
+        with patch("main.get_parse_response", return_value=payload):
+            resp = client.post("/parse", json={"text": "read 12 week year"})
+        assert resp.status_code == 200
+        db = TestSessionLocal()
+        book = db.query(models.Book).filter(models.Book.title == "The 12 Week Year").first()
+        assert book is not None
+        assert book.is_currently_reading is True
+        db.close()
+
+    def test_reading_update_does_not_create_todo(self):
+        self._add_book("The 12 Week Year")
+        payload = _fake_reading_parse("12 week year")
+        with patch("main.get_parse_response", return_value=payload):
+            client.post("/parse", json={"text": "read 12 week year"})
+        db = TestSessionLocal()
+        todos = db.query(models.Todo).all()
+        assert len(todos) == 0
+        db.close()
+
+    def test_reading_update_applied_in_response(self):
+        self._add_book("The 12 Week Year")
+        payload = _fake_reading_parse("12 week year")
+        with patch("main.get_parse_response", return_value=payload):
+            resp = client.post("/parse", json={"text": "read 12 week year"})
+        data = resp.json()
+        assert "The 12 Week Year" in data["updates"]["reading_updates_applied"]
+
+    def test_reading_update_clears_previous_currently_reading(self):
+        b1 = self._add_book("Old Book")
+        b2 = self._add_book("The 12 Week Year")
+        # Mark b1 as currently reading first
+        client.patch(f"/books/{b1}/currently-reading")
+        db = TestSessionLocal()
+        assert db.query(models.Book).filter(models.Book.id == b1).first().is_currently_reading is True
+        db.close()
+
+        payload = _fake_reading_parse("12 week year")
+        with patch("main.get_parse_response", return_value=payload):
+            client.post("/parse", json={"text": "read 12 week year"})
+
+        db = TestSessionLocal()
+        assert db.query(models.Book).filter(models.Book.id == b1).first().is_currently_reading is False
+        assert db.query(models.Book).filter(models.Book.id == b2).first().is_currently_reading is True
+        db.close()
+
+    def test_reading_update_no_match_returns_failure(self):
+        payload = _fake_reading_parse("nonexistent book xyz")
+        with patch("main.get_parse_response", return_value=payload):
+            resp = client.post("/parse", json={"text": "read nonexistent book xyz"})
+        data = resp.json()
+        assert "nonexistent book xyz" in data["updates"]["reading_match_failures"]

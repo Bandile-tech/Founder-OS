@@ -1065,6 +1065,8 @@ def apply_parse_updates(db: Session, parsed: dict, today: date) -> dict:
         "todos_added":             [],   # list of text strings
         "roadmap_completed":       [],   # list of task_id strings
         "annual_updates_applied":  [],   # list of name_fragment strings
+        "reading_updates_applied": [],   # list of book titles marked currently-reading
+        "reading_match_failures":  [],   # list of fragments that didn't match any book
         "revenue_logged":          [],   # list of {amount, source}
         "log_entry_created":       False,
     }
@@ -1148,6 +1150,27 @@ def apply_parse_updates(db: Session, parsed: dict, today: date) -> dict:
                 target.updated_at = datetime.utcnow()
                 result["annual_updates_applied"].append(frag)
         if result["annual_updates_applied"]:
+            db.commit()
+
+    # ── Reading updates ───────────────────────────────────────
+    if parsed.get("reading_updates"):
+        for u in parsed["reading_updates"]:
+            frag = u.get("title_fragment", "").lower()
+            if not frag:
+                continue
+            book = db.query(models.Book).filter(
+                func.lower(models.Book.title).contains(frag)
+            ).first()
+            if book:
+                # Clear current flag on all books, set only the matched one
+                db.query(models.Book).filter(models.Book.is_currently_reading == True).update(
+                    {"is_currently_reading": False}
+                )
+                book.is_currently_reading = True
+                result["reading_updates_applied"].append(book.title)
+            else:
+                result["reading_match_failures"].append(frag)
+        if result["reading_updates_applied"]:
             db.commit()
 
     # ── Todo additions ────────────────────────────────────────

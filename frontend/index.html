@@ -1876,7 +1876,17 @@ function getYearPct(){
 }
 
 function atStatusBadge(at){
-  const s=at.status||"on_track";
+  let s=at.status;
+  // Compute locally when status is absent or when we have the raw data to verify
+  if(!s){
+    if(at.is_numeric!==false&&at.target!=null&&at.current!=null){
+      const pct=(at.current/at.target)*100;
+      const gap=pct-(getYearPct()*100);
+      s=gap>10?"ahead":gap>-10?"on_track":gap>-25?"behind":"critical";
+    } else {
+      s=at.is_complete?"done":"pending";
+    }
+  }
   if(s==="ahead"||s==="done")return{label:s==="done"?"Done":"Ahead",cls:"b-suc"};
   if(s==="on_track")return{label:"On Track",cls:"b-glow"};
   if(s==="behind")return{label:"Behind",cls:"b-warn"};
@@ -1890,7 +1900,7 @@ function renderAnnualDash(){
   el.innerHTML=S.annualTargets.map(at=>{
     const st=atStatusBadge(at);
     if(at.is_numeric!==false&&at.target!=null){
-      const pct=at.progress_pct??Math.min(100,(at.current/at.target*100));
+      const pct=(at.target!=null&&at.current!=null)?Math.min(100,(at.current/at.target*100)):(at.progress_pct??0);
       return`<div class="at-row">
         <div style="flex:1;min-width:0">
           <div class="at-name">${at.name}</div>
@@ -1917,7 +1927,7 @@ function renderAnnualTargets(){
   el.innerHTML=S.annualTargets.map(at=>{
     const st=atStatusBadge(at);
     const isNumeric=at.is_numeric!==false&&at.target!=null;
-    const pct=isNumeric?(at.progress_pct??Math.min(100,(at.current/at.target*100))):0;
+    const pct=isNumeric?((at.target!=null&&at.current!=null)?Math.min(100,(at.current/at.target*100)):(at.progress_pct??0)):0;
     return`<div class="card">
       <div class="card-title">
         <span>${at.name}</span>
@@ -1958,10 +1968,14 @@ async function addAnnualTarget(){
   else{body.display_value=cur||name;}
   try{
     const r=await fetch(`${API_BASE}/annual-targets`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
-    if(r.ok){const d=await r.json();S.annualTargets.push({id:d.id,name,current:body.current_value??null,target:body.target_value??null,unit:"",display_value:body.display_value||null,is_complete:false,is_numeric:!!body.target_value,status:"on_track",progress_pct:0,expected_pct:Math.round(getYearPct()*100)});}
+    if(r.ok){const d=await r.json();S.annualTargets.push({id:d.id,name:d.name,current:d.current_value,target:d.target_value,unit:d.unit||"",display_value:d.display_value||null,is_complete:d.is_complete,is_numeric:d.is_numeric,status:d.status,progress_pct:d.progress_pct,expected_pct:d.expected_pct});}
     else throw new Error();
   }catch{
-    S.annualTargets.push({id:"at-"+uid(),name,current:body.current_value??null,target:body.target_value??null,unit:"",display_value:body.display_value||null,is_complete:false,is_numeric:!!body.target_value,status:"on_track",progress_pct:0,expected_pct:Math.round(getYearPct()*100)});
+    const fallbackPct=body.target_value?Math.min(100,(parseFloat(body.current_value)||0)/body.target_value*100):0;
+    const yearPct=getYearPct()*100;
+    const gap=fallbackPct-yearPct;
+    const fallbackStatus=gap>10?"ahead":gap>-10?"on_track":gap>-25?"behind":"critical";
+    S.annualTargets.push({id:"at-"+uid(),name,current:body.current_value??null,target:body.target_value??null,unit:"",display_value:body.display_value||null,is_complete:false,is_numeric:!!body.target_value,status:fallbackStatus,progress_pct:Math.round(fallbackPct),expected_pct:Math.round(yearPct)});
   }
   document.getElementById("at-name").value="";
   document.getElementById("at-current").value="";
@@ -3157,6 +3171,8 @@ async function submitUnifiedInput(){
         chips.push(u.roadmap_completed.length+" roadmap item"+(u.roadmap_completed.length>1?"s":"")+" done");
       if(u.revenue_logged&&u.revenue_logged.length)
         chips.push(u.revenue_logged.map(r=>"K"+r.amount+" ("+escHtml(r.source)+")").join(", ")+" revenue");
+      if(u.reading_updates_applied&&u.reading_updates_applied.length)
+        chips.push("Now reading: "+u.reading_updates_applied.map(escHtml).join(", "));
       const updateLine=chips.length?`<div style="margin-top:5px;color:var(--glow);font-size:8px;letter-spacing:0.05em">✓ Applied: ${chips.join(" · ")}</div>`:"";
 
       if(data.status==="partial"){
@@ -3176,7 +3192,9 @@ async function submitUnifiedInput(){
         badge.className="badge b-warn";
       } else {
         // Normal success toast
-        result.innerHTML=`<div style="color:var(--success)">✓ Logged — ${escHtml(data.summary)}</div>${updateLine}${data.advisory?`<div style="margin-top:4px;color:var(--muted)">${escHtml(data.advisory)}</div>`:""}`;
+        const readingFailures=(data.updates&&data.updates.reading_match_failures)||[];
+        const readingWarnHtml=readingFailures.length?`<div style="margin-top:5px;color:#f5a623;font-size:8px">⚠ Couldn't find a book matching: ${readingFailures.map(escHtml).join(", ")}</div>`:"";
+        result.innerHTML=`<div style="color:var(--success)">✓ Logged — ${escHtml(data.summary)}</div>${updateLine}${readingWarnHtml}${data.advisory?`<div style="margin-top:4px;color:var(--muted)">${escHtml(data.advisory)}</div>`:""}`;
         result.style.display="block";
         badge.textContent="Logged";
         badge.className="badge b-suc";

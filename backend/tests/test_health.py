@@ -48,6 +48,7 @@ def _fake_parse_response(overrides: dict) -> dict:
         "roadmap_complete": [],
         "habits_done": [],
         "annual_updates": [],
+        "reading_updates": [],
         "revenue_updates": [],
         "log_entry": "test log",
         "advisory": None,
