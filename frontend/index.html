@@ -159,7 +159,7 @@ body{
 ═══════════════════════════════════════════════════ */
 .dash-grid{display:grid;grid-template-columns:1fr 320px;gap:16px;height:100%}
 .dash-left{overflow-y:auto;padding-right:4px}
-.dash-right{overflow-y:auto}
+.dash-right{overflow-y:auto;min-width:0}
 
 /* COUNTDOWN STRIP */
 .countdown-strip{
@@ -708,10 +708,16 @@ tr:hover .td-del{opacity:1}
   font-size:10px;padding:9px;outline:none;resize:vertical;line-height:1.6;
 }
 
+@media(max-width:960px){
+  .dash-grid{grid-template-columns:1fr;height:auto}
+  .dash-left{overflow-y:visible}
+  .dash-right{overflow-y:visible}
+}
 @media(max-width:640px){
   .ar-subtopic-row{flex-wrap:wrap}
   .ar-slider{width:100%;order:5;flex-basis:100%;margin-top:4px}
   .ar-date-label{display:none}
+  .countdown-strip{grid-template-columns:repeat(2,1fr)}
 }
 
 /* ═══════════════════════════════════════════════════
@@ -2360,12 +2366,14 @@ function renderBooks(){
         </div>
         <div style="display:flex;flex-direction:column;align-items:flex-end;gap:5px">
           <span class="bk-status ${cls[b.status]}">${b.status}</span>
-          <button class="at-add-btn" style="font-size:8px;padding:2px 6px;${b.is_currently_reading?"background:var(--glow);border-color:var(--glow)":""}" onclick="toggleCurrentlyReading(${b.id})">${b.is_currently_reading?"★ Now":"☆ Now"}</button>
-          <select class="at-input" style="font-size:9px;padding:2px 5px;width:90px" onchange="updateBookStatus(${b.id},this.value)">
-            <option value="queue" ${b.status==="queue"?"selected":""}>queue</option>
-            <option value="reading" ${b.status==="reading"?"selected":""}>reading</option>
-            <option value="done" ${b.status==="done"?"selected":""}>done</option>
-          </select>
+          <div style="display:flex;align-items:center;gap:4px">
+            <button class="at-add-btn" style="font-size:8px;padding:2px 6px;${b.is_currently_reading?"background:var(--glow);border-color:var(--glow)":""}" onclick="toggleCurrentlyReading(${b.id})">${b.is_currently_reading?"★ Now":"☆ Now"}</button>
+            <select class="at-input" style="font-size:9px;padding:2px 5px;width:80px" onchange="updateBookStatus(${b.id},this.value)">
+              <option value="queue" ${b.status==="queue"?"selected":""}>queue</option>
+              <option value="reading" ${b.status==="reading"?"selected":""}>reading</option>
+              <option value="done" ${b.status==="done"?"selected":""}>done</option>
+            </select>
+          </div>
           <button class="at-add-btn" style="background:var(--danger);border-color:var(--danger);font-size:8px;padding:3px 8px" onclick="deleteBook(${b.id})">✕</button>
         </div>
       </div>`;
