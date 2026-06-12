@@ -1991,7 +1991,10 @@ async function updateAT(id){
   const at=S.annualTargets.find(a=>String(a.id)===String(id));
   if(!at)return;
   at.current=val;
-  try{await fetch(`${API_BASE}/annual-targets/${id}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({current_value:val})});}catch{}
+  try{
+    const r=await fetch(`${API_BASE}/annual-targets/${id}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({current_value:val})});
+    if(r.ok){const d=await r.json();at.status=d.status;at.progress_pct=d.progress_pct;at.expected_pct=d.expected_pct;}
+  }catch{}
   addLog(`Annual target updated: ${at.name} → ${val}`);
   saveState();renderAnnualTargets();checkUrgentAlerts();
 }
@@ -2000,8 +2003,10 @@ async function toggleATComplete(id,val){
   const at=S.annualTargets.find(a=>String(a.id)===String(id));
   if(!at)return;
   at.is_complete=val;
-  at.status=val?"done":"pending";
-  try{await fetch(`${API_BASE}/annual-targets/${id}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({is_complete:val})});}catch{}
+  try{
+    const r=await fetch(`${API_BASE}/annual-targets/${id}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({is_complete:val})});
+    if(r.ok){const d=await r.json();at.status=d.status;at.is_complete=d.is_complete;}
+  }catch{at.status=val?"done":"pending";}
   saveState();renderAnnualTargets();
 }
 
@@ -3201,6 +3206,11 @@ async function submitUnifiedInput(){
       }
       // Refresh data
       await syncFromBackend();
+      // Explicitly re-render panels that may not be the active page.
+      // syncFromBackend updates S.* but only renders the active page —
+      // cross-module brain dumps (reading, lifts, revenue from wrong page)
+      // need their panel forced. Add cases here as patterns emerge.
+      if(u.reading_updates_applied&&u.reading_updates_applied.length) renderBooks();
       renderRecentActivity();
     } else {
       // Query reply — show inline + add to conversation history
