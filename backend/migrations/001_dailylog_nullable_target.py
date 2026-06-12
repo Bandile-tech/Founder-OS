@@ -76,7 +76,7 @@ def apply(db_path: Path | None = None) -> None:
 
     conn.commit()
     conn.close()
-    print("Migration 001: done.")
+    print("Migration 001: done (SQLite path).")
 
 
 def rollback(db_path: Path | None = None) -> None:

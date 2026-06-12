@@ -35,15 +35,14 @@ DEFAULT_LIFTS = [
 # ── Dialect helpers ──────────────────────────────────────────
 
 def _dialect(conn) -> str:
-    """Return 'sqlite' or 'postgresql'."""
-    name = conn.dialect.name if hasattr(conn, "dialect") else ""
-    if not name:
-        # fall back via engine
-        try:
-            name = engine.dialect.name
-        except Exception:
-            name = "sqlite"
-    return name
+    """Return 'sqlite' or 'postgresql'.  Raises on anything else."""
+    name = getattr(conn.dialect, "name", None) or engine.dialect.name
+    if name in ("sqlite", "postgresql"):
+        return name
+    raise RuntimeError(
+        f"[m003] Unsupported dialect '{name}'. "
+        "Add an explicit migration path before deploying."
+    )
 
 
 def _lift_columns_exist(conn) -> bool:
@@ -112,7 +111,10 @@ def run(db=None):
         db = SessionLocal()
 
     try:
-        conn = db.bind.connect() if hasattr(db, "bind") else engine.connect()
+        # Use the engine the session is bound to (respects test overrides),
+        # falling back to the module-level engine when no session is supplied.
+        _engine = db.get_bind() if db is not None else engine
+        conn = _engine.connect()
 
         with conn.begin():
             if _lift_columns_exist(conn):
@@ -150,8 +152,9 @@ def run(db=None):
                 WHERE lift_id = -1
             """))
 
+        dialect = _dialect(conn)
         conn.close()
-        print("[m003] Lift log migration complete.")
+        print(f"[m003] Lift log migration complete on {dialect}.")
 
     finally:
         if own_db:
