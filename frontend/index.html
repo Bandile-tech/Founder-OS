@@ -1152,40 +1152,6 @@ tr:hover .td-del{opacity:1}
           </div>
         </div>
       </div>
-
-      <div id="edit-rp-modal" class="ar-modal-overlay" style="display:none" onclick="if(event.target===this)closeEditRpModal()">
-        <div class="ar-modal" style="width:420px">
-          <div class="ar-modal-title">Edit Reading Plan</div>
-          <div style="display:grid;gap:8px">
-            <input id="erp-name" class="at-input" placeholder="Plan name" style="width:100%;box-sizing:border-box"
-              onkeydown="if(event.key==='Escape')closeEditRpModal()">
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-              <input id="erp-book" class="at-input" placeholder="Current book"
-                onkeydown="if(event.key==='Escape')closeEditRpModal()">
-              <input id="erp-chapter" class="at-input" placeholder="Chapter" type="number" min="1"
-                onkeydown="if(event.key==='Escape')closeEditRpModal()">
-            </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-              <div>
-                <div style="font-size:8px;color:var(--muted);margin-bottom:3px">Daily target (chapters)</div>
-                <input id="erp-daily" class="at-input" placeholder="1" type="number" min="1" style="width:100%;box-sizing:border-box"
-                  onkeydown="if(event.key==='Escape')closeEditRpModal()">
-              </div>
-              <div>
-                <div style="font-size:8px;color:var(--muted);margin-bottom:3px">Target completion date</div>
-                <input id="erp-end" class="at-input" type="date" style="width:100%;box-sizing:border-box"
-                  onkeydown="if(event.key==='Escape')closeEditRpModal()">
-              </div>
-            </div>
-            <textarea id="erp-notes" class="ar-notes-ta" placeholder="Notes (optional)" style="min-height:60px"
-              onkeydown="if(event.key==='Escape')closeEditRpModal()"></textarea>
-          </div>
-          <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
-            <button class="ar-btn-sm" onclick="closeEditRpModal()">Cancel</button>
-            <button class="ar-btn" onclick="submitEditRp()">Save</button>
-          </div>
-        </div>
-      </div>
     </div>
 
     <!-- ── WAR ROOM ── -->
@@ -4525,5 +4491,39 @@ renderHeader();
   setInterval(()=>{if(document.getElementById("p-timetable").classList.contains("active"))renderTimetable();},60000);
 })();
 </script>
+
+<div id="edit-rp-modal" class="ar-modal-overlay" style="display:none" onclick="if(event.target===this)closeEditRpModal()">
+  <div class="ar-modal" style="width:420px">
+    <div class="ar-modal-title">Edit Reading Plan</div>
+    <div style="display:grid;gap:8px">
+      <input id="erp-name" class="at-input" placeholder="Plan name" style="width:100%;box-sizing:border-box"
+        onkeydown="if(event.key==='Escape')closeEditRpModal()">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <input id="erp-book" class="at-input" placeholder="Current book"
+          onkeydown="if(event.key==='Escape')closeEditRpModal()">
+        <input id="erp-chapter" class="at-input" placeholder="Chapter" type="number" min="1"
+          onkeydown="if(event.key==='Escape')closeEditRpModal()">
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div>
+          <div style="font-size:8px;color:var(--muted);margin-bottom:3px">Daily target (chapters)</div>
+          <input id="erp-daily" class="at-input" placeholder="1" type="number" min="1" style="width:100%;box-sizing:border-box"
+            onkeydown="if(event.key==='Escape')closeEditRpModal()">
+        </div>
+        <div>
+          <div style="font-size:8px;color:var(--muted);margin-bottom:3px">Target completion date</div>
+          <input id="erp-end" class="at-input" type="date" style="width:100%;box-sizing:border-box"
+            onkeydown="if(event.key==='Escape')closeEditRpModal()">
+        </div>
+      </div>
+      <textarea id="erp-notes" class="ar-notes-ta" placeholder="Notes (optional)" style="min-height:60px"
+        onkeydown="if(event.key==='Escape')closeEditRpModal()"></textarea>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+      <button class="ar-btn-sm" onclick="closeEditRpModal()">Cancel</button>
+      <button class="ar-btn" onclick="submitEditRp()">Save</button>
+    </div>
+  </div>
+</div>
 </body>
 </html>
