@@ -1460,76 +1460,85 @@ let S=loadState();
 ═══════════════════════════════════════════════════ */
 const API_BASE = "https://founder-os-backend-f6qn.onrender.com";
 
-async function syncFromBackend() {
-  try {
-    const [kpisRaw, habits, todos, annual, readingPlans, books, socialRaw, acadProgress, healthDaily, healthWeekly, tenkRaw, gateRaw] = await Promise.all([
-      fetch(`${API_BASE}/kpis`).then(r => r.json()),
-      fetch(`${API_BASE}/habits`).then(r => r.json()),
-      fetch(`${API_BASE}/todos`).then(r => r.json()),
-      fetch(`${API_BASE}/annual-targets`).then(r => r.json()),
-      fetch(`${API_BASE}/reading-plans`).then(r => r.json()),
-      fetch(`${API_BASE}/books`).then(r => r.json()),
-      fetch(`${API_BASE}/social-score`).then(r => r.json()),
-      fetch(`${API_BASE}/subjects/progress`).then(r => r.json()),
-      fetch(`${API_BASE}/health/daily/today`).then(r => r.json()),
-      fetch(`${API_BASE}/health/weekly/current`).then(r => r.json()),
-      fetch(`${API_BASE}/scoreboard/ten-k`).then(r => r.json()).catch(()=>null),
-      fetch(`${API_BASE}/trading/gate`).then(r => r.json()).catch(()=>null),
-    ]);
+function fetchWithTimeout(url, timeoutMs=10000){
+  const ctrl=new AbortController();
+  const tid=setTimeout(()=>ctrl.abort(),timeoutMs);
+  return fetch(url,{signal:ctrl.signal})
+    .then(r=>r.json())
+    .finally(()=>clearTimeout(tid));
+}
 
-    // kpisRaw is a dict keyed by kpi key
-    Object.entries(kpisRaw).forEach(([key, kpi]) => {
-      if (S.kpis[key]) {
-        S.kpis[key].value = kpi.value;
-        S.kpis[key].target = kpi.target;
-      }
-    });
-
-    // Override academic KPI values with live subject mastery data
-    acadProgress.forEach(p => {
-      const key = CODE_TO_KPI[p.code];
-      if (key && S.kpis[key]) S.kpis[key].value = p.weighted_pct ?? 0;
-    });
-
-    // Store live health data for dashboard KPI panel
-    S.health = { daily: healthDaily, weekly: healthWeekly };
-
-    // Store trading data for dashboard panels
-    if (tenkRaw) S.tenk = tenkRaw;
-    if (gateRaw) S.gate = gateRaw;
-
-    habits.forEach(h => {
-      if (S.habits[h.key]) S.habits[h.key].done = h.done;
-    });
-
-    S.todos = todos.map(t => ({...t, urgent: false}));
-
-    // Map backend field names to frontend conventions
-    S.annualTargets = annual.map(a => ({
-      id: a.id,
-      is_numeric: a.is_numeric,
-      status: a.status,
-      progress_pct: a.progress_pct,
-      expected_pct: a.expected_pct,
-      display_value: a.display_value,
-      is_complete: a.is_complete,
-      name: a.name,
-      current: a.current_value,
-      target: a.target_value,
-      unit: a.unit || "",
-    }));
-
-    S.readingPlans = readingPlans;
-    S.books = books;
-    S.social = socialRaw.value || 50;
-
-    saveState();
-    renderHeader();
-    renderPage(getActivePageName());
-    console.log("OS: Synced with backend");
-  } catch (e) {
-    console.warn("Backend offline. Using local cache.", e);
+function _setSyncWarning(staleEndpoints){
+  let el=document.getElementById("h-sync-warn");
+  if(!staleEndpoints.length){if(el)el.remove();return;}
+  if(!el){
+    el=document.createElement("div");
+    el.id="h-sync-warn";
+    el.style.cssText="font-size:9px;color:#F59E0B;letter-spacing:0.1em;cursor:pointer;display:flex;align-items:center;gap:6px";
+    document.querySelector(".h-right").insertBefore(el,document.querySelector(".h-right").firstChild);
   }
+  el.innerHTML=`⚠ Some data may be stale <button onclick="syncFromBackend()" style="background:none;border:1px solid #F59E0B44;border-radius:3px;color:#F59E0B;font-size:8px;padding:1px 6px;cursor:pointer;font-family:inherit">Retry sync</button>`;
+}
+
+async function syncFromBackend() {
+  const ENDPOINTS=[
+    {key:"kpis",       url:`${API_BASE}/kpis`},
+    {key:"habits",     url:`${API_BASE}/habits`},
+    {key:"todos",      url:`${API_BASE}/todos`},
+    {key:"annual",     url:`${API_BASE}/annual-targets`},
+    {key:"readingPlans",url:`${API_BASE}/reading-plans`},
+    {key:"books",      url:`${API_BASE}/books`},
+    {key:"social",     url:`${API_BASE}/social-score`},
+    {key:"acadProgress",url:`${API_BASE}/subjects/progress`},
+    {key:"healthDaily",url:`${API_BASE}/health/daily/today`},
+    {key:"healthWeekly",url:`${API_BASE}/health/weekly/current`},
+    {key:"tenk",       url:`${API_BASE}/scoreboard/ten-k`},
+    {key:"gate",       url:`${API_BASE}/trading/gate`},
+  ];
+
+  const results=await Promise.allSettled(ENDPOINTS.map(e=>fetchWithTimeout(e.url)));
+
+  const data={};
+  const failed=[];
+  results.forEach((r,i)=>{
+    if(r.status==="fulfilled"){data[ENDPOINTS[i].key]=r.value;}
+    else{failed.push(ENDPOINTS[i].key);console.warn(`OS: sync failed — ${ENDPOINTS[i].key}:`,r.reason);}
+  });
+
+  if(data.kpis){
+    Object.entries(data.kpis).forEach(([key,kpi])=>{
+      if(S.kpis[key]){S.kpis[key].value=kpi.value;S.kpis[key].target=kpi.target;}
+    });
+  }
+  if(data.acadProgress){
+    data.acadProgress.forEach(p=>{
+      const key=CODE_TO_KPI[p.code];
+      if(key&&S.kpis[key])S.kpis[key].value=p.weighted_pct??0;
+    });
+  }
+  if(data.healthDaily||data.healthWeekly){
+    S.health={daily:data.healthDaily??S.health?.daily,weekly:data.healthWeekly??S.health?.weekly};
+  }
+  if(data.tenk)S.tenk=data.tenk;
+  if(data.gate)S.gate=data.gate;
+  if(data.habits){data.habits.forEach(h=>{if(S.habits[h.key])S.habits[h.key].done=h.done;});}
+  if(data.todos){S.todos=data.todos.map(t=>({...t,urgent:false}));}
+  if(data.annual){
+    S.annualTargets=data.annual.map(a=>({
+      id:a.id,is_numeric:a.is_numeric,status:a.status,progress_pct:a.progress_pct,
+      expected_pct:a.expected_pct,display_value:a.display_value,is_complete:a.is_complete,
+      name:a.name,current:a.current_value,target:a.target_value,unit:a.unit||"",
+    }));
+  }
+  if(data.readingPlans)S.readingPlans=data.readingPlans;
+  if(data.books)S.books=data.books;
+  if(data.social)S.social=data.social.value||50;
+
+  saveState();
+  _setSyncWarning(failed);
+  renderHeader();
+  renderPage(getActivePageName());
+  console.log(`OS: Sync complete. Failed: [${failed.join(",")||"none"}]`);
 }
 
 function getActivePageName() {
@@ -4200,19 +4209,29 @@ function resetSystem(){
 /* ═══════════════════════════════════════════════════
    INIT
 ═══════════════════════════════════════════════════ */
+function initialRender(){
+  renderDash();
+  fetchAndRenderRadar();
+  renderConversationHistory();
+  checkUrgentAlerts();
+}
+
 dailyReset();
 renderHeader();
-renderDash();
-fetchAndRenderRadar();
-renderConversationHistory(); // replaces renderChatHistory() — now in Dashboard panel
-checkUrgentAlerts();
-// renderAgentAlerts() moved — agent-alerts panel is in hidden p-brain; alerts visible via conv history
-syncFromBackend();
-setInterval(syncFromBackend, 30000);
-setInterval(()=>{renderHeader();},60000);
-setInterval(()=>{if(document.getElementById("p-dashboard").classList.contains("active"))renderCountdown();},3600000);
-setInterval(()=>{if(document.getElementById("p-dashboard").classList.contains("active"))fetchAndRenderRadar();},5*60*1000);
-setInterval(()=>{if(document.getElementById("p-timetable").classList.contains("active"))renderTimetable();},60000);
+
+(async()=>{
+  // Race the first sync against a 5-second fallback so offline users
+  // still see their localStorage data promptly.
+  const syncPromise=syncFromBackend();
+  const fallback=new Promise(res=>setTimeout(res,5000));
+  await Promise.race([syncPromise,fallback]);
+  initialRender();
+  setInterval(syncFromBackend,30000);
+  setInterval(()=>{renderHeader();},60000);
+  setInterval(()=>{if(document.getElementById("p-dashboard").classList.contains("active"))renderCountdown();},3600000);
+  setInterval(()=>{if(document.getElementById("p-dashboard").classList.contains("active"))fetchAndRenderRadar();},5*60*1000);
+  setInterval(()=>{if(document.getElementById("p-timetable").classList.contains("active"))renderTimetable();},60000);
+})();
 </script>
 </body>
 </html>
