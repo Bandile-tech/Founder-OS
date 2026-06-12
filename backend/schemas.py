@@ -163,6 +163,23 @@ class NonNegotiablePatch(BaseModel):
 
 class ReadingPlanCreate(BaseModel):
     name: str
+    current_book: str = ""
+    current_chapter: int = 1
+    daily_target_chapters: int = 1
+    start_date: Optional[date] = None
+    target_completion_date: Optional[date] = None
+    notes: str = ""
+
+
+class ReadingPlanUpdate(BaseModel):
+    name: Optional[str] = None
+    current_book: Optional[str] = None
+    current_chapter: Optional[int] = None
+    daily_target_chapters: Optional[int] = None
+    start_date: Optional[date] = None
+    target_completion_date: Optional[date] = None
+    notes: Optional[str] = None
+    is_active: Optional[bool] = None
 
 
 class ReadingPlanEntryCreate(BaseModel):
