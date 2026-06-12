@@ -1558,6 +1558,11 @@ function uid(){return"t"+(++nextId)}
 function nowTime(){return new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"})}
 function todayStr(){return new Date().toISOString().slice(0,10)}
 function daysUntil(dateStr){return Math.ceil((new Date(dateStr)-new Date().setHours(0,0,0,0))/(864e5))}
+// Backend already computes status; this shim maps it to the capitalised labels callers expect.
+function atScheduleStatus(at){
+  const map={critical:"Critical",behind:"Behind",on_track:"On Track",ahead:"Ahead"};
+  return{label:map[at.status]||"On Track"};
+}
 function kpiPct(k){
   if(k.lowerBetter){const g=k.value*0.15;const d=k.value-k.target;return Math.max(0,Math.min(100,((g-d)/g)*100));}
   return Math.min(100,(k.value/k.target)*100);
@@ -3523,9 +3528,6 @@ function renderAgentAlerts(){
   const overdue=S.todos.filter(t=>!t.done&&t.due&&t.due<todayStr());
   if(overdue.length)alerts.push({type:"warn",head:"Overdue Tasks",text:`${overdue.length} task${overdue.length>1?"s":""} past due — pushed to today.`});
 
-  const daysToReg=daysUntil("2026-05-17");
-  if(daysToReg<=14)alerts.push({type:"glow",head:"Regionals Approaching",text:`${daysToReg} days to ISAZ Regionals. Review taper protocol.`});
-
   document.getElementById("alert-count").textContent=alerts.length;
   document.getElementById("agent-alerts").innerHTML=alerts.length
     ?alerts.map(a=>`<div class="agent-alert ${a.type==="glow"?"glow-alert":""}">
@@ -4212,7 +4214,7 @@ function initialRender(){
   renderDash();
   fetchAndRenderRadar();
   renderConversationHistory();
-  checkUrgentAlerts();
+  try{checkUrgentAlerts();}catch(e){console.warn("checkUrgentAlerts failed:",e);}
 }
 
 dailyReset();
