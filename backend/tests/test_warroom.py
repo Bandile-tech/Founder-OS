@@ -81,6 +81,25 @@ class TestAnnualTargetsNewSchema:
         assert r2.json()["is_complete"] is True
         assert r2.json()["status"] == "done"
 
+    def test_patch_current_value_returns_recomputed_status(self):
+        """PATCH current_value must return updated status — not stale pre-patch value.
+        This guards against the Issue B regression where the frontend discarded the
+        response body and rendered a stale at.status badge after updating current."""
+        r = client.post("/annual-targets", json={
+            "name": "Revenue",
+            "current_value": 900,
+            "target_value": 1000,
+        })
+        tid = r.json()["id"]
+        # 900/1000 = 90% — well ahead of any year_pct, should be "ahead"
+        assert r.json()["status"] == "ahead"
+        # Drop current to near zero — should become "critical"
+        r2 = client.patch(f"/annual-targets/{tid}", json={"current_value": 10})
+        assert r2.status_code == 200
+        d = r2.json()
+        assert d["progress_pct"] == 1
+        assert d["status"] in ("behind", "critical")
+
     def test_no_lower_is_better_or_year_or_category_in_response(self):
         r = client.post("/annual-targets", json={"name": "Test target", "target_value": 100})
         d = r.json()
