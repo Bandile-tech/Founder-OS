@@ -142,7 +142,14 @@ Correct output includes BOTH:
   "habits_done": ["scripture_prayer"]
   "trade_logs": [{{"type": "live", "pair": "EURUSD", "direction": "long", "net_pl_usd": 50, "adherence": true, "outcome": "win", "r_multiple": 1.0}}]
 
-READING RULE: When the user says they read or started reading a book, populate reading_updates — do NOT add to todos_add.
+READING RULE: Distinguish between Bible reading and general book reading.
+- Bible chapters (e.g. "read Proverbs 12", "read Matthew 5") → populate bible_log, NOT reading_updates and NOT todos_add.
+- Fiction/non-fiction books from reading queue (e.g. "read 12 week year") → populate reading_updates, NOT todos_add.
+
+Input: "read Proverbs chapter 12 this morning"
+Correct output: "bible_log": [{{"book": "Proverbs", "chapter": 12, "notes": null}}]
+Wrong output: "reading_updates": [{{"title_fragment": "Proverbs"}}] or "todos_add": [{{"text": "read Proverbs 12"}}]
+
 Input: "read 12 week year"
 Correct output: "reading_updates": [{{"title_fragment": "12 week year"}}]
 Wrong output: "todos_add": [{{"text": "read 12 week year"}}]
@@ -163,6 +170,7 @@ Schema:
   "habits_done": ["scripture_prayer|ironing|python_session|sprint_training|academics"],
   "annual_updates": [{{"name_fragment": "string", "current": number}}],
   "reading_updates": [{{"title_fragment": "string"}}],
+  "bible_log": [{{"book": "string (e.g. Proverbs)", "chapter": integer, "notes": "string_or_null"}}],
   "revenue_updates": [{{"amount": number, "source": "string", "client": "name-or-null"}}],
   "log_entry": "short log message",
   "advisory": "1-2 sentence strategic insight or null",
@@ -219,6 +227,7 @@ Today is {today}. Return valid JSON only."""
             "habits_done": [],
             "annual_updates": [],
             "reading_updates": [],
+            "bible_log": [],
             "revenue_updates": [],
             "log_entry": "Brain dump parse failed",
             "advisory": None

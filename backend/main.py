@@ -19,6 +19,7 @@ from models import (
     DailyHealth, WeeklyHealth, Lift, LiftLog,
     PropFirmAccount, BacktestTrade, LiveTrade,
     Document, DocumentChunk, NonNegotiable, ReadingPlan, ReadingPlanEntry,
+    DailyBibleLog,
 )
 from memory_service import get_recent_memories
 from openai_client import (
@@ -1072,9 +1073,10 @@ def apply_parse_updates(db: Session, parsed: dict, today: date) -> dict:
         "todos_added":             [],   # list of text strings
         "roadmap_completed":       [],   # list of task_id strings
         "annual_updates_applied":  [],   # list of name_fragment strings
-        "reading_updates_applied": [],   # list of book titles marked currently-reading
-        "reading_match_failures":  [],   # list of fragments that didn't match any book
-        "revenue_logged":          [],   # list of {amount, source}
+        "reading_updates_applied":    [],   # list of book titles marked currently-reading
+        "reading_match_failures":     [],   # list of fragments that didn't match any book
+        "bible_log_entries_created":  0,    # count of DailyBibleLog rows created
+        "revenue_logged":             [],   # list of {amount, source}
         "log_entry_created":       False,
     }
 
@@ -1178,6 +1180,25 @@ def apply_parse_updates(db: Session, parsed: dict, today: date) -> dict:
             else:
                 result["reading_match_failures"].append(frag)
         if result["reading_updates_applied"]:
+            db.commit()
+
+    # ── Bible log entries ─────────────────────────────────────
+    if parsed.get("bible_log"):
+        for bl in parsed["bible_log"]:
+            book_name = (bl.get("book") or "").strip()
+            chapter   = bl.get("chapter")
+            if not book_name or not chapter:
+                continue
+            db.add(DailyBibleLog(date=today, book=book_name, chapter=int(chapter), notes=bl.get("notes")))
+            result["bible_log_entries_created"] += 1
+            # Advance matching active ReadingPlan if current_book matches
+            plan = db.query(ReadingPlan).filter(
+                ReadingPlan.is_active == True,
+                func.lower(ReadingPlan.current_book) == book_name.lower(),
+            ).first()
+            if plan:
+                plan.current_chapter = int(chapter)
+        if result["bible_log_entries_created"]:
             db.commit()
 
     # ── Todo additions ────────────────────────────────────────
@@ -1536,6 +1557,53 @@ def bible_streak_endpoint(db: Session = Depends(get_db)):
         else:
             break
     return {"streak": streak}
+
+
+# ── BIBLE LOG ────────────────────────────────────────────────
+
+def _serialize_bible_log(e: DailyBibleLog) -> dict:
+    return {"id": e.id, "date": str(e.date), "book": e.book, "chapter": e.chapter, "notes": e.notes}
+
+
+@app.post("/bible-log", status_code=201)
+def create_bible_log(payload: schemas.DailyBibleLogCreate, db: Session = Depends(get_db)):
+    entry = DailyBibleLog(
+        date=payload.entry_date or date.today(),
+        book=payload.book.strip(),
+        chapter=payload.chapter,
+        notes=payload.notes,
+    )
+    db.add(entry)
+    db.commit()
+    db.refresh(entry)
+    return _serialize_bible_log(entry)
+
+
+@app.get("/bible-log/today")
+def get_bible_log_today(db: Session = Depends(get_db)):
+    today = date.today()
+    entries = db.query(DailyBibleLog).filter(DailyBibleLog.date == today).order_by(DailyBibleLog.created_at.asc()).all()
+    return [_serialize_bible_log(e) for e in entries]
+
+
+@app.get("/bible-log/recent")
+def get_bible_log_recent(days: int = 30, db: Session = Depends(get_db)):
+    since = date.today() - timedelta(days=days - 1)
+    entries = db.query(DailyBibleLog).filter(DailyBibleLog.date >= since).order_by(DailyBibleLog.date.desc(), DailyBibleLog.created_at.asc()).all()
+    grouped: dict = {}
+    for e in entries:
+        key = str(e.date)
+        grouped.setdefault(key, []).append(_serialize_bible_log(e))
+    return [{"date": k, "entries": v} for k, v in grouped.items()]
+
+
+@app.delete("/bible-log/{entry_id}", status_code=204)
+def delete_bible_log(entry_id: int, db: Session = Depends(get_db)):
+    entry = db.query(DailyBibleLog).filter(DailyBibleLog.id == entry_id).first()
+    if not entry:
+        raise HTTPException(404, "Entry not found")
+    db.delete(entry)
+    db.commit()
 
 
 # ── BOOKS ─────────────────────────────────────────────────────
