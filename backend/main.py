@@ -281,6 +281,11 @@ def health():
     return {"ok": True}
 
 
+@app.get("/ping")
+def ping():
+    return {"status": "ok", "ts": datetime.utcnow().isoformat()}
+
+
 # ── KPIs ─────────────────────────────────────────────────────
 @app.get("/kpis")
 def get_kpis():
