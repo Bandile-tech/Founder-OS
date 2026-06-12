@@ -1382,6 +1382,11 @@ tr:hover .td-del{opacity:1}
 
 <script>
 /* ═══════════════════════════════════════════════════
+   DEFENSIVE DOM HELPERS
+═══════════════════════════════════════════════════ */
+const safeUpdate = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value; };
+
+/* ═══════════════════════════════════════════════════
    STATE
 ═══════════════════════════════════════════════════ */
 const DEFAULT_STATE = {
@@ -1630,18 +1635,10 @@ function renderPage(page){
    HEADER
 ═══════════════════════════════════════════════════ */
 function renderHeader(){
-  document.getElementById("h-date").textContent=
-    new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric"});
+  safeUpdate("h-date", new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric"}));
   const drifting=Object.values(S.habits).filter(h=>!h.done).length;
   const hd=document.getElementById("h-drift");
-  hd.style.display=drifting>0?"block":"none";
-  hd.textContent=`⚡ ${drifting} HABIT${drifting>1?"S":""} DRIFTING`;
-
-  const regDate="2026-05-17";
-  const d=daysUntil(regDate);
-  document.getElementById("regionals-countdown").textContent=d>0?`${d} days`:"Race week!";
-  const rb=document.getElementById("regionals-box");
-  if(rb)rb.querySelector(".cd-val").textContent=d>0?d:"!";
+  if(hd){hd.style.display=drifting>0?"block":"none";hd.textContent=`⚡ ${drifting} HABIT${drifting>1?"S":""} DRIFTING`;}
 }
 
 /* ═══════════════════════════════════════════════════
