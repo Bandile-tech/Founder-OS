@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from pydantic import BaseModel
 from datetime import date
 from typing import Optional, List, Dict, Any
@@ -116,6 +118,14 @@ class ProactiveBriefRequest(BaseModel):
 class BibleEntryCreate(BaseModel):
     ref: str
     date: date
+
+
+class DailyBibleLogCreate(BaseModel):
+    model_config = {"populate_by_name": True}
+    entry_date: Optional[date] = None
+    book: str
+    chapter: int
+    notes: Optional[str] = None
 
 
 class BookCreate(BaseModel):

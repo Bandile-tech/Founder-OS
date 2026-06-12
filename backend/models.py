@@ -161,6 +161,18 @@ class BibleEntry(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class DailyBibleLog(Base):
+    """Free-form daily Bible reading log (book + chapter)."""
+    __tablename__ = "daily_bible_log"
+
+    id         = Column(Integer, primary_key=True, index=True)
+    date       = Column(Date, nullable=False, index=True)
+    book       = Column(String, nullable=False)
+    chapter    = Column(Integer, nullable=False)
+    notes      = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 class Book(Base):
     """Reading queue — from queue through done."""
     __tablename__ = "books"

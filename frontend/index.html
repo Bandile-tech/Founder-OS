@@ -651,6 +651,10 @@ body{
 .td-be{color:var(--muted)}
 .td-stats-row{display:flex;gap:16px;flex-wrap:wrap;padding:8px 0;border-top:1px solid #54ACBF22;font-size:10px;color:var(--muted)}
 .td-stats-val{color:var(--text);font-weight:600}
+.td-field-wrap{display:inline-flex;flex-direction:column;gap:2px}
+.td-field-err{font-size:8px;color:#e74c3c;font-style:italic;display:none}
+.td-field-wrap.has-error .at-input,.td-field-wrap.has-error .health-sel{border-color:#e74c3c!important}
+.td-field-wrap.has-error .td-field-err{display:block}
 .td-del{background:transparent;border:none;color:var(--muted);cursor:pointer;font-size:10px;padding:0 2px;opacity:0}
 tr:hover .td-del{opacity:1}
 .td-del:hover{color:var(--danger)}
@@ -1136,6 +1140,52 @@ tr:hover .td-del{opacity:1}
           </div>
         </div>
       </div>
+
+      <div id="add-subtopic-modal" class="ar-modal-overlay" style="display:none" onclick="if(event.target===this)closeAddSubtopicModal()">
+        <div class="ar-modal" style="width:340px">
+          <div class="ar-modal-title">Add Subtopic</div>
+          <input id="add-subtopic-name" class="at-input" placeholder="Subtopic name" style="width:100%;box-sizing:border-box"
+            onkeydown="if(event.key==='Enter')submitAddSubtopic();if(event.key==='Escape')closeAddSubtopicModal()">
+          <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+            <button class="ar-btn-sm" onclick="closeAddSubtopicModal()">Cancel</button>
+            <button class="ar-btn" onclick="submitAddSubtopic()">Add</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="edit-rp-modal" class="ar-modal-overlay" style="display:none" onclick="if(event.target===this)closeEditRpModal()">
+        <div class="ar-modal" style="width:420px">
+          <div class="ar-modal-title">Edit Reading Plan</div>
+          <div style="display:grid;gap:8px">
+            <input id="erp-name" class="at-input" placeholder="Plan name" style="width:100%;box-sizing:border-box"
+              onkeydown="if(event.key==='Escape')closeEditRpModal()">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+              <input id="erp-book" class="at-input" placeholder="Current book"
+                onkeydown="if(event.key==='Escape')closeEditRpModal()">
+              <input id="erp-chapter" class="at-input" placeholder="Chapter" type="number" min="1"
+                onkeydown="if(event.key==='Escape')closeEditRpModal()">
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+              <div>
+                <div style="font-size:8px;color:var(--muted);margin-bottom:3px">Daily target (chapters)</div>
+                <input id="erp-daily" class="at-input" placeholder="1" type="number" min="1" style="width:100%;box-sizing:border-box"
+                  onkeydown="if(event.key==='Escape')closeEditRpModal()">
+              </div>
+              <div>
+                <div style="font-size:8px;color:var(--muted);margin-bottom:3px">Target completion date</div>
+                <input id="erp-end" class="at-input" type="date" style="width:100%;box-sizing:border-box"
+                  onkeydown="if(event.key==='Escape')closeEditRpModal()">
+              </div>
+            </div>
+            <textarea id="erp-notes" class="ar-notes-ta" placeholder="Notes (optional)" style="min-height:60px"
+              onkeydown="if(event.key==='Escape')closeEditRpModal()"></textarea>
+          </div>
+          <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+            <button class="ar-btn-sm" onclick="closeEditRpModal()">Cancel</button>
+            <button class="ar-btn" onclick="submitEditRp()">Save</button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- ── WAR ROOM ── -->
@@ -1270,7 +1320,10 @@ tr:hover .td-del{opacity:1}
             <option value="long">Long</option>
             <option value="short">Short</option>
           </select>
-          <input class="at-input" id="bt-r"       type="number" step="0.1"  placeholder="R (e.g. 1.5)" style="width:100px">
+          <div class="td-field-wrap" id="wrap-bt-r">
+            <input class="at-input" id="bt-r" type="number" step="0.1" placeholder="R (e.g. 1.5)" style="width:100px" oninput="clearTdError('wrap-bt-r')">
+            <span class="td-field-err">R-multiple required</span>
+          </div>
           <select class="health-sel" id="bt-adh" style="width:80px">
             <option value="true">Adh ✓</option>
             <option value="false">Adh ✗</option>
@@ -1308,7 +1361,10 @@ tr:hover .td-del{opacity:1}
         <div id="lt-add-form" style="display:flex;flex-wrap:wrap;gap:6px;align-items:flex-start;margin-bottom:10px">
           <input class="at-input" id="lt-date"    type="date"   style="width:120px">
           <input class="at-input" id="lt-time"    type="text"   placeholder="Time" style="width:110px">
-          <select class="health-sel" id="lt-account" style="width:140px"><option value="">No account</option></select>
+          <div class="td-field-wrap" id="wrap-lt-account">
+            <select class="health-sel" id="lt-account" style="width:140px" onchange="clearTdError('wrap-lt-account')"><option value="">— Account —</option></select>
+            <span class="td-field-err">Account required</span>
+          </div>
           <select class="health-sel" id="lt-pair" style="width:100px">
             <option value="EURUSD">EURUSD</option>
             <option value="GBPUSD">GBPUSD</option>
@@ -1318,7 +1374,10 @@ tr:hover .td-del{opacity:1}
             <option value="long">Long</option>
             <option value="short">Short</option>
           </select>
-          <input class="at-input" id="lt-r"       type="number" step="0.1"  placeholder="R" style="width:80px">
+          <div class="td-field-wrap" id="wrap-lt-r">
+            <input class="at-input" id="lt-r" type="number" step="0.1" placeholder="R" style="width:80px" oninput="clearTdError('wrap-lt-r')">
+            <span class="td-field-err">R-multiple required</span>
+          </div>
           <select class="health-sel" id="lt-adh" style="width:80px">
             <option value="true">Adh ✓</option>
             <option value="false">Adh ✗</option>
@@ -1328,8 +1387,14 @@ tr:hover .td-del{opacity:1}
             <option value="loss">Loss</option>
             <option value="breakeven">BE</option>
           </select>
-          <input class="at-input" id="lt-risk"    type="number" step="0.1"  placeholder="Risk %" style="width:85px">
-          <input class="at-input" id="lt-pl"      type="number" step="1"    placeholder="P/L $"  style="width:90px">
+          <div class="td-field-wrap" id="wrap-lt-risk">
+            <input class="at-input" id="lt-risk" type="number" step="0.1" placeholder="Risk %" style="width:85px" oninput="clearTdError('wrap-lt-risk')">
+            <span class="td-field-err">Risk % required</span>
+          </div>
+          <div class="td-field-wrap" id="wrap-lt-pl">
+            <input class="at-input" id="lt-pl" type="number" step="1" placeholder="P/L $" style="width:90px" oninput="clearTdError('wrap-lt-pl')">
+            <span class="td-field-err">Net P/L required</span>
+          </div>
           <input class="at-input" id="lt-reason"  type="text"   placeholder="Entry reason" style="flex:1;min-width:180px">
           <div style="display:flex;align-items:center;gap:6px;width:100%">
             <label style="font-size:10px;color:var(--muted)">Rule broken?</label>
@@ -2276,12 +2341,59 @@ function addTimetableSlot(){
   saveState();renderTimetable();
 }
 
-function renderReadingPlan(){
+async function renderReadingPlan(){
   // Update streak display (legacy: count consecutive days with any mark-today; just show active plan count for now)
   const activePlans=S.readingPlans.filter(p=>p.is_active);
   document.getElementById("bible-streak").textContent=activePlans.length;
 
   let _archiveOpen=false;
+  let _historyOpen=false;
+  let _todayEntries=[];
+  let _historyGroups=[];
+
+  async function _loadBibleLog(){
+    try{
+      _todayEntries=await fetch(`${API_BASE}/bible-log/today`).then(r=>r.json());
+    }catch{_todayEntries=[];}
+  }
+  async function _loadHistory(){
+    try{
+      _historyGroups=await fetch(`${API_BASE}/bible-log/recent?days=30`).then(r=>r.json());
+    }catch{_historyGroups=[];}
+  }
+
+  function _buildLogSection(){
+    const todayRows=_todayEntries.length===0
+      ?`<div style="color:var(--muted);font-size:9px;padding:4px 0">No entries today yet.</div>`
+      :_todayEntries.map(e=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid #54ACBF10">
+          <span style="font-size:10px;color:var(--text)">${escHtml(e.book)} ${e.chapter}${e.notes?` <span style="color:var(--muted);font-style:italic">— ${escHtml(e.notes)}</span>`:""}</span>
+          <button class="td-del" onclick="deleteBibleLog(${e.id})" style="font-size:9px">✕</button>
+        </div>`).join("");
+
+    const historyRows=_historyGroups.length===0
+      ?`<div style="color:var(--muted);font-size:9px;padding:4px 0">No history yet.</div>`
+      :_historyGroups.map(g=>`<div style="margin-bottom:8px">
+          <div style="font-size:8px;color:var(--muted);letter-spacing:0.08em;margin-bottom:3px">${g.date}</div>
+          ${g.entries.map(e=>`<div style="font-size:10px;color:var(--text);padding:2px 0">${escHtml(e.book)} ${e.chapter}${e.notes?` <span style="color:var(--muted);font-style:italic">— ${escHtml(e.notes)}</span>`:""}</div>`).join("")}
+        </div>`).join("");
+
+    return`<div style="margin-top:16px;border-top:1px solid #54ACBF14;padding-top:12px">
+      <div class="card-title" style="margin-bottom:8px"><span>Today's Reading</span></div>
+      <div style="display:grid;grid-template-columns:1fr 60px 1fr auto;gap:6px;margin-bottom:8px">
+        <input class="at-input" id="bl-book" placeholder="Book (e.g. Proverbs)">
+        <input class="at-input" id="bl-chapter" placeholder="Ch." type="number" min="1">
+        <input class="at-input" id="bl-notes" placeholder="Notes (optional)">
+        <button class="at-add-btn" onclick="addBibleLog()">+ Log</button>
+      </div>
+      <div id="bl-today-list">${todayRows}</div>
+      <div style="margin-top:10px">
+        <div style="cursor:pointer;font-size:9px;color:var(--muted);letter-spacing:0.1em;user-select:none" onclick="toggleBibleHistory()">
+          ${_historyOpen?"▼":"▶"} READING HISTORY (LAST 30 DAYS)
+        </div>
+        <div id="bl-history-list" style="display:${_historyOpen?"block":"none"};margin-top:8px">${historyRows}</div>
+      </div>
+    </div>`;
+  }
 
   function _buildHtml(){
     const active=S.readingPlans.filter(p=>p.is_active);
@@ -2340,15 +2452,47 @@ function renderReadingPlan(){
         </div>
         <input class="at-input" id="rp-notes" placeholder="Notes (optional)" style="width:100%;margin-top:8px;box-sizing:border-box">
       </div>
-      ${archivedSection}`;
+      ${archivedSection}
+      ${_buildLogSection()}`;
   }
 
+  await _loadBibleLog();
   document.getElementById("bible-card").innerHTML=_buildHtml();
 
   window.toggleRpArchive=function(){
     _archiveOpen=!_archiveOpen;
     document.getElementById("bible-card").innerHTML=_buildHtml();
   };
+
+  window.toggleBibleHistory=async function(){
+    _historyOpen=!_historyOpen;
+    if(_historyOpen && _historyGroups.length===0) await _loadHistory();
+    document.getElementById("bible-card").innerHTML=_buildHtml();
+  };
+}
+
+async function addBibleLog(){
+  const book=(document.getElementById("bl-book").value||"").trim();
+  const chapter=parseInt(document.getElementById("bl-chapter").value);
+  const notes=(document.getElementById("bl-notes").value||"").trim()||null;
+  if(!book||isNaN(chapter))return;
+  try{
+    const r=await fetch(`${API_BASE}/bible-log`,{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({book,chapter,notes})});
+    if(!r.ok)throw new Error();
+    document.getElementById("bl-book").value="";
+    document.getElementById("bl-chapter").value="";
+    document.getElementById("bl-notes").value="";
+    renderReadingPlan();
+  }catch{addLog("Bible log failed","system");}
+}
+
+async function deleteBibleLog(id){
+  if(!confirm("Delete this entry?"))return;
+  try{
+    await fetch(`${API_BASE}/bible-log/${id}`,{method:"DELETE"});
+    renderReadingPlan();
+  }catch{addLog("Delete failed","system");}
 }
 
 async function markTodayReading(id){
@@ -2372,19 +2516,44 @@ async function archiveReadingPlan(id){
   }catch{addLog("Archive failed","system");}
 }
 
-async function editReadingPlan(id){
+let _editRpId=null;
+
+function editReadingPlan(id){
   const p=S.readingPlans.find(x=>x.id===id);
   if(!p)return;
-  const book=prompt("Current book:",p.current_book||"");
-  if(book===null)return;
-  const ch=parseInt(prompt("Current chapter:",p.current_chapter)||p.current_chapter);
-  if(isNaN(ch))return;
+  _editRpId=id;
+  document.getElementById("erp-name").value=p.name||"";
+  document.getElementById("erp-book").value=p.current_book||"";
+  document.getElementById("erp-chapter").value=p.current_chapter||1;
+  document.getElementById("erp-daily").value=p.daily_target_chapters||1;
+  document.getElementById("erp-end").value=p.target_completion_date||"";
+  document.getElementById("erp-notes").value=p.notes||"";
+  document.getElementById("edit-rp-modal").style.display="flex";
+  document.getElementById("erp-book").focus();
+}
+
+function closeEditRpModal(){
+  document.getElementById("edit-rp-modal").style.display="none";
+  _editRpId=null;
+}
+
+async function submitEditRp(){
+  if(!_editRpId)return;
+  const payload={
+    name:document.getElementById("erp-name").value.trim()||undefined,
+    current_book:document.getElementById("erp-book").value.trim(),
+    current_chapter:parseInt(document.getElementById("erp-chapter").value)||1,
+    daily_target_chapters:parseInt(document.getElementById("erp-daily").value)||1,
+    target_completion_date:document.getElementById("erp-end").value||null,
+    notes:document.getElementById("erp-notes").value.trim(),
+  };
+  closeEditRpModal();
   try{
-    const r=await fetch(`${API_BASE}/reading-plans/${id}`,{method:"PATCH",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({current_book:book,current_chapter:ch})});
+    const r=await fetch(`${API_BASE}/reading-plans/${_editRpId}`,{method:"PATCH",
+      headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
     if(!r.ok)throw new Error();
     const updated=await r.json();
-    S.readingPlans=S.readingPlans.map(p=>p.id===id?updated:p);
+    S.readingPlans=S.readingPlans.map(p=>p.id===updated.id?updated:p);
     saveState();renderReadingPlan();
   }catch{addLog("Edit failed","system");}
 }
@@ -3114,16 +3283,33 @@ async function saveNotes(){
   closeNotesModal();
 }
 
-/* ── Add subtopic ── */
-async function arAddSubtopic(topicId,subjId){
-  const name=window.prompt("New subtopic name:");
-  if(!name||!name.trim())return;
+/* ── Add subtopic modal ── */
+let _addSubtopicContext={topicId:null,subjId:null};
+
+function arAddSubtopic(topicId,subjId){
+  _addSubtopicContext={topicId,subjId};
+  const modal=document.getElementById("add-subtopic-modal");
+  const inp=document.getElementById("add-subtopic-name");
+  inp.value="";
+  modal.style.display="flex";
+  inp.focus();
+}
+
+function closeAddSubtopicModal(){
+  document.getElementById("add-subtopic-modal").style.display="none";
+  _addSubtopicContext={topicId:null,subjId:null};
+}
+
+async function submitAddSubtopic(){
+  const name=(document.getElementById("add-subtopic-name").value||"").trim();
+  if(!name)return;
+  const {topicId,subjId}=_addSubtopicContext;
+  closeAddSubtopicModal();
   try{
     const res=await fetch(`${API_BASE}/topics/${topicId}/subtopics`,{method:"POST",
       headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({name:name.trim(),mastery_level:0})});
+      body:JSON.stringify({name,mastery_level:0})});
     if(!res.ok)throw new Error(await res.text());
-    // Reload just this subject's data
     await _arReloadSubject(subjId);
   }catch(e){ alert("Failed to add subtopic: "+e.message); }
 }
@@ -4147,26 +4333,38 @@ function _renderAccountsGrid(){
 
 // ── Form actions ──────────────────────────────────────────
 
+function clearTdError(wrapId){
+  document.getElementById(wrapId)?.classList.remove("has-error");
+}
+
+function _tdShowError(wrapId){
+  document.getElementById(wrapId)?.classList.add("has-error");
+}
+
 async function submitBacktest(){
+  const rVal=document.getElementById("bt-r").value;
+  const r=parseFloat(rVal);
+  let valid=true;
+  if(!rVal||isNaN(r)){_tdShowError("wrap-bt-r");valid=false;}
+  if(!valid)return;
+
   const date=document.getElementById("bt-date").value||todayStr();
   const time=document.getElementById("bt-time").value||null;
   const pair=document.getElementById("bt-pair").value;
   const dir=document.getElementById("bt-dir").value;
-  const r=parseFloat(document.getElementById("bt-r").value);
   const adh=document.getElementById("bt-adh").value==="true";
   const outcome=document.getElementById("bt-outcome").value;
   const reason=document.getElementById("bt-reason").value.trim()||null;
-  if(isNaN(r)){alert("Enter an R-multiple.");return;}
   try{
     const resp=await fetch(`${API_BASE}/trading/backtest`,{method:"POST",
       headers:{"Content-Type":"application/json"},
       body:JSON.stringify({date,time_of_day:time,pair,direction:dir,r_multiple:r,
         rule_adherence:adh,outcome,entry_reason:reason})});
-    if(!resp.ok){const e=await resp.json();alert(e.detail||"Error");return;}
+    if(!resp.ok){const e=await resp.json();addLog(e.detail||"Backtest error","system");return;}
     document.getElementById("bt-reason").value="";
     document.getElementById("bt-r").value="";
     renderTrading();
-  }catch(e){alert("Backend offline.");}
+  }catch{addLog("Backend offline.","system");}
 }
 
 async function deleteBt(id){
@@ -4185,23 +4383,32 @@ function toggleRuleBreak(){
 
 async function submitLiveTrade(){
   if(_tdGate&&_tdGate.status==="LOCKED"){
-    alert("GATE LOCKED: Complete 50 backtests with ≥90% adherence before logging live trades.");
+    addLog("GATE LOCKED: complete 50 backtests with ≥90% adherence first.","system");
     return;
   }
+  const rVal=document.getElementById("lt-r").value;
+  const acctVal=document.getElementById("lt-account").value;
+  const riskVal=document.getElementById("lt-risk").value;
+  const plVal=document.getElementById("lt-pl").value;
+  const r=parseFloat(rVal);
+  let valid=true;
+  if(!rVal||isNaN(r)){_tdShowError("wrap-lt-r");valid=false;}
+  if(!acctVal){_tdShowError("wrap-lt-account");valid=false;}
+  if(!riskVal){_tdShowError("wrap-lt-risk");valid=false;}
+  if(!plVal){_tdShowError("wrap-lt-pl");valid=false;}
+  if(!valid)return;
+
   const date=document.getElementById("lt-date").value||todayStr();
   const time=document.getElementById("lt-time").value||null;
-  const acctId=parseInt(document.getElementById("lt-account").value)||null;
+  const acctId=parseInt(acctVal)||null;
   const pair=document.getElementById("lt-pair").value;
   const dir=document.getElementById("lt-dir").value;
-  const r=parseFloat(document.getElementById("lt-r").value);
   const adh=document.getElementById("lt-adh").value==="true";
   const outcome=document.getElementById("lt-outcome").value;
-  const risk=parseFloat(document.getElementById("lt-risk").value)||null;
-  const pl=parseFloat(document.getElementById("lt-pl").value)||null;
+  const risk=parseFloat(riskVal)||null;
+  const pl=parseFloat(plVal)||null;
   const reason=document.getElementById("lt-reason").value.trim()||null;
   const ruleDesc=_ltRuleOn?(document.getElementById("lt-rule-desc").value.trim()||null):null;
-  if(isNaN(r)){alert("Enter an R-multiple.");return;}
-  if(_ltRuleOn&&!ruleDesc){alert("Describe the rule break.");return;}
   try{
     const resp=await fetch(`${API_BASE}/trading/live`,{method:"POST",
       headers:{"Content-Type":"application/json"},
@@ -4212,16 +4419,16 @@ async function submitLiveTrade(){
     if(resp.status===423){
       const e=await resp.json();
       const g=e.detail?.gate||{};
-      alert(`GATE LOCKED\n${g.total_backtests||0}/50 backtests · ${g.adherence_pct||0}% adherence\nMissing: ${g.missing?.trades||0} trades · ${g.missing?.adherence_pct_gap||0}% adherence gap`);
+      addLog(`GATE LOCKED — ${g.total_backtests||0}/50 trades · ${g.adherence_pct||0}% adherence`,"system");
       return;
     }
-    if(!resp.ok){const e=await resp.json();alert(e.detail||"Error");return;}
+    if(!resp.ok){const e=await resp.json();addLog(e.detail||"Live trade error","system");return;}
     document.getElementById("lt-reason").value="";
     document.getElementById("lt-r").value="";
     document.getElementById("lt-risk").value="";
     document.getElementById("lt-pl").value="";
     renderTrading();
-  }catch(e){alert("Backend offline.");}
+  }catch{addLog("Backend offline.","system");}
 }
 
 async function deleteLt(id){
