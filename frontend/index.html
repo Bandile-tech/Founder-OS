@@ -733,14 +733,15 @@ tr:hover .td-del{opacity:1}
 }
 @media(max-width:768px){
   #hamburger{display:block}
+  .h-sub{display:none}
+  #h-date{display:none}
+  .h-drift{max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;letter-spacing:0.08em}
   #nav{
     position:fixed;top:0;left:0;height:100%;z-index:200;
     transform:translateX(-100%);transition:transform 250ms ease;
     width:280px;
   }
   #nav.sidebar--open{transform:translateX(0)}
-  #nav.sidebar--open ~ * #nav-backdrop,
-  body.sidebar--open #nav-backdrop{display:block}
   #app{overflow:hidden}
   #main-content{width:100%;margin-left:0}
 }
@@ -1690,7 +1691,7 @@ function renderHeader(){
   safeUpdate("h-date", new Date().toLocaleDateString("en-GB",{weekday:"long",day:"numeric",month:"long",year:"numeric"}));
   const drifting=Object.values(S.habits).filter(h=>!h.done).length;
   const hd=document.getElementById("h-drift");
-  if(hd){hd.style.display=drifting>0?"block":"none";hd.textContent=`⚡ ${drifting} HABIT${drifting>1?"S":""} DRIFTING`;}
+  if(hd){hd.style.display=drifting>0?"block":"none";const mobile=window.innerWidth<=768;hd.textContent=mobile?`⚡ ${drifting} DRIFTING`:`⚡ ${drifting} HABIT${drifting>1?"S":""} DRIFTING`;}
 }
 
 /* ═══════════════════════════════════════════════════
