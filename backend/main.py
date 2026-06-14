@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -1468,6 +1469,26 @@ def unified_input(request: schemas.UnifiedInputRequest, db: Session = Depends(ge
             resp["gate_locked_warning"] = updates["gate_locked_warning"]
             resp["status"] = "partial"
         return resp
+
+
+# ── ORCHESTRATOR (Phase 6) ───────────────────────────────────
+# Single model-driven entry point. Decides log-vs-query itself, streams reasoning +
+# tool calls over SSE, and reuses /parse, /input, /chat logic internally. The legacy
+# /input keyword router above is kept alive for backward compatibility.
+@app.post("/orchestrator")
+def orchestrator_endpoint(request: schemas.UnifiedInputRequest, db: Session = Depends(get_db)):
+    import orchestrator
+    return StreamingResponse(
+        orchestrator.orchestrator_stream(request, db),
+        media_type="text/event-stream",
+    )
+
+
+@app.get("/orchestrator/alerts")
+def orchestrator_alerts(db: Session = Depends(get_db)):
+    """Off-track alerts for dashboard load. Plain JSON array — empty when clear."""
+    import orchestrator
+    return orchestrator.run_off_track(db)
 
 
 # ── PROACTIVE BRIEF ──────────────────────────────────────────

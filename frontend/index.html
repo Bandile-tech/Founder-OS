@@ -869,6 +869,12 @@ tr:hover .td-del{opacity:1}
           <div class="countdown-strip" id="countdown-strip"></div>
 
           <!-- UNIFIED COMMAND INPUT -->
+          <!-- OFF-TRACK ALERTS (Phase 6) — hidden when none -->
+          <div class="card" id="alerts-card" style="display:none;border:1px solid #f5a62355">
+            <div class="card-title"><span>⚠ Off-Track Alerts</span><span class="badge b-warn" id="alerts-badge">0</span></div>
+            <div id="alerts-list"></div>
+          </div>
+
           <div class="card" id="unified-cmd-card">
             <div class="card-title"><span>⚡ Command</span><span class="badge b-glow" id="ucmd-mode-badge">Ready</span></div>
             <div style="display:flex;gap:6px;align-items:center">
@@ -3489,6 +3495,51 @@ function chatKey(e){if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();sendChat
 ═══════════════════════════════════════════════════ */
 function ucmdKey(e){if(e.key==="Enter"){e.preventDefault();submitUnifiedInput()}}
 
+/* ═══════════════════════════════════════════════════
+   OFF-TRACK ALERTS (Phase 6) — dashboard load + 5-min poll
+═══════════════════════════════════════════════════ */
+const _dismissedAlerts=new Set();   // frontend-only, by rule_id
+
+function _alertSeverityColor(sev){
+  return sev==="critical"?"#ef4444":(sev==="warn"?"#f5a623":"var(--muted)");
+}
+
+function dismissAlert(ruleId){
+  _dismissedAlerts.add(ruleId);
+  renderAlerts(_lastAlerts);
+}
+
+let _lastAlerts=[];
+function renderAlerts(alerts){
+  _lastAlerts=alerts||[];
+  const card=document.getElementById("alerts-card");
+  const list=document.getElementById("alerts-list");
+  const badge=document.getElementById("alerts-badge");
+  if(!card||!list)return;
+  const visible=_lastAlerts.filter(a=>!_dismissedAlerts.has(a.rule_id));
+  if(!visible.length){card.style.display="none";return;}
+  card.style.display="block";
+  if(badge)badge.textContent=String(visible.length);
+  list.innerHTML=visible.map(a=>{
+    const c=_alertSeverityColor(a.severity);
+    return `<div style="display:flex;align-items:flex-start;gap:6px;margin:4px 0;padding:6px 8px;border-left:2px solid ${c};background:rgba(255,255,255,0.02)">
+      <div style="flex:1;font-size:9px;color:var(--text)"><span style="color:${c};font-weight:700;text-transform:uppercase;font-size:7px;letter-spacing:0.08em">${escHtml(a.severity)}</span><br>${escHtml(a.message)}</div>
+      <button onclick="dismissAlert('${escHtml(a.rule_id)}')" style="background:none;border:1px solid var(--border);color:var(--muted);border-radius:3px;cursor:pointer;font-size:8px;padding:1px 6px;font-family:inherit">✕</button>
+    </div>`;
+  }).join("");
+}
+
+async function fetchOrchestratorAlerts(){
+  try{
+    const r=await fetch(`${API_BASE}/orchestrator/alerts`);
+    if(!r.ok)return;
+    const alerts=await r.json();
+    renderAlerts(Array.isArray(alerts)?alerts:[]);
+  }catch(_){/* offline — leave card as-is */}
+}
+
+// Phase 6 — orchestrator. The model decides log-vs-query; we stream its reasoning,
+// tool calls, and final answer over SSE. No client-side routing.
 async function submitUnifiedInput(){
   const inp=document.getElementById("ucmd-input");
   const text=inp.value.trim();
@@ -3499,7 +3550,8 @@ async function submitUnifiedInput(){
   badge.textContent="Thinking…";
   badge.className="badge b-glow";
   inp.disabled=true;
-  result.style.display="none";
+  result.style.display="block";
+  result.innerHTML=`<div style="color:var(--glow);margin-bottom:4px">⚡ ${escHtml(text)}</div><div id="ucmd-reasoning" class="md-body" style="color:var(--text)"></div><div id="ucmd-tool-indicator" style="color:var(--muted);font-size:8px;margin-top:4px"></div>`;
 
   let sessionId=localStorage.getItem("founderOS_session");
   if(!sessionId){sessionId=Date.now().toString(36)+Math.random().toString(36).slice(2);localStorage.setItem("founderOS_session",sessionId);}
@@ -3511,79 +3563,82 @@ async function submitUnifiedInput(){
     annualTargets:S.annualTargets.map(a=>({name:a.name,current:a.current,target:a.target})),
   };
 
+  let reasoning="";
+  let finalText="";
+  let loggedSummary=null;      // set when route_brain_dump runs
+  const toolsUsed=[];
+
+  const handleEvent=(ev)=>{
+    const reasoningEl=document.getElementById("ucmd-reasoning");
+    const indicatorEl=document.getElementById("ucmd-tool-indicator");
+    if(ev.type==="reasoning"){
+      reasoning+=ev.content||"";
+      if(reasoningEl)reasoningEl.innerHTML=mdHtml(reasoning);
+    } else if(ev.type==="tool_call"){
+      toolsUsed.push(ev.tool);
+      if(indicatorEl)indicatorEl.textContent=`⚙ ${ev.tool}…`;
+    } else if(ev.type==="tool_result"){
+      if(ev.tool==="route_brain_dump")loggedSummary=ev.summary||"";
+      if(indicatorEl)indicatorEl.textContent="";
+    } else if(ev.type==="final"){
+      finalText=ev.content||"";
+    }
+  };
+
   try{
-    const r=await fetch(`${API_BASE}/input`,{method:"POST",headers:{"Content-Type":"application/json"},
+    const r=await fetch(`${API_BASE}/orchestrator`,{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({text,session_id:sessionId,context:ctx})});
-    if(!r.ok)throw new Error("Backend "+r.status);
-    const data=await r.json();
+    if(!r.ok||!r.body)throw new Error("Backend "+r.status);
+
+    const reader=r.body.getReader();
+    const decoder=new TextDecoder();
+    let buf="";
+    while(true){
+      const {value,done}=await reader.read();
+      if(done)break;
+      buf+=decoder.decode(value,{stream:true});
+      // SSE frames are separated by a blank line.
+      let sep;
+      while((sep=buf.indexOf("\n\n"))>=0){
+        const frame=buf.slice(0,sep);
+        buf=buf.slice(sep+2);
+        for(const line of frame.split("\n")){
+          if(!line.startsWith("data:"))continue;
+          const payload=line.slice(5).trim();
+          if(!payload)continue;
+          try{handleEvent(JSON.parse(payload));}catch(_){}
+        }
+      }
+    }
 
     inp.value="";
 
-    if(data.type==="log"){
-      // Persist in local chat history with system marker
-      S.chatHistory.push({text:`📥 Logged: ${data.summary}`,role:"bot",time:nowTime()});
-      saveState();
-      // Build compact "what was applied" line from updates object
-      const u=data.updates||{};
-      const chips=[];
-      if(u.habits_updated&&u.habits_updated.length)
-        chips.push(u.habits_updated.map(h=>h.key).join(", ")+" habit"+(u.habits_updated.length>1?"s":"")+" ✓");
-      if(u.kpi_updates_applied&&u.kpi_updates_applied.length)
-        chips.push(u.kpi_updates_applied.join(", ")+" KPI"+(u.kpi_updates_applied.length>1?"s":""));
-      if(u.todos_added&&u.todos_added.length)
-        chips.push(u.todos_added.length+" task"+(u.todos_added.length>1?"s":"")+" added");
-      if(u.roadmap_completed&&u.roadmap_completed.length)
-        chips.push(u.roadmap_completed.length+" roadmap item"+(u.roadmap_completed.length>1?"s":"")+" done");
-      if(u.revenue_logged&&u.revenue_logged.length)
-        chips.push(u.revenue_logged.map(r=>"K"+r.amount+" ("+escHtml(r.source)+")").join(", ")+" revenue");
-      if(u.reading_updates_applied&&u.reading_updates_applied.length)
-        chips.push("Now reading: "+u.reading_updates_applied.map(escHtml).join(", "));
-      const updateLine=chips.length?`<div style="margin-top:5px;color:var(--glow);font-size:8px;letter-spacing:0.05em">✓ Applied: ${chips.join(" · ")}</div>`:"";
-
-      if(data.status==="partial"){
-        // Persistent gate-locked warning panel — does NOT auto-fade
-        const blocked=((data.updates&&data.updates.trades_blocked)||[]).map(b=>`<li style="margin:2px 0">${escHtml(b.pair?(b.pair+" "+b.direction+" — "+b.reason):String(b))}</li>`).join("");
-        const blockedList=blocked?`<ul style="margin:6px 0 0 14px;padding:0;font-size:9px;color:#f5a623">${blocked}</ul>`:"";
-        result.innerHTML=`
-          <div id="gate-warning-panel" style="border:1px solid #f5a623;border-radius:4px;padding:10px 12px;background:rgba(245,166,35,0.08)">
-            <div style="color:#f5a623;font-weight:700;font-size:11px;letter-spacing:0.08em">⚠ Refused: Gate is LOCKED</div>
-            <div style="margin-top:6px;color:#f5a623;font-size:9px;line-height:1.5">${escHtml(data.gate_locked_warning||"")}</div>
-            ${blockedList}
-            ${updateLine}
-            <button onclick="document.getElementById('gate-warning-panel').remove()" style="margin-top:8px;background:none;border:1px solid #f5a623;color:#f5a623;padding:3px 10px;border-radius:3px;cursor:pointer;font-size:8px;letter-spacing:0.06em">Dismiss</button>
-          </div>`;
-        result.style.display="block";
-        badge.textContent="Partial — Refused";
-        badge.className="badge b-warn";
-      } else {
-        // Normal success toast
-        const readingFailures=(data.updates&&data.updates.reading_match_failures)||[];
-        const readingWarnHtml=readingFailures.length?`<div style="margin-top:5px;color:#f5a623;font-size:8px">⚠ Couldn't find a book matching: ${readingFailures.map(escHtml).join(", ")}</div>`:"";
-        result.innerHTML=`<div style="color:var(--success)">✓ Logged — ${escHtml(data.summary)}</div>${updateLine}${readingWarnHtml}${data.advisory?`<div style="margin-top:4px;color:var(--muted)">${escHtml(data.advisory)}</div>`:""}`;
-        result.style.display="block";
-        badge.textContent="Logged";
-        badge.className="badge b-suc";
-      }
-      // Refresh data
-      await syncFromBackend();
-      // Explicitly re-render panels that may not be the active page.
-      // syncFromBackend updates S.* but only renders the active page —
-      // cross-module brain dumps (reading, lifts, revenue from wrong page)
-      // need their panel forced. Add cases here as patterns emerge.
-      if(u.reading_updates_applied&&u.reading_updates_applied.length) renderBooks();
-      renderRecentActivity();
+    // Render final state.
+    if(loggedSummary!==null){
+      S.chatHistory.push({text:`📥 Logged: ${loggedSummary}`,role:"bot",time:nowTime()});
+      const appliedLine=`<div style="margin-top:5px;color:var(--glow);font-size:8px;letter-spacing:0.05em">✓ Applied: ${escHtml(loggedSummary)}</div>`;
+      const finalHtml=finalText?`<div style="margin-top:4px;color:var(--muted)">${mdHtml(finalText)}</div>`:"";
+      result.innerHTML=`<div style="color:var(--success)">✓ Logged — ${escHtml(loggedSummary)}</div>${appliedLine}${finalHtml}`;
+      badge.textContent="Logged";
+      badge.className="badge b-suc";
     } else {
-      // Query reply — show inline + add to conversation history
       S.chatHistory.push({text,role:"user",time:nowTime()});
-      S.chatHistory.push({text:data.reply,role:"bot",time:nowTime()});
+      S.chatHistory.push({text:finalText,role:"bot",time:nowTime()});
       if(S.chatHistory.length>80)S.chatHistory=S.chatHistory.slice(-80);
-      saveState();
-      result.innerHTML=`<div style="color:var(--glow);margin-bottom:4px">⚡ ${escHtml(text)}</div><div class="md-body" style="color:var(--text)">${mdHtml(data.reply)}</div>`;
-      result.style.display="block";
+      result.innerHTML=`<div style="color:var(--glow);margin-bottom:4px">⚡ ${escHtml(text)}</div><div class="md-body" style="color:var(--text)">${mdHtml(finalText)}</div>`;
       badge.textContent="Reply";
       badge.className="badge b-glow";
-      renderConversationHistory();
     }
+    result.style.display="block";
+    saveState();
+
+    // Refresh data + cross-module panels after any write.
+    await syncFromBackend();
+    renderConversationHistory();
+    try{renderBooks();}catch(_){}
+    try{renderRecentActivity();}catch(_){}
+    // Logging may have shifted alerts — refresh them.
+    try{fetchOrchestratorAlerts();}catch(_){}
   }catch(e){
     result.innerHTML=`<div style="color:var(--danger)">Backend offline — check server.</div>`;
     result.style.display="block";
@@ -4460,6 +4515,7 @@ function initialRender(){
   fetchAndRenderRadar();
   renderConversationHistory();
   try{checkUrgentAlerts();}catch(e){console.warn("checkUrgentAlerts failed:",e);}
+  try{fetchOrchestratorAlerts();}catch(e){console.warn("fetchOrchestratorAlerts failed:",e);}
 }
 
 let _lastPingSuccess=0;
@@ -4489,6 +4545,7 @@ renderHeader();
   setInterval(()=>{if(document.getElementById("p-dashboard").classList.contains("active"))renderCountdown();},3600000);
   setInterval(()=>{if(document.getElementById("p-dashboard").classList.contains("active"))fetchAndRenderRadar();},5*60*1000);
   setInterval(()=>{if(document.getElementById("p-timetable").classList.contains("active"))renderTimetable();},60000);
+  setInterval(fetchOrchestratorAlerts,5*60*1000);
 })();
 </script>
 

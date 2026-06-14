@@ -342,3 +342,146 @@ def get_radar_scores(context: dict) -> dict:
         "skills":    max(0, min(100, skills)),
         "social":    max(0, min(100, social)),
     }
+
+
+# ════════════════════════════════════════════════════════════════
+# Phase 6 — Orchestrator (streaming + tool-call loop)
+# ════════════════════════════════════════════════════════════════
+
+import os
+from pathlib import Path
+
+_ORCH_PROMPT_PATH = (
+    Path(__file__).resolve().parent.parent / "context" / "core" / "orchestrator_prompt.md"
+)
+
+
+def orchestrator_model() -> str:
+    """The model the orchestrator runs on. Never hardcoded — env-driven."""
+    return os.getenv("ORCHESTRATOR_MODEL", "gpt-5.4")
+
+
+def _load_orchestrator_prompt() -> str:
+    try:
+        return _ORCH_PROMPT_PATH.read_text(encoding="utf-8")
+    except OSError:
+        # Fall back to the analytical system prompt if the file is missing.
+        return SYSTEM_PROMPT
+
+
+def _stream_completion(convo: list, tools: list):
+    """Thin wrapper over the OpenAI streaming SDK — the ONLY place the orchestrator
+    touches OpenAI. Yields normalized delta dicts so callers (and tests) never depend on
+    SDK chunk objects:
+
+      {"content": "<text>"}                                  — assistant content delta
+      {"tool_calls": [{"index","id","name","arguments"}...]} — tool-call fragment(s)
+      {"finish_reason": "<reason>"}                           — end of this completion
+
+    Tests patch this function to inject canned deltas.
+    """
+    stream = client.chat.completions.create(
+        model=orchestrator_model(),
+        messages=convo,
+        tools=tools,
+        stream=True,
+    )
+    for chunk in stream:
+        if not chunk.choices:
+            continue
+        choice = chunk.choices[0]
+        delta = choice.delta
+        if getattr(delta, "content", None):
+            yield {"content": delta.content}
+        if getattr(delta, "tool_calls", None):
+            frags = []
+            for tc in delta.tool_calls:
+                frags.append({
+                    "index": tc.index,
+                    "id": tc.id,
+                    "name": tc.function.name if tc.function else None,
+                    "arguments": tc.function.arguments if tc.function else None,
+                })
+            yield {"tool_calls": frags}
+        if choice.finish_reason:
+            yield {"finish_reason": choice.finish_reason}
+
+
+def get_orchestrator_response(messages: list, db, max_rounds: int = 6):
+    """Drive the orchestrator: stream tokens, execute tool calls, loop until the model
+    produces a final answer with no further tool calls.
+
+    Yields event dicts ready for SSE serialization:
+      {"type": "reasoning", "content": "..."}
+      {"type": "tool_call", "tool": "...", "args": {...}}
+      {"type": "tool_result", "tool": "...", "summary": "..."}
+      {"type": "final", "content": "..."}
+    """
+    import orchestrator_tools
+
+    convo = [{"role": "system", "content": _load_orchestrator_prompt()}] + list(messages)
+    final_text = ""
+
+    for _ in range(max_rounds):
+        content_acc = ""
+        # tool-call fragments accumulated by stream index
+        calls: dict = {}
+
+        for delta in _stream_completion(convo, orchestrator_tools.TOOL_SCHEMAS):
+            if "content" in delta:
+                content_acc += delta["content"]
+                yield {"type": "reasoning", "content": delta["content"]}
+            if "tool_calls" in delta:
+                for frag in delta["tool_calls"]:
+                    slot = calls.setdefault(
+                        frag.get("index", 0), {"id": "", "name": "", "arguments": ""}
+                    )
+                    if frag.get("id"):
+                        slot["id"] = frag["id"]
+                    if frag.get("name"):
+                        slot["name"] = frag["name"]
+                    if frag.get("arguments"):
+                        slot["arguments"] += frag["arguments"]
+            # finish_reason is informational; loop control is driven by whether we
+            # accumulated any tool calls below.
+
+        if not calls:
+            final_text = content_acc
+            yield {"type": "final", "content": final_text}
+            return
+
+        # Record the assistant turn (with its tool calls) before appending tool results.
+        assistant_tool_calls = []
+        for idx in sorted(calls):
+            slot = calls[idx]
+            assistant_tool_calls.append({
+                "id": slot["id"] or f"call_{idx}",
+                "type": "function",
+                "function": {"name": slot["name"], "arguments": slot["arguments"] or "{}"},
+            })
+        convo.append({
+            "role": "assistant",
+            "content": content_acc or None,
+            "tool_calls": assistant_tool_calls,
+        })
+
+        # Execute each tool, emit events, feed results back into the conversation.
+        for idx in sorted(calls):
+            slot = calls[idx]
+            name = slot["name"]
+            try:
+                args = json.loads(slot["arguments"]) if slot["arguments"] else {}
+            except (ValueError, TypeError):
+                args = {}
+            yield {"type": "tool_call", "tool": name, "args": args}
+            result, summary = orchestrator_tools.run_tool(name, args, db)
+            yield {"type": "tool_result", "tool": name, "summary": summary}
+            convo.append({
+                "role": "tool",
+                "tool_call_id": slot["id"] or f"call_{idx}",
+                "content": json.dumps(result, default=str),
+            })
+
+    # Safety valve — hit max rounds without a clean final.
+    yield {"type": "final", "content": final_text or "Unable to complete the request."}
+
