@@ -1,0 +1,44 @@
+{
+  "rules": [
+    {
+      "id": "no_revenue_30d",
+      "severity": "critical",
+      "enabled": true,
+      "check": "no_revenue_since",
+      "params": { "after_date": "2026-06-01", "window_days": 30 },
+      "message": "No revenue logged in the last 30 days. First-revenue phase is stalling — ship and invoice."
+    },
+    {
+      "id": "habit_drift_7d",
+      "severity": "warn",
+      "enabled": true,
+      "check": "habit_completion_below",
+      "params": { "threshold_pct": 60, "window_days": 7 },
+      "message": "Habit completion has dropped under 60% over the last 7 days. Discipline is drifting."
+    },
+    {
+      "id": "annual_target_critical",
+      "severity": "critical",
+      "enabled": true,
+      "check": "annual_target_status",
+      "params": { "status": "critical" },
+      "message": "At least one annual target is in critical status. Re-plan or re-sequence before the gap compounds."
+    },
+    {
+      "id": "backtest_stalled",
+      "severity": "warn",
+      "enabled": true,
+      "check": "backtest_stalled",
+      "params": { "window_days": 7 },
+      "message": "No new backtests in 7 days while the trading gate is LOCKED. The gate will never clear without reps."
+    },
+    {
+      "id": "zero_mastery_high_weight",
+      "severity": "info",
+      "enabled": true,
+      "check": "zero_mastery_high_weight",
+      "params": { "min_weight": 7 },
+      "message": "A zero-mastery subtopic sits inside a high-weight topic. High exam leverage is being left untouched."
+    }
+  ]
+}
