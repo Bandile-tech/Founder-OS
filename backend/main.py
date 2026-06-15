@@ -108,6 +108,8 @@ async def startup():
         run_m004(db)        # m004 — war room schema migration
         from migrations.m005_reading_plan_schema import run as run_m005
         run_m005(db)        # m005 — reading plan columns + book position backfill
+        from migrations.m006_todo_completed_at import run as run_m006
+        run_m006(db)        # m006 — todos.completed_at column
         _validate_schema(engine)   # raises if any ORM column is absent from the live DB
         _seed_non_negotiables_if_empty(db)
         _verify_seed_integrity(db)
@@ -501,8 +503,9 @@ def toggle_todo(todo_id: int, db: Session = Depends(get_db)):
     if not todo:
         raise HTTPException(404, "Todo not found")
     todo.done = not todo.done
+    todo.completed_at = date.today() if todo.done else None
     db.commit()
-    return {"id": todo.id, "done": todo.done}
+    return {"id": todo.id, "done": todo.done, "completed_at": str(todo.completed_at) if todo.completed_at else None}
 
 # ── RADAR ────────────────────────────────────────────────────
 @app.get("/radar")

@@ -136,6 +136,7 @@ class Todo(Base):
     due = Column(String)
     source = Column(String)
     roadmap_id = Column(String, nullable=True)
+    completed_at = Column(Date, nullable=True)
 
 
 class ChatMessage(Base):
