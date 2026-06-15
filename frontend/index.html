@@ -419,7 +419,14 @@ body{
 .book-row{
   display:flex;justify-content:space-between;align-items:center;
   padding:10px 0;border-bottom:1px solid #54ACBF0A;
+  border-top:2px solid transparent;border-left:none;border-right:none;
 }
+.book-row.dragging{opacity:0.4}
+.book-row.drag-over-top{border-top:2px solid var(--glow)!important}
+.book-row.drag-over-bot{border-bottom:2px solid var(--glow)!important}
+.bk-drag-handle{display:flex;align-items:center;padding:0 6px 0 2px;cursor:grab;color:var(--muted);font-size:11px;opacity:0;transition:opacity .15s;user-select:none}
+.book-row:hover .bk-drag-handle{opacity:1}
+@media(max-width:640px){.bk-drag-handle{display:none}}
 .bk-title{font-size:11px;color:var(--text)}
 .bk-author{font-size:9px;color:var(--muted);margin-top:2px}
 .bk-status{font-size:8px;text-transform:uppercase;letter-spacing:0.1em}
@@ -1482,13 +1489,7 @@ const DEFAULT_STATE = {
     {id:4,text:"Economics: Chapter 7 – Market Structures",priority:4,done:false,category:"academics",due:"2026-04-30",source:"manual",roadmapId:null,urgent:false},
     {id:5,text:"Draft friend's website homepage copy",priority:5,done:false,category:"business",due:"2026-05-01",source:"manual",roadmapId:null,urgent:false},
   ],
-  habits:{
-    scripture_prayer:{label:"Scripture & Prayer (pre-5:20am)",done:false},
-    ironing:{label:"Clothes ironed night before",done:false},
-    python_session:{label:"Python / Aether (20:30–21:30)",done:false},
-    sprint_training:{label:"Sprint training",done:false},
-    academics:{label:"Academic study block (18:00–20:00)",done:false},
-  },
+  habits:{},
   bible:[], // legacy BibleEntry — kept for backward compat; frontend now uses readingPlans
   readingPlans:[],
   books:[
@@ -1607,7 +1608,20 @@ async function syncFromBackend() {
   }
   if(data.tenk)S.tenk=data.tenk;
   if(data.gate)S.gate=data.gate;
-  if(data.habits){data.habits.forEach(h=>{if(S.habits[h.key])S.habits[h.key].done=h.done;});}
+  // Rebuild S.habits from active non-negotiables (single source of truth)
+  if(data.nonNeg){
+    S.nonNeg=data.nonNeg;
+    const doneMap={};
+    if(data.habits){data.habits.forEach(h=>{doneMap[h.key]=h.done;});}
+    const newHabits={};
+    data.nonNeg.filter(n=>n.is_active).forEach(n=>{
+      newHabits[n.key]={label:n.label, done: doneMap[n.key]??S.habits[n.key]?.done??false};
+    });
+    S.habits=newHabits;
+  } else if(data.habits){
+    // nonNeg unavailable — update done state only for keys we know about
+    data.habits.forEach(h=>{if(S.habits[h.key])S.habits[h.key].done=h.done;});
+  }
   if(data.todos){S.todos=data.todos.map(t=>({...t,urgent:false}));}
   if(data.annual){
     S.annualTargets=data.annual.map(a=>({
@@ -1619,7 +1633,6 @@ async function syncFromBackend() {
   if(data.readingPlans)S.readingPlans=data.readingPlans;
   if(data.books)S.books=data.books;
   if(data.social)S.social=data.social.value||50;
-  if(data.nonNeg)S.nonNeg=data.nonNeg;
 
   saveState();
   _setSyncWarning(failed);
@@ -1939,16 +1952,7 @@ async function quickAdd(e){
 }
 
 function renderNonNeg(){
-  // Build entry list: prefer S.nonNeg (managed in War Room) merged with S.habits done state;
-  // fall back to S.habits alone when S.nonNeg is empty (first load or backend unavailable).
-  let entries;
-  if(S.nonNeg && S.nonNeg.length){
-    entries=S.nonNeg
-      .filter(n=>n.is_active)
-      .map(n=>[n.key,{label:n.label, done:S.habits[n.key]?.done||false}]);
-  } else {
-    entries=Object.entries(S.habits);
-  }
+  const entries=Object.entries(S.habits);
   const done=entries.filter(([,h])=>h.done).length;
   const total=entries.length;
   const drifting=total-done;
@@ -1967,6 +1971,7 @@ function renderNonNeg(){
 }
 
 async function toggleHabit(k){
+  if(!S.habits[k])return;
   S.habits[k].done=!S.habits[k].done;
   addLog(`Habit ${S.habits[k].done?"done":"undone"}: ${S.habits[k].label}`);
 
@@ -2575,11 +2580,12 @@ function renderBooks(){
       const total=b.total_pages||b.total||0;
       const pct=total>0?Math.round(b.page/total*100):0;
       const isFirst=i===0, isLast=i===sorted.length-1;
-      return`<div class="book-row" style="display:flex;align-items:flex-start;gap:6px">
-        <div style="display:flex;flex-direction:column;gap:2px;padding-top:2px">
+      const isMobile=window.matchMedia("(max-width:640px)").matches;
+      return`<div class="book-row" draggable="${isMobile?'false':'true'}" data-book-id="${b.id}" style="display:flex;align-items:flex-start;gap:6px">
+        ${isMobile?`<div style="display:flex;flex-direction:column;gap:2px;padding-top:2px">
           <button class="at-add-btn" style="font-size:10px;padding:1px 5px;line-height:1;${isFirst?"opacity:0.3;cursor:default":""}" onclick="${isFirst?"":` reorderBook(${b.id},'up')`}" ${isFirst?"disabled":""}>▲</button>
           <button class="at-add-btn" style="font-size:10px;padding:1px 5px;line-height:1;${isLast?"opacity:0.3;cursor:default":""}" onclick="${isLast?"":` reorderBook(${b.id},'down')`}" ${isLast?"disabled":""}>▼</button>
-        </div>
+        </div>`:`<div class="bk-drag-handle" title="Drag to reorder">⋮⋮</div>`}
         <div style="flex:1;min-width:0">
           <div class="bk-title">${escHtml(b.title)}${b.is_currently_reading?` <span class="badge b-glow" style="font-size:7px;vertical-align:middle">NOW</span>`:""}</div>
           <div class="bk-author">${escHtml(b.author||"")}</div>
@@ -2614,6 +2620,10 @@ function renderBooks(){
         <button class="at-add-btn" onclick="addBook()">+ Add</button>
       </div>
     </div>`;
+  if(!window.matchMedia("(max-width:640px)").matches){
+    const container=document.getElementById("books-card");
+    if(container)_initBooksDrag(container);
+  }
 }
 
 async function reorderBook(id, direction){
@@ -2639,6 +2649,75 @@ async function reorderBook(id, direction){
     addLog("Reorder failed — retrying sync","system");
     await syncFromBackend();
   }
+}
+
+// ── Books drag-and-drop (desktop only) ───────────────────────
+let _dragBookId=null;
+function _bookDragStart(e){
+  const row=e.target.closest("[data-book-id]");
+  if(!row)return;
+  _dragBookId=parseInt(row.dataset.bookId);
+  e.dataTransfer.effectAllowed="move";
+  e.dataTransfer.setData("text/plain",_dragBookId);
+  requestAnimationFrame(()=>row.classList.add("dragging"));
+}
+function _bookDragOver(e){
+  e.preventDefault();
+  e.dataTransfer.dropEffect="move";
+  const row=e.target.closest("[data-book-id]");
+  if(!row||parseInt(row.dataset.bookId)===_dragBookId)return;
+  document.querySelectorAll(".book-row").forEach(r=>r.classList.remove("drag-over-top","drag-over-bot"));
+  const rect=row.getBoundingClientRect();
+  const half=rect.top+rect.height/2;
+  row.classList.add(e.clientY<half?"drag-over-top":"drag-over-bot");
+}
+function _bookDragLeave(e){
+  const row=e.target.closest("[data-book-id]");
+  if(row){row.classList.remove("drag-over-top","drag-over-bot");}
+}
+async function _bookDrop(e){
+  e.preventDefault();
+  const targetRow=e.target.closest("[data-book-id]");
+  document.querySelectorAll(".book-row").forEach(r=>r.classList.remove("drag-over-top","drag-over-bot","dragging"));
+  if(!targetRow||!_dragBookId)return;
+  const targetId=parseInt(targetRow.dataset.bookId);
+  if(targetId===_dragBookId){_dragBookId=null;return;}
+  const rect=targetRow.getBoundingClientRect();
+  const insertBefore=e.clientY<rect.top+rect.height/2;
+  const sorted=[...S.books].sort((a,b)=>(a.position??0)-(b.position??0));
+  const dragIdx=sorted.findIndex(b=>b.id===_dragBookId);
+  const targetIdx=sorted.findIndex(b=>b.id===targetId);
+  if(dragIdx<0||targetIdx<0){_dragBookId=null;return;}
+  const [dragged]=sorted.splice(dragIdx,1);
+  const newTargetIdx=sorted.findIndex(b=>b.id===targetId);
+  sorted.splice(insertBefore?newTargetIdx:newTargetIdx+1,0,dragged);
+  sorted.forEach((b,i)=>{b.position=i;});
+  const order=sorted.map(b=>b.id);
+  const prev=[...S.books];
+  S.books=sorted;
+  saveState();renderBooks();
+  try{
+    const r=await fetch(`${API_BASE}/books/reorder`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(order)});
+    if(!r.ok)throw new Error();
+  }catch{
+    S.books=prev;
+    addLog("Reorder failed — retrying sync","system");
+    await syncFromBackend();
+  }
+  _dragBookId=null;
+}
+function _bookDragEnd(e){
+  document.querySelectorAll(".book-row").forEach(r=>r.classList.remove("dragging","drag-over-top","drag-over-bot"));
+  _dragBookId=null;
+}
+function _initBooksDrag(container){
+  if(container._dragReady)return;
+  container._dragReady=true;
+  container.addEventListener("dragstart",_bookDragStart);
+  container.addEventListener("dragover",_bookDragOver);
+  container.addEventListener("dragleave",_bookDragLeave);
+  container.addEventListener("drop",_bookDrop);
+  container.addEventListener("dragend",_bookDragEnd);
 }
 
 async function updateBookPage(id,val){
