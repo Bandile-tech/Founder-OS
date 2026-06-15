@@ -508,9 +508,26 @@ def toggle_todo(todo_id: int, db: Session = Depends(get_db)):
     return {"id": todo.id, "done": todo.done, "completed_at": str(todo.completed_at) if todo.completed_at else None}
 
 # ── RADAR ────────────────────────────────────────────────────
+import time as _time
+
+# Date-keyed 60s cache. SQLite + sync SQLAlchemy means async/gather would block
+# the event loop, so we cache instead. 60s staleness is acceptable for radar.
+_radar_cache: dict = {"key": None, "ts": 0.0, "payload": None}
+_RADAR_TTL = 60.0
+
+
 @app.get("/radar")
 def get_radar(db: Session = Depends(get_db)):
     """Compute radar domain scores from live system data."""
+    today_key = date.today()
+    now = _time.monotonic()
+    if (
+        _radar_cache["key"] == today_key
+        and _radar_cache["payload"] is not None
+        and now - _radar_cache["ts"] < _RADAR_TTL
+    ):
+        return _radar_cache["payload"]
+
     habits_today = {h.key: h.done for h in db.query(Habit).filter(Habit.date == date.today()).all()}
     annual = [
         {"name": t.name, "current": t.current_value, "target": t.target_value}
@@ -567,7 +584,11 @@ def get_radar(db: Session = Depends(get_db)):
 
     scores = get_radar_scores(context)
     composite = round(sum(scores.values()) / len(scores))
-    return {"scores": scores, "composite": composite, "computed_at": str(datetime.utcnow())}
+    payload = {"scores": scores, "composite": composite, "computed_at": str(datetime.utcnow())}
+    _radar_cache["key"] = today_key
+    _radar_cache["ts"] = now
+    _radar_cache["payload"] = payload
+    return payload
 
 
 # ── ACADEMIC ROADMAP ─────────────────────────────────────────
@@ -796,6 +817,16 @@ def weakest_subtopics(limit: int = Query(5, ge=1, le=50), db: Session = Depends(
         }
         for st, t, s in rows
     ]
+
+
+# Defined AFTER the static /subjects/progress and /subjects/weakest routes so
+# the path param does not shadow them.
+@app.get("/subjects/{subject_id}")
+def get_subject(subject_id: int, db: Session = Depends(get_db)):
+    subj = db.query(Subject).filter(Subject.id == subject_id).first()
+    if not subj:
+        raise HTTPException(404, "Subject not found")
+    return _serialize_subject(subj)
 
 
 # ── HEALTH MODULE ────────────────────────────────────────────
