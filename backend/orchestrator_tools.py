@@ -318,6 +318,37 @@ def query_war_room(db, q: str):
 
 
 # ════════════════════════════════════════════════════════════════
+# Tool 7 — add_todos
+# ════════════════════════════════════════════════════════════════
+
+def add_todos(db, items: list, category: str = "personal", priority: int = 5):
+    """Create Todo rows for each item. Only called when the user explicitly instructs.
+
+    Never called for advisory or query responses. Source is always "orchestrator".
+    """
+    today = str(date.today())
+    created = []
+    for text in items:
+        todo = models.Todo(
+            text=text,
+            priority=priority,
+            done=False,
+            category=category,
+            due=today,
+            source="orchestrator",
+            roadmap_id=None,
+            completed_at=None,
+        )
+        db.add(todo)
+        db.flush()
+        created.append({"id": todo.id, "text": todo.text})
+    db.commit()
+    result = {"created": len(created), "todos": created}
+    summary = f"added {len(created)} todo(s)"
+    return result, summary
+
+
+# ════════════════════════════════════════════════════════════════
 # Dispatch + JSON tool schemas for the model
 # ════════════════════════════════════════════════════════════════
 
@@ -328,6 +359,12 @@ _TOOL_DISPATCH = {
     "synthesize_weekly_review": lambda db, a: synthesize_weekly_review(db, a.get("week_start")),
     "surface_weakest_subtopic": lambda db, a: surface_weakest_subtopic(db, int(a.get("limit", 1))),
     "query_war_room": lambda db, a: query_war_room(db, a.get("q", "")),
+    "add_todos": lambda db, a: add_todos(
+        db,
+        items=a.get("items", []),
+        category=a.get("category", "personal"),
+        priority=int(a.get("priority", 5)),
+    ),
 }
 
 
@@ -421,6 +458,37 @@ TOOL_SCHEMAS = [
                     "q": {"type": "string", "description": "Search query."}
                 },
                 "required": ["q"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "add_todos",
+            "description": (
+                "Add tasks explicitly named by the user to today's execution stack. "
+                "ONLY call this when the user has used explicit add/log/stack/save language "
+                "(e.g. 'add these to my stack', 'put these in my todos', 'log these as tasks'). "
+                "Do NOT call when the user is asking a question, brainstorming, or asking for advice."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "items": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Exact task texts the user named. Do not add, invent, or round out.",
+                    },
+                    "category": {
+                        "type": "string",
+                        "description": "Category for all items. Default 'personal'.",
+                    },
+                    "priority": {
+                        "type": "integer",
+                        "description": "Priority for all items (1=high, 9=low). Default 5.",
+                    },
+                },
+                "required": ["items"],
             },
         },
     },

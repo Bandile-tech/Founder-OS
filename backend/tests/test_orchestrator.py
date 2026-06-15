@@ -259,3 +259,70 @@ class TestAlertsEndpoint:
         r = client.get("/orchestrator/alerts")
         assert r.status_code == 200
         assert isinstance(r.json(), list)
+
+
+# ════════════════════════════════════════════════════════════════
+# Tool 7 — add_todos
+# ════════════════════════════════════════════════════════════════
+
+class TestAddTodos:
+
+    def test_add_todos_creates_rows(self):
+        db = _db()
+        before = db.query(models.Todo).count()
+        result, summary = ot.add_todos(db, items=["Task A", "Task B", "Task C"])
+        db.close()
+
+        assert result["created"] == 3
+        assert len(result["todos"]) == 3
+
+        db = _db()
+        after = db.query(models.Todo).count()
+        assert after == before + 3
+        rows = db.query(models.Todo).filter(
+            models.Todo.source == "orchestrator"
+        ).order_by(models.Todo.id.desc()).limit(3).all()
+        texts = {r.text for r in rows}
+        assert texts == {"Task A", "Task B", "Task C"}
+        for r in rows:
+            assert r.done is False
+        db.close()
+
+    def test_add_todos_respects_category_and_priority(self):
+        db = _db()
+        result, _ = ot.add_todos(db, items=["Study calculus"], category="academics", priority=2)
+        todo_id = result["todos"][0]["id"]
+        db.close()
+
+        db = _db()
+        row = db.query(models.Todo).filter(models.Todo.id == todo_id).first()
+        assert row.category == "academics"
+        assert row.priority == 2
+        assert row.source == "orchestrator"
+        assert row.done is False
+        db.close()
+
+    def test_orchestrator_refuses_add_todos_on_query(self):
+        # Model answers with prose — does NOT call add_todos
+        rounds = [
+            _tool_round("get_dashboard_state", {}),
+            _final_round("Focus on maths tonight — weakest area is calculus."),
+        ]
+        events = _collect(rounds, "what should I focus on today")
+        tools_called = [e["tool"] for e in events if e["type"] == "tool_call"]
+        assert "add_todos" not in tools_called
+
+    def test_orchestrator_calls_add_todos_on_explicit_instruction(self):
+        # Model calls add_todos with exactly the stated items
+        rounds = [
+            _tool_round("add_todos", {"items": ["Review calculus", "Read chapter 4", "Sprint drills"]}),
+            _final_round("Done — 3 tasks added to your stack."),
+        ]
+        with patch("orchestrator_tools.add_todos", wraps=ot.add_todos) as mock_add:
+            events = _collect(rounds, "add these to my stack: Review calculus, Read chapter 4, Sprint drills")
+        tools_called = [e["tool"] for e in events if e["type"] == "tool_call"]
+        assert "add_todos" in tools_called
+        # Verify the items passed match exactly what the user stated
+        add_event = next(e for e in events if e.get("type") == "tool_call" and e["tool"] == "add_todos")
+        args = add_event.get("args", {})
+        assert set(args.get("items", [])) == {"Review calculus", "Read chapter 4", "Sprint drills"}

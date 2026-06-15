@@ -1883,11 +1883,15 @@ function renderTodos(){
   const active=sorted.filter(t=>!t.done);
   document.getElementById("active-badge").textContent=`${active.length} active`;
 
+  // Only show completed todos if they were completed today
+  const today=todayStr();
+  const visible=sorted.filter(t=>!t.done||(t.completed_at===today));
+
   const drifting=S.todos.filter(t=>!t.done&&t.due&&t.due<todayStr()).length;
   const db=document.getElementById("drift-box-dash");
   db.innerHTML=drifting>0?`<div class="drift-box"><span>⚡</span>${drifting} task${drifting>1?"s":""} overdue — pushed to today</div>`:"";
 
-  document.getElementById("todo-list").innerHTML=sorted.map((t,i)=>{
+  document.getElementById("todo-list").innerHTML=visible.map((t,i)=>{
     const rank=!t.done?`<span class="todo-rank">#${active.indexOf(t)+1}</span>`:"";
     const urgBadge=t.urgent&&!t.done?`<span class="tag tag-urgent">URGENT</span>`:"";
     return`<div class="todo-item ${t.done?"done-item":""}">
@@ -1910,6 +1914,7 @@ async function toggleTodo(id){
   const t=S.todos.find(x=>String(x.id)===String(id));
   if(!t)return;
   t.done=!t.done;
+  t.completed_at=t.done?todayStr():null;
 
   if(t.roadmapId&&t.done){
     syncRoadmapTask(t.roadmapId,true);
