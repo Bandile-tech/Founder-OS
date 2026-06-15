@@ -318,16 +318,22 @@ def kpi_history(key: str, limit: int = 30, db: Session = Depends(get_db)):
 # ── HABITS ───────────────────────────────────────────────────
 @app.get("/habits")
 def get_habits(for_date: Optional[date] = None, db: Session = Depends(get_db)):
+    from models import NonNegotiable
     target_date = for_date or date.today()
-    # Ensure today's habits exist
+    active_nns = db.query(NonNegotiable).filter(NonNegotiable.is_active == True).order_by(NonNegotiable.sort_order, NonNegotiable.id).all()
+    if not active_nns:
+        # Fallback: seed non-negotiables then retry
+        _seed_non_negotiables_if_empty(db)
+        active_nns = db.query(NonNegotiable).filter(NonNegotiable.is_active == True).order_by(NonNegotiable.sort_order, NonNegotiable.id).all()
     existing = {h.key: h for h in db.query(Habit).filter(Habit.date == target_date).all()}
-    if not existing:
-        _seed_habits_if_empty(db)
-        existing = {h.key: h for h in db.query(Habit).filter(Habit.date == target_date).all()}
-    return [
-        {"id": h.id, "key": h.key, "label": h.label, "done": h.done, "date": str(h.date)}
-        for h in existing.values()
-    ]
+    result = []
+    for nn in active_nns:
+        h = existing.get(nn.key)
+        if h:
+            result.append({"id": h.id, "key": h.key, "label": h.label, "done": h.done, "date": str(h.date)})
+        else:
+            result.append({"id": None, "key": nn.key, "label": nn.label, "done": False, "date": str(target_date)})
+    return result
 
 
 @app.post("/habits/toggle")
