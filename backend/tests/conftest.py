@@ -59,4 +59,11 @@ def fresh_db():
     """Drop and recreate all tables before each test for complete isolation."""
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
+    # Reset the 60s radar cache so a prior test's response can't leak across the
+    # table reset.
+    try:
+        import main
+        main._radar_cache.update({"key": None, "ts": 0.0, "payload": None})
+    except Exception:
+        pass
     yield

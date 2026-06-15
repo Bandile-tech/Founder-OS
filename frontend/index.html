@@ -1637,7 +1637,15 @@ async function syncFromBackend() {
   saveState();
   _setSyncWarning(failed);
   renderHeader();
-  renderPage(getActivePageName());
+  const activePage=getActivePageName();
+  // Skip the academic full re-render while the user is actively working on it —
+  // it blanks the DOM ("Loading subjects…") and refetches, wiping in-progress
+  // edits. Only re-render if the user has been idle for 60s+.
+  if(activePage==="academic" && Date.now()-lastUserActionTimestamp<60000){
+    console.log("OS: Sync — skipping academic re-render (user active)");
+  }else{
+    renderPage(activePage);
+  }
   console.log(`OS: Sync complete. Failed: [${failed.join(",")||"none"}]`);
 }
 
@@ -1648,6 +1656,30 @@ function getActivePageName() {
 
 let nextId=500;
 function uid(){return"t"+(++nextId)}
+
+/* ── Activity tracking: used to gate the 30s sync's academic re-render ── */
+let lastUserActionTimestamp=Date.now();
+function _markUserAction(){lastUserActionTimestamp=Date.now();}
+document.addEventListener("click",_markUserAction,true);
+document.addEventListener("input",_markUserAction,true);
+document.addEventListener("change",_markUserAction,true);
+
+/* ── Minimal toast (no animation-CSS changes; inline styles, auto-dismiss) ── */
+function showToast(msg,type="info"){
+  let host=document.getElementById("toast-host");
+  if(!host){
+    host=document.createElement("div");
+    host.id="toast-host";
+    host.style.cssText="position:fixed;bottom:18px;right:18px;z-index:9999;display:flex;flex-direction:column;gap:8px;pointer-events:none";
+    document.body.appendChild(host);
+  }
+  const color=type==="error"?"#F87171":type==="success"?"#34D399":"#54ACBF";
+  const el=document.createElement("div");
+  el.style.cssText=`pointer-events:auto;font-family:inherit;font-size:10px;letter-spacing:0.05em;color:${color};background:#011C40;border:1px solid ${color}55;border-radius:5px;padding:8px 12px;max-width:280px;box-shadow:0 4px 18px #00000055`;
+  el.textContent=msg;
+  host.appendChild(el);
+  setTimeout(()=>{el.remove();},type==="error"?4500:2500);
+}
 function nowTime(){return new Date().toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"})}
 function todayStr(){return new Date().toISOString().slice(0,10)}
 function daysUntil(dateStr){return Math.ceil((new Date(dateStr)-new Date().setHours(0,0,0,0))/(864e5))}
@@ -1944,16 +1976,29 @@ async function quickAdd(e){
   const v=e.target.value.trim();
   if(!v)return;
   e.target.value="";
+
+  // ── Optimistic: show the todo immediately with a temp id ──
+  const tempId=uid();
+  const optimistic={id:tempId,text:v,priority:9,done:false,category:"personal",
+    due:todayStr(),source:"manual",roadmapId:null,urgent:false};
+  S.todos.push(optimistic);
+  addLog(`Task added: ${v.slice(0,40)}`);
+  saveState();renderTodos();
+
+  // ── Persist in the background; swap temp id → real id on success ──
   try{
     const r=await fetch(`${API_BASE}/todos`,{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({text:v,priority:9,category:"personal",due:todayStr(),source:"manual"})});
-    if(r.ok){const t=await r.json();S.todos.push({...t,urgent:false});}
-    else throw new Error();
-  }catch{
-    S.todos.push({id:uid(),text:v,priority:9,done:false,category:"personal",due:todayStr(),source:"manual",roadmapId:null,urgent:false});
+    if(!r.ok)throw new Error("HTTP "+r.status);
+    const t=await r.json();
+    const idx=S.todos.findIndex(x=>x.id===tempId);
+    if(idx>=0) S.todos[idx]={...S.todos[idx],...t,urgent:false};
+    saveState();renderTodos();
+  }catch(err){
+    // Keep the row locally (offline-friendly) but warn the user it didn't sync.
+    console.warn("OS: quickAdd backend sync failed —",err);
+    showToast("Task saved locally — backend sync failed","error");
   }
-  addLog(`Task added: ${v.slice(0,40)}`);
-  saveState();renderTodos();
 }
 
 function renderNonNeg(){
@@ -3361,13 +3406,51 @@ async function submitAddSubtopic(){
   if(!name)return;
   const {topicId,subjId}=_addSubtopicContext;
   closeAddSubtopicModal();
+
+  // ── Optimistic: append the row immediately with a temp id + "saving…" state ──
+  const tempId="tmp"+Date.now();
+  _arAppendSubtopicRow(topicId,{id:tempId,name,mastery_level:0,last_reviewed_date:null,notes:""},true);
+
   try{
     const res=await fetch(`${API_BASE}/topics/${topicId}/subtopics`,{method:"POST",
       headers:{"Content-Type":"application/json"},
       body:JSON.stringify({name,mastery_level:0})});
     if(!res.ok)throw new Error(await res.text());
-    await _arReloadSubject(subjId);
-  }catch(e){ alert("Failed to add subtopic: "+e.message); }
+    const real=await res.json();
+    // Swap the temp row for the real one
+    const tmpRow=document.getElementById(`arstr-${tempId}`);
+    if(tmpRow) tmpRow.outerHTML=_arSubtopicRow(real);
+    // Update local cache so notes/rename/delete operate on real data
+    for(const s of _arSubjects){
+      for(const t of s.topics||[]){
+        if(t.id===topicId){ (t.subtopics=t.subtopics||[]).push(real); break; }
+      }
+    }
+    _arRefreshProgress();
+  }catch(e){
+    const tmpRow=document.getElementById(`arstr-${tempId}`);
+    if(tmpRow) tmpRow.remove();
+    showToast("Failed to add subtopic: "+e.message,"error");
+  }
+}
+
+/* Append a subtopic row into a topic's section in the DOM, replacing any
+   "No subtopics yet" empty placeholder. `saving` marks an optimistic temp row. */
+function _arAppendSubtopicRow(topicId,st,saving){
+  const head=document.querySelector(`.ar-topic-head button.ar-add-sub-btn[onclick^="arAddSubtopic(${topicId},"]`);
+  const section=head?head.closest(".ar-topic-section"):null;
+  if(!section)return;
+  const empty=section.querySelector(".ar-empty");
+  if(empty) empty.remove();
+  const wrap=document.createElement("div");
+  wrap.innerHTML=_arSubtopicRow(st);
+  const row=wrap.firstElementChild;
+  if(saving){
+    row.style.opacity="0.55";
+    const lbl=row.querySelector(`#arsp-${st.id}`);
+    if(lbl) lbl.textContent="saving…";
+  }
+  section.appendChild(row);
 }
 
 /* ── Add topic ── */
@@ -3466,7 +3549,14 @@ async function submitAddSubject(){
 /* ── Reload a single subject from the API ── */
 async function _arReloadSubject(subjId){
   try{
-    const subj=await fetch(`${API_BASE}/subjects/${subjId}`).then(r=>r.json());
+    const res=await fetch(`${API_BASE}/subjects/${subjId}`);
+    if(!res.ok){
+      // Don't blank the UI — keep the existing card and log a warning.
+      console.warn(`OS: _arReloadSubject(${subjId}) failed — HTTP ${res.status}; keeping existing card`);
+      _arRefreshProgress();
+      return;
+    }
+    const subj=await res.json();
     const idx=_arSubjects.findIndex(s=>s.id===subjId);
     if(idx>=0) _arSubjects[idx]=subj;
     // Re-render just the body of this card
