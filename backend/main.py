@@ -110,6 +110,8 @@ async def startup():
         run_m005(db)        # m005 — reading plan columns + book position backfill
         from migrations.m006_todo_completed_at import run as run_m006
         run_m006(db)        # m006 — todos.completed_at column
+        from migrations.m007_cold_archive import run as run_m007
+        run_m007(db)        # m007 — cold_archive_chunks table
         _validate_schema(engine)   # raises if any ORM column is absent from the live DB
         _seed_non_negotiables_if_empty(db)
         _verify_seed_integrity(db)
@@ -206,6 +208,42 @@ def freeze_ended_weeks_job():
 @app.on_event("startup")
 async def run_freeze_on_startup():
     freeze_ended_weeks_job()
+
+
+# ── VAULT SYNC — startup (non-blocking) + APScheduler ────────
+
+def _vault_sync_job():
+    from vault_sync import sync_vault as _sync
+    db = SessionLocal()
+    try:
+        result = _sync(db)
+        print(f"[vault_scheduler] sync complete: {result}")
+    except Exception as exc:
+        print(f"[vault_scheduler] sync error: {exc}")
+    finally:
+        db.close()
+
+
+@app.on_event("startup")
+async def start_vault_scheduler():
+    import threading
+    # Non-blocking startup sync
+    t = threading.Thread(target=_vault_sync_job, daemon=True, name="vault-startup-sync")
+    t.start()
+
+    # Scheduled recurring sync via APScheduler
+    from apscheduler.schedulers.background import BackgroundScheduler
+    from vault_sync import VAULT_SYNC_INTERVAL_HOURS
+    scheduler = BackgroundScheduler()
+    scheduler.add_job(
+        _vault_sync_job,
+        "interval",
+        hours=VAULT_SYNC_INTERVAL_HOURS,
+        id="vault_sync",
+        replace_existing=True,
+    )
+    scheduler.start()
+    print(f"[vault_sync] Scheduler started — every {VAULT_SYNC_INTERVAL_HOURS}h.")
 
 
 # ── SEED HELPERS ─────────────────────────────────────────────
@@ -2014,6 +2052,48 @@ def search_context(q: str, db: Session = Depends(get_db)):
                 "content": chunk.content,
             })
     return {"query": q, "results": results[:20]}
+
+
+# ── VAULT (COLD ARCHIVE) ──────────────────────────────────────
+
+@app.post("/vault/sync")
+def vault_sync_endpoint(db: Session = Depends(get_db)):
+    """Manually trigger a vault clone/pull and re-index."""
+    from vault_sync import sync_vault
+    return sync_vault(db)
+
+
+@app.get("/vault/status")
+def vault_status(db: Session = Depends(get_db)):
+    """Return sync status: last synced time, chunk count, file count, repo URL."""
+    from vault_sync import VAULT_REPO_URL
+    chunk_count = db.query(models.ColdArchiveChunk).count()
+    file_count = (
+        db.query(models.ColdArchiveChunk.file_path)
+        .distinct()
+        .count()
+    )
+    latest = (
+        db.query(models.ColdArchiveChunk)
+        .order_by(models.ColdArchiveChunk.last_synced.desc())
+        .first()
+    )
+    last_synced = str(latest.last_synced) if latest and latest.last_synced else None
+    return {
+        "last_synced": last_synced,
+        "chunk_count": chunk_count,
+        "file_count": file_count,
+        "repo_url": VAULT_REPO_URL,
+    }
+
+
+@app.get("/vault/search")
+def vault_search(q: str, db: Session = Depends(get_db)):
+    """Keyword search across cold archive chunks. Returns top 8."""
+    from vault_sync import search_vault
+    if not q or len(q) < 2:
+        raise HTTPException(400, "Query too short")
+    return {"query": q, "results": search_vault(q, db, limit=8)}
 
 
 # ── SOCIAL SCORE ──────────────────────────────────────────────

@@ -1355,6 +1355,24 @@ tr:hover .td-del{opacity:1}
         </div>
         <div id="wr-search-results" style="font-size:10px;color:var(--muted)"></div>
       </div>
+
+      <!-- Obsidian Vault -->
+      <div class="card">
+        <div class="card-title">
+          <span>Obsidian Vault</span>
+          <span class="badge b-muted" id="vault-status-badge">Not synced</span>
+        </div>
+        <div id="vault-status-info" style="font-size:10px;color:var(--muted);margin-bottom:12px"></div>
+        <div style="display:flex;gap:8px;margin-bottom:12px">
+          <button class="at-add-btn" onclick="syncVault()" id="vault-sync-btn">&#8635; Sync Vault</button>
+        </div>
+        <div style="display:flex;gap:8px">
+          <input class="at-input" id="vault-search-q" placeholder="Search vault…" style="flex:1"
+            onkeydown="if(event.key==='Enter')searchVault()">
+          <button class="at-add-btn" onclick="searchVault()">Search</button>
+        </div>
+        <div id="vault-search-results" style="font-size:10px;color:var(--muted);margin-top:10px"></div>
+      </div>
     </div>
 
     <!-- ── ANNUAL TARGETS ── -->
@@ -2350,6 +2368,7 @@ async function renderWarRoom(){
     _wr.nonNeg = nns;
     _wr.docs   = docs;
   }catch(e){console.warn("War Room fetch failed",e);}
+  loadVaultStatus();
 
   // Non-Negotiables
   const nnEl=document.getElementById("wr-nn-list");
@@ -2458,6 +2477,62 @@ async function searchContext(){
         <div style="line-height:1.5">${escHtml(c.content.slice(0,300))}${c.content.length>300?"…":""}</div>
       </div>`).join("");
   }catch(e){el.textContent="Search failed.";}
+}
+
+async function loadVaultStatus(){
+  try{
+    const r=await fetch(`${API_BASE}/vault/status`);
+    if(!r.ok)return;
+    const d=await r.json();
+    const badge=document.getElementById("vault-status-badge");
+    const info=document.getElementById("vault-status-info");
+    if(badge){
+      badge.textContent=d.chunk_count>0?`${d.chunk_count} chunks / ${d.file_count} files`:"Not synced";
+      badge.className=d.chunk_count>0?"badge b-glow":"badge b-muted";
+    }
+    if(info){
+      info.textContent=d.last_synced
+        ?`Last synced: ${d.last_synced.slice(0,19).replace("T"," ")} UTC`
+        :"Never synced — click Sync Vault to index.";
+    }
+  }catch(e){console.warn("vault status fetch failed",e);}
+}
+
+async function syncVault(){
+  const btn=document.getElementById("vault-sync-btn");
+  if(btn)btn.textContent="Syncing…";
+  try{
+    const r=await fetch(`${API_BASE}/vault/sync`,{method:"POST"});
+    const d=await r.json();
+    await loadVaultStatus();
+    const info=document.getElementById("vault-status-info");
+    if(info&&d.errors&&d.errors.length){
+      info.textContent=`Sync error: ${d.errors[0]}`;
+    }
+  }catch(e){
+    const info=document.getElementById("vault-status-info");
+    if(info)info.textContent="Sync failed — check network.";
+  }finally{
+    if(btn)btn.textContent="↻ Sync Vault";
+  }
+}
+
+async function searchVault(){
+  const q=document.getElementById("vault-search-q").value.trim();
+  if(!q)return;
+  const el=document.getElementById("vault-search-results");
+  el.textContent="Searching vault…";
+  try{
+    const r=await fetch(`${API_BASE}/vault/search?q=${encodeURIComponent(q)}`);
+    const d=await r.json();
+    if(!d.results?.length){el.textContent="No results in vault.";return}
+    el.innerHTML=d.results.map(c=>`
+      <div style="border:1px solid #A7EBF222;border-radius:3px;padding:8px;margin-bottom:6px">
+        <div style="font-size:10px;font-weight:600;margin-bottom:2px">${escHtml(c.file_title)}</div>
+        <div style="line-height:1.5;margin-bottom:4px">${escHtml(c.content.slice(0,280))}${c.content.length>280?"…":""}</div>
+        <div style="font-size:10px;color:var(--muted)">${escHtml(c.file_path)}</div>
+      </div>`).join("");
+  }catch(e){el.textContent="Vault search failed.";}
 }
 
 /* ═══════════════════════════════════════════════════

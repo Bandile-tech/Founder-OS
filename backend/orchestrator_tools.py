@@ -349,6 +349,35 @@ def add_todos(db, items: list, category: str = "personal", priority: int = 5):
 
 
 # ════════════════════════════════════════════════════════════════
+# Tool 8 — query_cold_archive
+# ════════════════════════════════════════════════════════════════
+
+def query_cold_archive(db, query: str, limit: int = 5):
+    """Search Bandile's Obsidian vault (cold archive).
+
+    ONLY called when the user explicitly instructs a vault/notes/second-brain search.
+    Never called autonomously.
+    """
+    from vault_sync import search_vault
+
+    if not query or len(query) < 2:
+        return {"query": query, "results": []}, "query too short"
+
+    raw = search_vault(query, db, limit=limit)
+    results = []
+    for r in raw:
+        results.append({
+            "file_title": r["file_title"],
+            "file_path": r["file_path"],
+            "excerpt": r["content"][:400] + ("…" if len(r["content"]) > 400 else ""),
+            "chunk_index": r["chunk_index"],
+        })
+
+    summary = f"{len(results)} vault match(es) for '{query}'"
+    return {"query": query, "results": results}, summary
+
+
+# ════════════════════════════════════════════════════════════════
 # Dispatch + JSON tool schemas for the model
 # ════════════════════════════════════════════════════════════════
 
@@ -364,6 +393,11 @@ _TOOL_DISPATCH = {
         items=a.get("items", []),
         category=a.get("category", "personal"),
         priority=int(a.get("priority", 5)),
+    ),
+    "query_cold_archive": lambda db, a: query_cold_archive(
+        db,
+        query=a.get("query", ""),
+        limit=int(a.get("limit", 5)),
     ),
 }
 
@@ -489,6 +523,35 @@ TOOL_SCHEMAS = [
                     },
                 },
                 "required": ["items"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "query_cold_archive",
+            "description": (
+                "Query the cold archive — Bandile's Obsidian vault containing Apple Notes dumps, "
+                "journal entries, past project documents, and personal archives. ONLY call this "
+                "tool when the user explicitly asks to search their second brain, memory, or vault. "
+                "Trigger phrases: 'look in my vault', 'check my notes', 'search my second brain', "
+                "'do I have anything about X in my archive', 'find in my obsidian'. Do NOT call "
+                "this tool during normal conversation, brain dumps, or when answering questions "
+                "from general knowledge. The vault is cold storage — it is never queried automatically."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The keyword(s) to search for in the vault.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum results to return. Default 5.",
+                    },
+                },
+                "required": ["query"],
             },
         },
     },

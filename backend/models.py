@@ -482,3 +482,19 @@ class ReadingPlanEntry(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     plan = relationship("ReadingPlan", back_populates="entries")
+
+
+# ── COLD ARCHIVE (OBSIDIAN VAULT) ────────────────────────────
+
+class ColdArchiveChunk(Base):
+    """Chunks indexed from the Obsidian vault markdown files."""
+    __tablename__ = "cold_archive_chunks"
+
+    id          = Column(Integer, primary_key=True, index=True)
+    file_path   = Column(String, nullable=False)   # relative path, e.g. "journal/2026-06.md"
+    file_title  = Column(String, nullable=False)   # filename without extension
+    content     = Column(Text, nullable=False)     # chunk text
+    chunk_index = Column(Integer, nullable=False)
+    word_count  = Column(Integer, nullable=True)
+    last_synced = Column(DateTime, default=datetime.utcnow)
+    created_at  = Column(DateTime, default=datetime.utcnow)
