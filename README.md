@@ -1,133 +1,28 @@
 # Founder OS
 
-A personal operating system for disciplined execution, KPI tracking, and systems thinking.
+A personal operating system I built for myself — not a product, not a client tool. It's the system I use daily to run my academics, health, trading discipline, and business execution against my own written standards, not generic productivity defaults.
 
-This is not a motivation app.
-This is a command interface for daily execution.
 
-⸻
+## What it does
 
-What this is
+- **Academic tracking** — syllabus progress by subject, topic, and subtopic, weighted against actual exam dates
+- **Health** — daily and weekly logs, lift progression
+- **Trading** — backtest logging with a hard-coded 50-trade / 90%-adherence gate before live trading unlocks. The gate is enforced in code, not by willpower.
+- **Non-negotiables** — daily habit tracking against standards I've set for myself
+- **AI layer** — an orchestrator that reasons from documents I've written (personal doctrine, standing rules, reading plans) rather than generic advice, and can log brain dumps, surface off-track alerts, and answer questions grounded in what I've actually said matters to me
 
-Founder OS is a lightweight, browser-based system that combines:
-	•	Daily execution logging
-	•	Weekly objectives & KPI tracking
-	•	Visual progress indicators (arc-based KPIs)
-	•	A built-in AI chat interface for reflection and reporting
+## What it isn't
 
-It is designed to scale psychologically from student → founder → group CEO without needing redesign.
+Not a SaaS product. Not built for other users. No auth layer, no multi-tenancy — it's scoped to one person's data because that's the only person it was built for.
 
-⸻
+## Stack
 
-Core Principles
-	•	Systems over vibes
-	•	Discipline over dopamine
-	•	Execution over intention
-	•	Long-term clarity over short-term motivation
+FastAPI + vanilla JS frontend, Supabase (Postgres), deployed on Render (backend) and Netlify (frontend). AI orchestration via OpenAI's API.
 
-If it doesn’t improve decision-making or execution, it doesn’t belong here.
+## Why
 
-⸻
+Every domain in here — academics, training, trading, building — runs on the same principle: the standard is worthless if nothing enforces it when no one's watching. This is the enforcement layer.
 
-Tech Stack
-	•	HTML / CSS / Vanilla JavaScript
-	•	SVG for KPI visualisation
-	•	localStorage for persistence
-	•	Optional FastAPI backend for chat (/chat endpoint)
+---
 
-No frameworks. No dependencies. Full control.
-
-⸻
-
-How it works
-
-1. Weekly Objectives
-	•	Define weekly objectives with target execution counts
-	•	Stored in localStorage
-	•	Used as the backbone for all KPI calculations
-
-2. Daily Execution Logs
-	•	Log daily actions and contributions
-	•	Each log links to a weekly objective
-	•	Automatically feeds KPI metrics
-
-3. KPI System
-	•	Weekly KPI aggregation (last 7 days)
-	•	Visual arc indicators (open-bottom, executive-style)
-	•	Text KPI summary (counts + averages)
-
-4. AI Chat
-	•	Session-based chat with backend
-	•	Can query KPI status using natural language (e.g. “KPI”, “on track”)
-	•	Designed for future expansion into a full personal assistant
-
-⸻
-
-Running the project
-
-Option A — Open locally
-
-Just open index.html in a browser.
-
-Option B — With backend
-
-Ensure your backend is running at:
-http://127.0.0.1:8000/chat
-Then open the frontend normally.
-
-Option C — Replit (mobile-friendly)
-	•	Import the GitHub repo into Replit
-	•	Use for light edits, UI tweaks, and review from phone
-
-⸻
-
-Data persistence (important)
-
-All execution data is stored in browser localStorage.
-
-Implications:
-	•	Data is browser-specific
-	•	Phone ≠ laptop data
-	•	Replit preview ≠ local browser
-
-Planned upgrade:
-	•	Manual export/import of data as JSON
-	•	Eventual backend sync
-
-⸻
-
-What NOT to touch casually
-	•	KPI aggregation logic
-	•	Weekly objective structure
-	•	Execution log schema
-
-These are system-critical components.
-
-⸻
-
-Roadmap (high level)
-	•	Manual data export/import
-	•	Dark-mode optimisation (already palette-ready)
-	•	KPI trend history (weekly/monthly)
-	•	Assistant-driven insights (“You’re drifting”, “Execution down 20%”)
-	•	Transition from localStorage → backend persistence
-
-⸻
-
-Status
-
-v0.1 — Stable
-	•	KPI arcs working
-	•	Execution logging stable
-	•	UI aligned with founder-grade palette
-	•	Safe to build on
-
-⸻
-
-Philosophy (non-negotiable)
-
-This system is not meant to inspire you.
-It is meant to command you.
-
-If it becomes pretty but ineffective, it has failed.
-
+Built solo. First full build, shipped and iterated on in public.
