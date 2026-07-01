@@ -1972,7 +1972,7 @@ function renderCountdown(){
 
   const dMonth=Math.ceil((endMonth-now)/864e5);
   const dQ=Math.ceil((endQ-now)/864e5);
-  const dSem=Math.ceil((new Date(y,10,30)-now)/864e5);
+ const dSem=Math.ceil((new Date(y,8,30).setHours(0,0,0,0)-new Date().setHours(0,0,0,0))/864e5);
   const dYear=Math.ceil((endYear-now)/864e5);
 
   const pctMonth=Math.round(((new Date(y,m+1,0).getDate()-dMonth)/new Date(y,m+1,0).getDate())*100);
@@ -3343,7 +3343,7 @@ const SUBJ_COLORS = ["var(--glow)","var(--purple)","var(--interactive)","var(--w
 
 async function renderAcademicRoadmap(){
   // Exam countdown
-  const examDate="2026-10-01";
+  const examDate="2026-09-30";
   const d=daysUntil(examDate);
   document.getElementById("exam-days").textContent=d>0?d:"!";
 
