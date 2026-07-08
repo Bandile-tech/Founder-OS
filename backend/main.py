@@ -1,6 +1,6 @@
-from fastapi import FastAPI, Depends, HTTPException, Query
+from fastapi import FastAPI, Depends, HTTPException, Query, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -28,6 +28,8 @@ from openai_client import (
     get_parse_response,
     get_proactive_brief,
     get_radar_scores,
+    transcribe_audio,
+    synthesize_speech,
 )
 
 # ── CREATE TABLES ────────────────────────────────────────────
@@ -112,6 +114,8 @@ async def startup():
         run_m006(db)        # m006 — todos.completed_at column
         from migrations.m007_cold_archive import run as run_m007
         run_m007(db)        # m007 — cold_archive_chunks table
+        from migrations.m009_market_intel import run as run_m009
+        run_m009(db)        # m009 — market intelligence agent tables
         _validate_schema(engine)   # raises if any ORM column is absent from the live DB
         _seed_non_negotiables_if_empty(db)
         _verify_seed_integrity(db)
@@ -1616,6 +1620,33 @@ def chat_endpoint(request: schemas.ChatRequest, db: Session = Depends(get_db)):
     return {"reply": bot_reply}
 
 
+# ── VOICE ────────────────────────────────────────────────────
+@app.post("/voice/transcribe")
+async def voice_transcribe(audio: UploadFile = File(...)):
+    data = await audio.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="Empty audio upload")
+    try:
+        text = transcribe_audio(data, filename=audio.filename or "audio.webm")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Transcription failed: {e}")
+    if not text:
+        raise HTTPException(status_code=422, detail="No speech detected")
+    return {"text": text}
+
+
+@app.post("/voice/speak")
+def voice_speak(request: schemas.SpeakRequest):
+    text = request.text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Text required")
+    try:
+        audio_bytes = synthesize_speech(text)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Speech synthesis failed: {e}")
+    return Response(content=audio_bytes, media_type="audio/mpeg")
+
+
 # ── BIBLE ────────────────────────────────────────────────────
 @app.get("/bible")
 def get_bible(db: Session = Depends(get_db)):
@@ -2094,6 +2125,113 @@ def vault_search(q: str, db: Session = Depends(get_db)):
     if not q or len(q) < 2:
         raise HTTPException(400, "Query too short")
     return {"query": q, "results": search_vault(q, db, limit=8)}
+
+
+# ── MARKET INTELLIGENCE (RESEARCH) ────────────────────────────
+
+_PIPELINE_STAGES = {"discovered", "researching", "validating", "building", "rejected"}
+
+
+@app.get("/research/projects")
+def research_projects(db: Session = Depends(get_db)):
+    """Research projects newest-first, with finding counts."""
+    projects = db.query(models.ResearchProject).order_by(
+        models.ResearchProject.created_at.desc()
+    ).all()
+    return [{
+        "id": p.id,
+        "title": p.title,
+        "objective": p.objective,
+        "status": p.status,
+        "finding_count": len(p.findings),
+        "created_at": str(p.created_at) if p.created_at else None,
+        "completed_at": str(p.completed_at) if p.completed_at else None,
+    } for p in projects]
+
+
+@app.get("/research/projects/{project_id}")
+def research_project_detail(project_id: int, db: Session = Depends(get_db)):
+    """One project with its full findings (JSON fields parsed)."""
+    from market_intel.agent import _serialize_finding
+    project = db.query(models.ResearchProject).filter(
+        models.ResearchProject.id == project_id
+    ).first()
+    if not project:
+        raise HTTPException(404, "Research project not found")
+    return {
+        "id": project.id,
+        "title": project.title,
+        "objective": project.objective,
+        "status": project.status,
+        "error": project.error,
+        "created_at": str(project.created_at) if project.created_at else None,
+        "completed_at": str(project.completed_at) if project.completed_at else None,
+        "findings": [_serialize_finding(f) for f in project.findings],
+    }
+
+
+@app.get("/research/pipeline")
+def research_pipeline(db: Session = Depends(get_db)):
+    """Opportunity pipeline entries joined to their findings."""
+    from market_intel.agent import _serialize_finding
+    entries = db.query(models.OpportunityPipeline).order_by(
+        models.OpportunityPipeline.promoted_at.desc()
+    ).all()
+    return [{
+        "id": e.id,
+        "stage": e.stage,
+        "notes": e.notes,
+        "promoted_at": str(e.promoted_at) if e.promoted_at else None,
+        "updated_at": str(e.updated_at) if e.updated_at else None,
+        "finding": _serialize_finding(e.finding) if e.finding else None,
+    } for e in entries]
+
+
+@app.post("/research/promote")
+def research_promote(payload: schemas.PromoteFindingRequest, db: Session = Depends(get_db)):
+    """Explicitly promote a surfaced finding into the pipeline — the 'save this
+    opportunity' action. The agent never does this on its own."""
+    import orchestrator_tools
+    result, _summary = orchestrator_tools.promote_research_opportunity(
+        db, finding_id=payload.finding_id, notes=payload.notes
+    )
+    if result.get("error"):
+        raise HTTPException(404, result["error"])
+    return result
+
+
+@app.patch("/research/pipeline/{entry_id}")
+def research_pipeline_update(entry_id: int, payload: schemas.PipelineUpdateRequest,
+                             db: Session = Depends(get_db)):
+    """Move a pipeline entry between stages or update its notes."""
+    entry = db.query(models.OpportunityPipeline).filter(
+        models.OpportunityPipeline.id == entry_id
+    ).first()
+    if not entry:
+        raise HTTPException(404, "Pipeline entry not found")
+    if payload.stage is not None:
+        if payload.stage not in _PIPELINE_STAGES:
+            raise HTTPException(400, f"Invalid stage. Must be one of: {sorted(_PIPELINE_STAGES)}")
+        entry.stage = payload.stage
+    if payload.notes is not None:
+        entry.notes = payload.notes
+    db.commit()
+    return {"id": entry.id, "stage": entry.stage, "notes": entry.notes}
+
+
+@app.get("/research/memory")
+def research_memory(db: Session = Depends(get_db)):
+    """The agent's lesson notes — one lesson per note."""
+    notes = db.query(models.ResearchMemoryNote).order_by(
+        models.ResearchMemoryNote.updated_at.desc()
+    ).all()
+    return [{
+        "slug": n.slug,
+        "summary": n.summary,
+        "content": n.content,
+        "times_reinforced": n.times_reinforced,
+        "updated_at": str(n.updated_at) if n.updated_at else None,
+    } for n in notes]
 
 
 # ── SOCIAL SCORE ──────────────────────────────────────────────

@@ -3,9 +3,13 @@
   "configurations": [
     {
       "name": "founder-os-backend",
-      "runtimeExecutable": "python",
-      "runtimeArgs": ["-m", "uvicorn", "main:app", "--app-dir", "backend", "--port", "8000"],
-      "port": 8000
+      "runtimeExecutable": "backend/venv/Scripts/python.exe",
+      "runtimeArgs": [
+        "-c",
+        "import os, sys; sys.path.insert(0, 'backend'); from dotenv import load_dotenv; load_dotenv('backend/.env'); import uvicorn; uvicorn.run('main:app', host='127.0.0.1', port=int(os.environ.get('PORT', '8000')))"
+      ],
+      "port": 8000,
+      "autoPort": true
     }
   ]
 }

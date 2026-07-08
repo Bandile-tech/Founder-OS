@@ -111,6 +111,10 @@ class ChatRequest(BaseModel):
     context: Optional[Dict[str, Any]] = None
 
 
+class SpeakRequest(BaseModel):
+    text: str
+
+
 class ProactiveBriefRequest(BaseModel):
     context: Dict[str, Any]
 
@@ -418,3 +422,15 @@ class LiveTradePatch(BaseModel):
     net_pl_usd: Optional[float] = None
     rule_broken: Optional[bool] = None
     rule_broken_description: Optional[str] = None
+
+
+# ── Market Intelligence Agent ─────────────────────────────────
+
+class PromoteFindingRequest(BaseModel):
+    finding_id: int
+    notes: Optional[str] = None
+
+
+class PipelineUpdateRequest(BaseModel):
+    stage: Optional[str] = None      # discovered|researching|validating|building|rejected
+    notes: Optional[str] = None

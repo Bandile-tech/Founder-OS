@@ -51,6 +51,33 @@ OPERATING RULES
 """
 
 
+# ── Voice (STT + TTS) ────────────────────────────────────────
+STT_MODEL = "whisper-1"
+TTS_MODEL = "tts-1"
+# Placeholder voice — Bandile will pick one by ear later. Options:
+# alloy, echo, fable, onyx, nova, shimmer.
+TTS_VOICE = "onyx"
+
+
+def transcribe_audio(file_bytes: bytes, filename: str = "audio.webm") -> str:
+    """Transcribe recorded audio via OpenAI Whisper. Returns plain text."""
+    result = client.audio.transcriptions.create(
+        model=STT_MODEL,
+        file=(filename, file_bytes),
+    )
+    return (result.text or "").strip()
+
+
+def synthesize_speech(text: str) -> bytes:
+    """Convert reply text to spoken audio (MP3 bytes) via OpenAI TTS."""
+    response = client.audio.speech.create(
+        model=TTS_MODEL,
+        voice=TTS_VOICE,
+        input=text[:4000],
+    )
+    return response.content
+
+
 def clean_ai_output(text: str) -> str:
     if not text:
         return ""

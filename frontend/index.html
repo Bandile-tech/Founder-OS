@@ -900,6 +900,50 @@ tr:hover .td-del{opacity:1}
 }
 
 /* ═══════════════════════════════════════════════════
+   VOICE — mic button + status indicator
+═══════════════════════════════════════════════════ */
+.mic-btn{
+  width:34px;height:34px;flex-shrink:0;
+  border-radius:50%;
+  border:1px solid var(--border-hi);
+  background:var(--surface-hi);
+  color:var(--glow);
+  cursor:pointer;font-size:14px;line-height:1;
+  display:flex;align-items:center;justify-content:center;
+  transition:all 0.2s var(--ease-spring);
+}
+.mic-btn:hover{transform:translateY(-1px);border-color:var(--glow);box-shadow:0 0 12px rgba(167,235,242,0.2)}
+.mic-btn:active{transform:scale(0.94)}
+.mic-btn.recording{
+  background:var(--danger);border-color:var(--danger);color:#fff;
+  animation:micPulse 1.2s var(--ease-smooth) infinite;
+}
+.mic-btn.busy{opacity:0.55;cursor:wait;animation:pulse 1.2s infinite}
+.mic-btn.speaking{background:var(--interactive);border-color:var(--glow);color:var(--glow)}
+@keyframes micPulse{
+  0%,100%{box-shadow:0 0 0 0 rgba(255,92,92,0.5)}
+  50%{box-shadow:0 0 0 9px rgba(255,92,92,0)}
+}
+.voice-status{
+  font-size:10px;letter-spacing:0.1em;
+  color:var(--muted);text-transform:uppercase;margin-top:7px;
+  display:none;align-items:center;gap:8px;
+}
+.voice-status.show{display:flex}
+.voice-bars{display:flex;gap:2px;align-items:center;height:12px}
+.voice-bars span{
+  width:2px;height:12px;background:var(--glow);border-radius:1px;
+  transform-origin:bottom;transform:scaleY(0.25);
+  animation:voiceBar 0.9s var(--ease-smooth) infinite;
+}
+.voice-bars span:nth-child(1){animation-delay:0s}
+.voice-bars span:nth-child(2){animation-delay:0.15s}
+.voice-bars span:nth-child(3){animation-delay:0.3s}
+.voice-bars span:nth-child(4){animation-delay:0.45s}
+.voice-bars span:nth-child(5){animation-delay:0.6s}
+@keyframes voiceBar{0%,100%{transform:scaleY(0.25)}50%{transform:scaleY(1)}}
+
+/* ═══════════════════════════════════════════════════
    ANIMATIONS
 ═══════════════════════════════════════════════════ */
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}
@@ -1025,9 +1069,14 @@ tr:hover .td-del{opacity:1}
             <div class="card-title"><span>⚡ Command</span><span class="badge b-glow" id="ucmd-mode-badge">Ready</span></div>
             <div style="display:flex;gap:6px;align-items:center">
               <input id="ucmd-input" class="quick-add" style="flex:1;margin:0"
-                placeholder="Brain dump or ask anything… (Enter to send)"
+                placeholder="Brain dump, ask anything, or tap the mic… (Enter to send)"
                 onkeydown="ucmdKey(event)">
+              <button class="mic-btn" id="mic-btn" title="Talk to it instead of typing" onclick="toggleVoice()">◉</button>
               <button class="btn-parse" style="padding:6px 12px;font-size:10px" onclick="submitUnifiedInput()">→</button>
+            </div>
+            <div class="voice-status" id="voice-status">
+              <div class="voice-bars"><span></span><span></span><span></span><span></span><span></span></div>
+              <span id="voice-status-text">Listening…</span>
             </div>
             <div id="ucmd-result" style="display:none;margin-top:8px;font-size:10px;color:var(--muted);border-top:1px solid var(--border);padding-top:8px"></div>
           </div>
@@ -1701,7 +1750,10 @@ let S=loadState();
 /* ═══════════════════════════════════════════════════
    SURGICAL BRIDGE: API MAPPING
 ═══════════════════════════════════════════════════ */
-const API_BASE = "https://founder-os-backend-f6qn.onrender.com";
+// Use the local backend when the app is served by it (uvicorn), else the deployed API.
+const API_BASE = (location.hostname==="127.0.0.1"||location.hostname==="localhost")
+  ? location.origin
+  : "https://founder-os-backend-f6qn.onrender.com";
 
 function fetchWithTimeout(url, timeoutMs=10000){
   const ctrl=new AbortController();
@@ -4025,6 +4077,14 @@ async function submitUnifiedInput(){
     result.style.display="block";
     saveState();
 
+    // Voice loop: speak the reply if this input came from the mic.
+    if(_voicePending){
+      _voicePending=false;
+      const spoken=(finalText||(loggedSummary!==null?`Logged. ${loggedSummary}`:""))
+        .replace(/[*_#`>]|\[(.*?)\]\(.*?\)/g,"$1").trim();   // strip markdown before TTS
+      if(spoken)speakText(spoken);
+    }
+
     // Refresh data + cross-module panels after any write.
     await syncFromBackend();
     renderConversationHistory();
@@ -4898,6 +4958,101 @@ function resetSystem(){
   if(!confirm("Reset ALL data? This cannot be undone."))return;
   localStorage.removeItem("founderOSv2");
   location.reload();
+}
+
+/* ═══════════════════════════════════════════════════
+   VOICE — mic → Whisper → orchestrator → spoken reply
+═══════════════════════════════════════════════════ */
+let _mediaRecorder=null,_voiceChunks=[],_voicePending=false,_voiceBusy=false,_voiceAudio=null,_speakInFlight=false;
+
+function _voiceUI(state,text){
+  const btn=document.getElementById("mic-btn");
+  const status=document.getElementById("voice-status");
+  const statusText=document.getElementById("voice-status-text");
+  if(!btn)return;
+  btn.className="mic-btn"+(state==="recording"?" recording":state==="busy"?" busy":state==="speaking"?" speaking":"");
+  btn.textContent=state==="recording"?"■":state==="speaking"?"♪":"◉";
+  if(status){
+    status.className="voice-status"+(state==="idle"?"":" show");
+    if(statusText&&text)statusText.textContent=text;
+  }
+}
+
+async function toggleVoice(){
+  if(_voiceBusy)return;
+  // Stop an in-flight spoken reply if tapped while speaking
+  if(_voiceAudio&&!_voiceAudio.paused){_voiceAudio.pause();_voiceAudio=null;_voiceUI("idle");return;}
+  if(_mediaRecorder&&_mediaRecorder.state==="recording"){_mediaRecorder.stop();return;}
+
+  if(!navigator.mediaDevices?.getUserMedia){showToast("Microphone not supported in this browser","error");return;}
+  let stream;
+  try{stream=await navigator.mediaDevices.getUserMedia({audio:true});}
+  catch{showToast("Microphone permission denied","error");return;}
+
+  const mime=MediaRecorder.isTypeSupported("audio/webm")?"audio/webm"
+            :MediaRecorder.isTypeSupported("audio/mp4")?"audio/mp4":"";
+  _voiceChunks=[];
+  _mediaRecorder=new MediaRecorder(stream,mime?{mimeType:mime}:undefined);
+  _mediaRecorder.ondataavailable=e=>{if(e.data.size>0)_voiceChunks.push(e.data);};
+  _mediaRecorder.onstop=async()=>{
+    stream.getTracks().forEach(t=>t.stop());
+    const type=_mediaRecorder.mimeType||"audio/webm";
+    const blob=new Blob(_voiceChunks,{type});
+    _mediaRecorder=null;
+    if(blob.size<800){_voiceUI("idle");return;}   // accidental tap — nothing recorded
+    await _voiceTranscribeAndSend(blob,type.includes("mp4")?"audio.mp4":"audio.webm");
+  };
+  _mediaRecorder.start();
+  _voiceUI("recording","Listening… tap to stop");
+}
+
+async function _voiceTranscribeAndSend(blob,filename){
+  _voiceBusy=true;
+  _voiceUI("busy","Transcribing…");
+  try{
+    const fd=new FormData();
+    fd.append("audio",blob,filename);
+    const r=await fetch(`${API_BASE}/voice/transcribe`,{method:"POST",body:fd});
+    if(!r.ok){
+      const detail=(await r.json().catch(()=>({})))?.detail||("HTTP "+r.status);
+      throw new Error(detail);
+    }
+    const {text}=await r.json();
+    const inp=document.getElementById("ucmd-input");
+    inp.value=text;
+    _voicePending=true;             // speak the reply when it lands
+    _voiceUI("busy","Thinking…");
+    await submitUnifiedInput();
+  }catch(e){
+    showToast("Voice failed: "+e.message,"error");
+    _voiceUI("idle");
+  }finally{
+    _voiceBusy=false;
+    if(!_voiceAudio&&!_speakInFlight)_voiceUI("idle");
+  }
+}
+
+async function speakText(text){
+  if(!text)return;
+  _speakInFlight=true;
+  try{
+    _voiceUI("busy","Fetching voice…");
+    const r=await fetch(`${API_BASE}/voice/speak`,{method:"POST",
+      headers:{"Content-Type":"application/json"},body:JSON.stringify({text})});
+    if(!r.ok)throw new Error("HTTP "+r.status);
+    const blob=await r.blob();
+    const url=URL.createObjectURL(blob);
+    _voiceAudio=new Audio(url);
+    _voiceUI("speaking","Speaking… tap mic to stop");
+    _voiceAudio.onended=()=>{URL.revokeObjectURL(url);_voiceAudio=null;_voiceUI("idle");};
+    await _voiceAudio.play();
+  }catch(e){
+    showToast("Playback failed: "+e.message,"error");
+    _voiceAudio=null;
+    _voiceUI("idle");
+  }finally{
+    _speakInFlight=false;
+  }
 }
 
 /* ═══════════════════════════════════════════════════
