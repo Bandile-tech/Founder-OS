@@ -434,3 +434,4 @@ class PromoteFindingRequest(BaseModel):
 class PipelineUpdateRequest(BaseModel):
     stage: Optional[str] = None      # discovered|researching|validating|building|rejected
     notes: Optional[str] = None
+

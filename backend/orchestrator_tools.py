@@ -379,7 +379,7 @@ def query_cold_archive(db, query: str, limit: int = 5):
 
 # ════════════════════════════════════════════════════════════════
 # Tool 9 — run_market_research_agent
-# ════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════
 
 def run_market_research_agent(db, objective: str, max_opportunities: int = 3):
     """Run the Market Intelligence Agent on a research objective.
@@ -402,9 +402,9 @@ def run_market_research_agent(db, objective: str, max_opportunities: int = 3):
     return result, summary
 
 
-# ════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════
 # Tool 10 — promote_research_opportunity
-# ════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════
 
 def promote_research_opportunity(db, finding_id: int, notes: str = None):
     """Promote a surfaced finding into the opportunity pipeline (stage 'discovered').
@@ -448,7 +448,8 @@ def promote_research_opportunity(db, finding_id: int, notes: str = None):
     return result, summary
 
 
-# ════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════
+
 # Dispatch + JSON tool schemas for the model
 # ════════════════════════════════════════════════════════════════
 
