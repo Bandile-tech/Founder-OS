@@ -1622,8 +1622,10 @@ def chat_endpoint(request: schemas.ChatRequest, db: Session = Depends(get_db)):
 
 # ── VOICE ────────────────────────────────────────────────────
 @app.post("/voice/transcribe")
-async def voice_transcribe(audio: UploadFile = File(...)):
-    data = await audio.read()
+def voice_transcribe(audio: UploadFile = File(...)):
+    # Plain def (like /voice/speak): FastAPI runs it in the threadpool, so the
+    # blocking Whisper SDK call can't stall the event loop.
+    data = audio.file.read()
     if not data:
         raise HTTPException(status_code=400, detail="Empty audio upload")
     try:
