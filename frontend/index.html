@@ -2508,7 +2508,10 @@ let S=loadState();
 /* ═══════════════════════════════════════════════════
    SURGICAL BRIDGE: API MAPPING
 ═══════════════════════════════════════════════════ */
-const API_BASE = "https://founder-os-backend-f6qn.onrender.com";
+// Use the local backend when the app is served by it (uvicorn), else the deployed API.
+const API_BASE = (location.hostname==="127.0.0.1"||location.hostname==="localhost")
+  ? location.origin
+  : "https://founder-os-backend-f6qn.onrender.com";
 
 function fetchWithTimeout(url, timeoutMs=10000){
   const ctrl=new AbortController();
