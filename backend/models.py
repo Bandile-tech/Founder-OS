@@ -498,3 +498,88 @@ class ColdArchiveChunk(Base):
     word_count  = Column(Integer, nullable=True)
     last_synced = Column(DateTime, default=datetime.utcnow)
     created_at  = Column(DateTime, default=datetime.utcnow)
+
+
+# ── MARKET INTELLIGENCE AGENT ────────────────────────────────
+
+class ResearchProject(Base):
+    """One row per research run of the market intelligence agent."""
+    __tablename__ = "research_projects"
+
+    id           = Column(Integer, primary_key=True, index=True)
+    title        = Column(String, nullable=False)
+    objective    = Column(Text, nullable=False)
+    status       = Column(String, nullable=False, default="running")  # running|completed|failed
+    error        = Column(Text, nullable=True)
+    created_at   = Column(DateTime, default=datetime.utcnow)
+    completed_at = Column(DateTime, nullable=True)
+
+    findings = relationship("ResearchFinding", back_populates="project",
+                            cascade="all, delete-orphan")
+
+
+class ResearchFinding(Base):
+    """A structured, evidence-backed opportunity surfaced by the agent.
+
+    The agent only ever writes rows with status='surfaced'. Promotion into the
+    opportunity pipeline is a separate explicit action, never a side effect.
+    JSON payloads (discovery, market_analysis, founder_fit, evidence, scores)
+    live in TEXT columns — identical on SQLite and Postgres.
+    """
+    __tablename__ = "research_findings"
+
+    id                  = Column(Integer, primary_key=True, index=True)
+    project_id          = Column(Integer, ForeignKey("research_projects.id", ondelete="CASCADE"),
+                                 nullable=False, index=True)
+    problem             = Column(Text, nullable=False)
+    industry            = Column(String, nullable=True)
+    customer_segment    = Column(String, nullable=True)
+    persona             = Column(String, nullable=True)
+    discovery           = Column(Text, nullable=True)   # JSON: pain, frequency, financial impact, workaround
+    market_analysis     = Column(Text, nullable=True)   # JSON: existing solutions, gaps, trends
+    founder_fit         = Column(Text, nullable=True)   # JSON: why solvable, difficulty, MVP, model
+    evidence            = Column(Text, nullable=True)   # JSON array: {source_type, ref, title, excerpt}
+    scores              = Column(Text, nullable=True)   # JSON: 7 axes /10 + overall
+    overall_score       = Column(Float, nullable=True)
+    first_customer_path = Column(Text, nullable=True)
+    status              = Column(String, nullable=False, default="surfaced", index=True)
+    notes               = Column(Text, nullable=True)
+    created_at          = Column(DateTime, default=datetime.utcnow)
+
+    project  = relationship("ResearchProject", back_populates="findings")
+    pipeline = relationship("OpportunityPipeline", back_populates="finding", uselist=False,
+                            cascade="all, delete-orphan")
+
+
+class OpportunityPipeline(Base):
+    """Explicitly promoted opportunities. One entry per finding, staged
+    discovered → researching → validating → building → rejected."""
+    __tablename__ = "opportunity_pipeline"
+
+    id          = Column(Integer, primary_key=True, index=True)
+    finding_id  = Column(Integer, ForeignKey("research_findings.id", ondelete="CASCADE"),
+                         nullable=False, unique=True)
+    stage       = Column(String, nullable=False, default="discovered", index=True)
+    notes       = Column(Text, nullable=True)
+    promoted_at = Column(DateTime, default=datetime.utcnow)
+    updated_at  = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    finding = relationship("ResearchFinding", back_populates="pipeline")
+
+
+class ResearchMemoryNote(Base):
+    """The agent's lesson memory — one lesson per row.
+
+    slug = the note's identity, summary = the one-line summary at the top,
+    content = the markdown body. Upserted by slug so lessons update in place
+    rather than duplicating. DB-backed (not files) because Render disk is ephemeral.
+    """
+    __tablename__ = "research_memory_notes"
+
+    id               = Column(Integer, primary_key=True, index=True)
+    slug             = Column(String, nullable=False, unique=True)
+    summary          = Column(String, nullable=False)
+    content          = Column(Text, nullable=False)
+    times_reinforced = Column(Integer, default=1)
+    created_at       = Column(DateTime, default=datetime.utcnow)
+    updated_at       = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

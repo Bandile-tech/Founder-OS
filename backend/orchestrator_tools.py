@@ -1,7 +1,7 @@
 """
 Phase 6 — Orchestrator tools.
 
-Six tools the orchestrator can call. Every tool takes a live SQLAlchemy ``Session``
+The tools the orchestrator can call. Every tool takes a live SQLAlchemy ``Session``
 plus keyword args and returns ``(result_dict, summary_str)`` where ``summary_str`` is the
 short human line surfaced in the SSE ``tool_result`` event.
 
@@ -378,6 +378,78 @@ def query_cold_archive(db, query: str, limit: int = 5):
 
 
 # ════════════════════════════════════════════════════════════════
+# Tool 9 — run_market_research_agent
+# ═══════════════════════════════════════════════════════════════
+
+def run_market_research_agent(db, objective: str, max_opportunities: int = 3):
+    """Run the Market Intelligence Agent on a research objective.
+
+    SURFACES findings only (status='surfaced'). Never writes to the opportunity
+    pipeline — promotion is a separate explicit action (promote_research_opportunity).
+    Slow tool: multiple LLM calls + source searches (~30-90s).
+    """
+    from market_intel.agent import run_market_research
+
+    result = run_market_research(db, objective, max_opportunities)
+    if result.get("error"):
+        return result, result["error"]
+    n = len(result.get("opportunities", []))
+    summary = (
+        f"{n} opportunit{'y' if n == 1 else 'ies'} surfaced "
+        f"({result.get('rejected_count', 0)} rejected by verifier) — "
+        f"project #{result.get('project_id')}"
+    )
+    return result, summary
+
+
+# ═══════════════════════════════════════════════════════════════
+# Tool 10 — promote_research_opportunity
+# ═══════════════════════════════════════════════════════════════
+
+def promote_research_opportunity(db, finding_id: int, notes: str = None):
+    """Promote a surfaced finding into the opportunity pipeline (stage 'discovered').
+
+    ONLY called when the user explicitly instructs a save/promote. This is the
+    single write path into the pipeline. Idempotent: promoting an already-promoted
+    finding is reported, not duplicated.
+    """
+    finding = db.query(models.ResearchFinding).filter(
+        models.ResearchFinding.id == finding_id
+    ).first()
+    if finding is None:
+        return {"error": f"finding {finding_id} not found"}, f"finding {finding_id} not found"
+
+    existing = db.query(models.OpportunityPipeline).filter(
+        models.OpportunityPipeline.finding_id == finding.id
+    ).first()
+    if existing is not None:
+        summary = f"finding {finding.id} already in pipeline (stage {existing.stage})"
+        return {
+            "finding_id": finding.id,
+            "pipeline_id": existing.id,
+            "stage": existing.stage,
+            "already_promoted": True,
+        }, summary
+
+    entry = models.OpportunityPipeline(finding_id=finding.id, stage="discovered", notes=notes)
+    finding.status = "promoted"
+    db.add(entry)
+    db.commit()
+    db.refresh(entry)
+
+    summary = f"finding {finding.id} promoted to pipeline (discovered)"
+    result = {
+        "finding_id": finding.id,
+        "pipeline_id": entry.id,
+        "stage": entry.stage,
+        "problem": finding.problem,
+        "already_promoted": False,
+    }
+    return result, summary
+
+
+# ═══════════════════════════════════════════════════════════════
+
 # Dispatch + JSON tool schemas for the model
 # ════════════════════════════════════════════════════════════════
 
@@ -398,6 +470,16 @@ _TOOL_DISPATCH = {
         db,
         query=a.get("query", ""),
         limit=int(a.get("limit", 5)),
+    ),
+    "run_market_research_agent": lambda db, a: run_market_research_agent(
+        db,
+        objective=a.get("objective", ""),
+        max_opportunities=int(a.get("max_opportunities", 3)),
+    ),
+    "promote_research_opportunity": lambda db, a: promote_research_opportunity(
+        db,
+        finding_id=int(a.get("finding_id", 0)),
+        notes=a.get("notes"),
     ),
 }
 
@@ -552,6 +634,63 @@ TOOL_SCHEMAS = [
                     },
                 },
                 "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_market_research_agent",
+            "description": (
+                "Run the Market Intelligence Agent: a multi-role research pipeline "
+                "(planner, parallel researchers, analyst, founder advisor, verifier) that "
+                "investigates a business research objective across web, War Room, and vault "
+                "sources and returns structured, evidence-backed opportunities with scores. "
+                "ONLY call when the user explicitly commands research (e.g. 'research X', "
+                "'find painful problems in Y', 'run market research on Z'). It SURFACES "
+                "findings only — it never saves them to the opportunity pipeline. Slow tool "
+                "(30-90s); never call it speculatively or during normal conversation."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "objective": {
+                        "type": "string",
+                        "description": "The research objective, e.g. 'find painful problems in Zambian SMEs where AI automation could create a valuable business'.",
+                    },
+                    "max_opportunities": {
+                        "type": "integer",
+                        "description": "Maximum opportunities to surface (1-5). Default 3.",
+                    },
+                },
+                "required": ["objective"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "promote_research_opportunity",
+            "description": (
+                "Save a surfaced research finding into the opportunity pipeline (stage "
+                "'discovered'). ONLY call when the user explicitly instructs a save/promote "
+                "with clear language ('save opportunity 12', 'promote that finding', 'add it "
+                "to the pipeline'). NEVER call as a side effect of research, and never on "
+                "your own initiative. Requires the finding id from a prior research result."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "finding_id": {
+                        "type": "integer",
+                        "description": "The id of the research finding to promote.",
+                    },
+                    "notes": {
+                        "type": "string",
+                        "description": "Optional note to attach to the pipeline entry.",
+                    },
+                },
+                "required": ["finding_id"],
             },
         },
     },
