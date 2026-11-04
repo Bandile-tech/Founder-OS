@@ -52,9 +52,11 @@ app.add_middleware(
 import usage as _usage
 import change_log as _change_log
 import actions as _actions
+import notes as _notes
 app.include_router(_usage.router)
 app.include_router(_change_log.router)
 app.include_router(_actions.router)
+app.include_router(_notes.router)
 
 # Serve frontend from ../frontend if it exists
 FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend")
@@ -130,6 +132,8 @@ async def startup():
         run_m010(db)        # m010 — chat thread/tool columns, summaries, llm_usage
         from migrations.m011_change_log import run as run_m011
         run_m011(db)        # m011 — change_log, pending_actions, suggestions, notes
+        from migrations.m012_notes_currency_retrieval import run as run_m012
+        run_m012(db)        # m012 — revenue.currency, todos.due_date, embeddings, exam_dates
         _validate_schema(engine)   # raises if any ORM column is absent from the live DB
         _seed_non_negotiables_if_empty(db)
         _verify_seed_integrity(db)
@@ -545,6 +549,7 @@ def create_todo(todo: dict, db: Session = Depends(get_db)):
         done=False,
         category=todo.get("category", "personal"),
         due=todo.get("due", str(date.today())),
+        due_date=_due_date_from(todo.get("due", str(date.today()))),
         source=todo.get("source", "manual"),
         roadmap_id=todo.get("roadmapId")
     )
@@ -1155,6 +1160,95 @@ def delete_lift_log(log_id: int, db: Session = Depends(get_db)):
 
 
 # ── SHARED PARSE-APPLICATION HELPER ─────────────────────────
+# ── CURRENCY ─────────────────────────────────────────────────
+DEFAULT_ZMW_PER_USD = 27.0
+
+
+def _zmw_per_usd() -> float:
+    """Kwacha per dollar for the $10K scoreboard. Set ZMW_PER_USD on Render."""
+    try:
+        v = float(os.getenv("ZMW_PER_USD", DEFAULT_ZMW_PER_USD))
+        return v if v > 0 else DEFAULT_ZMW_PER_USD
+    except ValueError:
+        return DEFAULT_ZMW_PER_USD
+
+
+def _to_usd(amount: float, currency: str | None) -> float:
+    cur = (currency or "USD").upper()
+    if cur in ("ZMW", "K", "KWACHA"):
+        return float(amount) / _zmw_per_usd()
+    return float(amount)
+
+
+def _revenue_usd_total(db: Session, since: date | None = None) -> float:
+    q = db.query(Revenue)
+    if since is not None:
+        q = q.filter(Revenue.date >= since)
+    return round(sum(_to_usd(r.amount, r.currency) for r in q.all()), 2)
+
+
+def _normalise_currency(value) -> str:
+    v = (str(value or "USD")).strip().upper()
+    if v in ("K", "ZMW", "KWACHA", "ZK"):
+        return "ZMW"
+    if v in ("$", "USD", "DOLLAR", "DOLLARS", "US$"):
+        return "USD"
+    return v[:3] if v else "USD"
+
+
+# ── DUE DATES ────────────────────────────────────────────────
+def _due_date_from(value) -> date | None:
+    from migrations.m012_notes_currency_retrieval import parse_due
+    return parse_due(value)
+
+
+# ── TODO FUZZY MATCHING ──────────────────────────────────────
+_COMPLETE_STRIP = {
+    "finished", "finish", "finishing", "completed", "complete", "done", "did", "do",
+    "the", "my", "a", "an", "that", "this", "with", "off", "up", "task", "todo", "today",
+}
+
+
+def _todo_words(text: str) -> set[str]:
+    import re as _re
+    return {w for w in _re.findall(r"[a-z0-9]+", (text or "").lower()) if len(w) > 1 and w not in _COMPLETE_STRIP}
+
+
+def match_open_todos(db: Session, fragment: str, min_score: float = 0.5) -> list[tuple[float, "models.Todo"]]:
+    """Score open todos against a free-text fragment. Highest first."""
+    import difflib
+    frag = " ".join(sorted(_todo_words(fragment)))
+    fw = _todo_words(fragment)
+    if not fw:
+        return []
+    scored = []
+    for t in db.query(models.Todo).filter(models.Todo.done == False).all():
+        tw = _todo_words(t.text)
+        if not tw:
+            continue
+        overlap = len(fw & tw) / min(len(fw), len(tw))
+        ratio = difflib.SequenceMatcher(None, frag, " ".join(sorted(tw))).ratio()
+        tl, fl = (t.text or "").lower(), (fragment or "").lower().strip()
+        contain = 1.0 if (fl and (fl in tl or tl in fl)) else 0.0
+        score = max(overlap * 0.9, ratio, contain)
+        if score >= min_score:
+            scored.append((round(score, 3), t))
+    scored.sort(key=lambda x: (x[0], -(x[1].id)), reverse=True)
+    return scored
+
+
+def resolve_todo_completion(db: Session, fragment: str):
+    """(todo, candidates). ``todo`` is set when exactly one open task clearly matches;
+    otherwise ``candidates`` lists the plausible ones (empty when nothing matches)."""
+    scored = match_open_todos(db, fragment)
+    if not scored:
+        return None, []
+    top, second = scored[0][0], (scored[1][0] if len(scored) > 1 else 0.0)
+    if top >= 0.75 and (top - second) >= 0.2:
+        return scored[0][1], []
+    return None, scored[:3]
+
+
 def _intent_confidence_min() -> float:
     try:
         return float(os.getenv("INTENT_CONFIDENCE_MIN", "0.7"))
@@ -1316,6 +1410,10 @@ def _apply_parse_updates_inner(db: Session, parsed: dict, today: date) -> dict:
             result["reading_updates_applied"].append(book.title)
         else:
             result["reading_match_failures"].append(frag)
+        progress = (u.get("progress") or "").strip()
+        if progress:
+            note = notes_mod.book_entry(db, book.title if book else u.get("title_fragment", "").strip(), progress, on=today)
+            result.setdefault("reading_notes_appended", []).append(note.title)
 
     # ── Bible log entries ─────────────────────────────────────
     for bl in parsed.get("bible_log") or []:
@@ -1327,6 +1425,7 @@ def _apply_parse_updates_inner(db: Session, parsed: dict, today: date) -> dict:
         db.add(entry)
         change_log.record_create(db, entry, f"Bible: {book_name} {chapter}")
         result["bible_log_entries_created"] += 1
+        notes_mod.bible_entry(db, book_name, int(chapter), bl.get("notes"), on=today)
         # Advance matching active ReadingPlan if current_book matches
         plan = db.query(ReadingPlan).filter(
             ReadingPlan.is_active == True,
@@ -1368,11 +1467,13 @@ def _apply_parse_updates_inner(db: Session, parsed: dict, today: date) -> dict:
             notes_mod.inbox_add(db, text, on=today)
             result["ideas_inboxed"].append(text)
             continue
+        due_raw = t.get("due") or str(today)
         todo = models.Todo(
             text=text,
             priority=t.get("priority", 5),
             category=t.get("category", "personal"),
-            due=t.get("due") or str(today),
+            due=str(due_raw),
+            due_date=_due_date_from(due_raw),
             source="ai",
             roadmap_id=t.get("roadmap_id") or t.get("roadmapId"),
         )
@@ -1388,15 +1489,41 @@ def _apply_parse_updates_inner(db: Session, parsed: dict, today: date) -> dict:
             notes_mod.inbox_add(db, text, on=today)
             result["ideas_inboxed"].append(text)
 
-    # ── Todo completions by id (fuzzy text matching lives in Stage 3) ──
+    # ── Todo completions ──────────────────────────────────────
+    def _complete(todo):
+        if todo.done:
+            return
+        before = change_log.snapshot(todo)
+        todo.done = True
+        todo.completed_at = today
+        change_log.record_update(db, todo, before, f"Completed task: {todo.text[:80]}")
+        result["todos_completed"].append({"id": todo.id, "text": todo.text})
+
     for todo_id in parsed.get("todos_complete_ids") or []:
         todo = db.query(models.Todo).filter(models.Todo.id == int(todo_id)).first()
-        if todo and not todo.done:
-            before = change_log.snapshot(todo)
-            todo.done = True
-            todo.completed_at = today
-            change_log.record_update(db, todo, before, f"Completed task: {todo.text[:80]}")
-            result["todos_completed"].append({"id": todo.id, "text": todo.text})
+        if todo:
+            _complete(todo)
+
+    # Free-text fragments: one clear match completes; ambiguity becomes suggestions.
+    result["todos_complete_unmatched"] = []
+    for frag in parsed.get("todos_complete") or []:
+        frag = (frag or "").strip()
+        if not frag:
+            continue
+        todo, candidates = resolve_todo_completion(db, frag)
+        if todo is not None:
+            _complete(todo)
+        elif candidates:
+            for score, cand in candidates:
+                result["suggestions"].append(actions.add_suggestion(
+                    db, "todo_complete",
+                    {"todo_id": cand.id, "text": cand.text, "fragment": frag, "score": score},
+                    confidence=score,
+                    reason=f"'{frag}' could mean this task — tap to complete it",
+                    source_text=source_text,
+                ))
+        else:
+            result["todos_complete_unmatched"].append(frag)
 
     # ── Revenue updates ───────────────────────────────────────
     for ru in parsed.get("revenue_updates") or []:
@@ -1412,16 +1539,18 @@ def _apply_parse_updates_inner(db: Session, parsed: dict, today: date) -> dict:
             ).first()
             if matched:
                 client_id = matched.id
+        currency = _normalise_currency(ru.get("currency"))
         rev = Revenue(
             amount=float(amount),
+            currency=currency,
             source=source,
             client_id=client_id,
             date=today,
             notes="auto-logged via brain dump",
         )
         db.add(rev)
-        change_log.record_create(db, rev, f"Revenue {float(amount):g} from {source or 'unknown'}")
-        result["revenue_logged"].append({"amount": float(amount), "source": source})
+        change_log.record_create(db, rev, f"Revenue {currency} {float(amount):g} from {source or 'unknown'}")
+        result["revenue_logged"].append({"amount": float(amount), "currency": currency, "source": source})
 
     # ── DailyLog entry ────────────────────────────────────────
     if parsed.get("log_entry"):
@@ -1481,99 +1610,7 @@ def _apply_parse_updates_inner(db: Session, parsed: dict, today: date) -> dict:
             logs_created.append({"lift": lift.name, "weight_kg": float(weight), "reps": int(reps)})
         result["lift_logs_created"] = logs_created
 
-    # ── Trade logs from brain dump ────────────────────────────
-    if parsed.get("trade_logs"):
-        trades_created = []
-        trades_blocked = []
-        trades_with_defaulted_r = []
-        gate = None   # lazy-compute once if a live trade is attempted
-
-        for entry in parsed["trade_logs"]:
-            trade_type = (entry.get("type") or "backtest").lower()
-            pair = entry.get("pair") or "EURUSD"
-            direction = entry.get("direction") or "long"
-            r_multiple = entry.get("r_multiple")
-            outcome = entry.get("outcome") or "loss"
-            adherence = entry.get("adherence")
-            if adherence is None:
-                adherence = True
-            entry_reason = entry.get("entry_reason")
-            rule_broken = bool(entry.get("rule_broken"))
-            rule_broken_desc = entry.get("rule_broken_description")
-
-            # r_multiple missing → default to 1.0 and surface to user (never silently drop)
-            if r_multiple is None:
-                r_multiple = 1.0
-                trades_with_defaulted_r.append({
-                    "type": trade_type,
-                    "pair": pair,
-                    "note": "r_multiple not provided, defaulted to 1.0",
-                })
-
-            if trade_type == "backtest":
-                bt = BacktestTrade(
-                    date=today, pair=pair, direction=direction,
-                    entry_reason=entry_reason,
-                    r_multiple=float(r_multiple),
-                    rule_adherence=bool(adherence),
-                    outcome=outcome,
-                )
-                db.add(bt)
-                change_log.record_create(db, bt, f"Backtest {pair} {direction} {float(r_multiple):+g}R")
-                trades_created.append({"type": "backtest", "pair": pair, "r_multiple": r_multiple})
-
-            elif trade_type == "live":
-                # Gate check — compute once per parse call
-                if gate is None:
-                    gate = _compute_gate(db)
-                if gate["status"] == "LOCKED":
-                    trades_blocked.append({
-                        "type": "live", "pair": pair,
-                        "reason": "Gate LOCKED",
-                        "gate": gate,
-                    })
-                    continue
-
-                # Match account by name (case-insensitive)
-                account_name = entry.get("account_name") or ""
-                account_id = None
-                if account_name:
-                    acct = db.query(PropFirmAccount).filter(
-                        PropFirmAccount.name.ilike(f"%{account_name}%")
-                    ).first()
-                    if acct:
-                        account_id = acct.id
-
-                lt = LiveTrade(
-                    date=today, pair=pair, direction=direction,
-                    entry_reason=entry_reason,
-                    r_multiple=float(r_multiple),
-                    rule_adherence=bool(adherence),
-                    outcome=outcome,
-                    account_id=account_id,
-                    risk_pct=entry.get("risk_pct"),
-                    net_pl_usd=entry.get("net_pl_usd"),
-                    rule_broken=rule_broken,
-                    rule_broken_description=rule_broken_desc if rule_broken else None,
-                )
-                db.add(lt)
-                change_log.record_create(db, lt, f"Live trade {pair} {direction} {float(r_multiple):+g}R")
-                trades_created.append({
-                    "type": "live", "pair": pair, "r_multiple": r_multiple,
-                    "account_id": account_id,
-                    "account_matched": account_id is not None,
-                })
-
-        result["trades_created"] = trades_created
-        if trades_with_defaulted_r:
-            result["trades_with_defaulted_r"] = trades_with_defaulted_r
-        if trades_blocked:
-            result["trades_blocked"] = trades_blocked
-            result["gate_locked_warning"] = (
-                f"GATE LOCKED: {len(trades_blocked)} live trade(s) were NOT logged. "
-                f"Complete {gate['missing']['trades']} more backtests and close the "
-                f"{gate['missing']['adherence_pct_gap']}% adherence gap to unlock live trading."
-            )
+    # Trading is no longer tracked by the parser; any trade_logs key is ignored.
 
     return result
 
@@ -2447,22 +2484,30 @@ def delete_client(client_id: int, db: Session = Depends(get_db)):
 @app.get("/revenue")
 def get_revenue(db: Session = Depends(get_db)):
     records = db.query(Revenue).order_by(Revenue.date.desc()).all()
-    total = sum(r.amount for r in records)
+    by_currency: dict = {}
+    for r in records:
+        cur = (r.currency or "USD").upper()
+        by_currency[cur] = round(by_currency.get(cur, 0.0) + r.amount, 2)
     return {
-        "total": total,
-        "records": [{"id": r.id, "amount": r.amount, "source": r.source,
-                     "client_id": r.client_id, "date": str(r.date), "notes": r.notes}
+        "total": sum(r.amount for r in records),          # legacy: raw sum across currencies
+        "total_usd": round(sum(_to_usd(r.amount, r.currency) for r in records), 2),
+        "by_currency": by_currency,
+        "zmw_per_usd": _zmw_per_usd(),
+        "records": [{"id": r.id, "amount": r.amount, "currency": (r.currency or "USD").upper(),
+                     "source": r.source, "client_id": r.client_id, "date": str(r.date), "notes": r.notes}
                     for r in records]
     }
 
 
 @app.post("/revenue")
 def add_revenue(payload: schemas.RevenueCreate, db: Session = Depends(get_db)):
-    record = Revenue(**payload.dict())
+    data = payload.dict()
+    data["currency"] = _normalise_currency(data.get("currency"))
+    record = Revenue(**data)
     db.add(record)
     db.commit()
     db.refresh(record)
-    return {"id": record.id, "amount": record.amount}
+    return {"id": record.id, "amount": record.amount, "currency": record.currency}
 
 
 @app.delete("/revenue/{revenue_id}")
@@ -2764,9 +2809,7 @@ def ten_k_scoreboard(db: Session = Depends(get_db)):
     target_date = date(2026, 9, 30)
     days_remaining = max(0, (target_date - date.today()).days)
 
-    ai_revenue = db.query(func.sum(Revenue.amount)).filter(
-        Revenue.date >= TEN_K_START_DATE
-    ).scalar() or 0.0
+    ai_revenue = _revenue_usd_total(db, since=TEN_K_START_DATE)   # ZMW converted via ZMW_PER_USD
 
     trading_pl = db.query(func.sum(LiveTrade.net_pl_usd)).filter(
         LiveTrade.date >= TEN_K_START_DATE,
@@ -2787,9 +2830,10 @@ def ten_k_scoreboard(db: Session = Depends(get_db)):
         m_start, m_end = date(yr, mo, 1), date(yr, mo, last_day)
         label = f"{yr}-{mo:02d}"
 
-        ai_mo = float(db.query(func.sum(Revenue.amount)).filter(
-            Revenue.date >= m_start, Revenue.date <= m_end
-        ).scalar() or 0)
+        ai_mo = float(sum(
+            _to_usd(r.amount, r.currency) for r in
+            db.query(Revenue).filter(Revenue.date >= m_start, Revenue.date <= m_end).all()
+        ))
         tr_mo = float(db.query(func.sum(LiveTrade.net_pl_usd)).filter(
             LiveTrade.date >= m_start, LiveTrade.date <= m_end,
             LiveTrade.net_pl_usd.isnot(None),
@@ -2809,6 +2853,7 @@ def ten_k_scoreboard(db: Session = Depends(get_db)):
         "total_progress_usd": total,
         "ai_revenue_usd": round(float(ai_revenue), 2),
         "trading_pl_usd": round(float(trading_pl), 2),
+        "zmw_per_usd": _zmw_per_usd(),
         "monthly_breakdown": breakdown,
     }
 

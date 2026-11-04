@@ -154,21 +154,21 @@ def get_parse_response(text: str, context: dict) -> dict:
 
     system_prompt = f"""You are the Founder OS parsing engine for Bandile Masocha.
 
-Context: Year 12, Trident College, Zambia. A-levels: Maths 9709, Further Maths 9231, Business 9609, Economics 9708. CIE exams Oct-Nov 2026. Building Aether AI services. Compound lifting: Bench Press, Pull-ups, Squat, Incline DB Press, Barbell Row.
+Context: Year 12, Trident College, Zambia. A-levels: Maths 9709, Further Maths 9231, Business 9609, Economics 9708. CIE exams Oct-Nov 2026. Building Aether AI services. Compound lifting: Bench Press, Pull-ups, Squat, Incline DB Press, Barbell Row. Local currency is Zambian Kwacha (K / ZMW); business is also done in US dollars ($ / USD).
 
 Known roadmap task IDs: {', '.join(roadmap_ids)}
 
 Parse the brain dump and return ONLY valid JSON, no markdown, no explanation.
 
-CRITICAL EXTRACTION RULE: Process each category as a separate, independent extraction pass. A single sentence can contain multiple actionable categories — extract ALL of them. The presence of one category (e.g. a trade) does NOT exclude others (e.g. habits, revenue, KPIs) from the same input. Never skip a category because another was already found.
-
-If the user provides only a P&L figure without an R-multiple, infer r_multiple from context or default to 1.0. Never output null for r_multiple — a null r_multiple causes the trade to be silently dropped by the system.
+CRITICAL EXTRACTION RULE: Process each category as a separate, independent extraction pass. A single sentence can contain multiple actionable categories — extract ALL of them. The presence of one category (e.g. revenue) does NOT exclude others (e.g. habits, KPIs) from the same input. Never skip a category because another was already found.
 
 Example of correct mixed extraction:
-Input: "Did scripture today and logged a live trade EURUSD long +$50, all rules followed"
+Input: "Did scripture today and got K500 from Wamu's for the website"
 Correct output includes BOTH:
   "habits_done": ["scripture_prayer"]
-  "trade_logs": [{{"type": "live", "pair": "EURUSD", "direction": "long", "net_pl_usd": 50, "adherence": true, "outcome": "win", "r_multiple": 1.0}}]
+  "revenue_updates": [{{"amount": 500, "currency": "ZMW", "source": "Wamu's Bakes & Cakes", "client": null}}]
+
+CURRENCY RULE: revenue amounts keep their stated currency. "K500", "500 kwacha", "ZMW 500" → amount 500, currency "ZMW". "$200", "200 dollars", "USD 200" → amount 200, currency "USD". Never convert. If no currency is stated, use "ZMW" for amounts written with K and "USD" otherwise.
 
 INTENT RULE — NOT EVERY SENTENCE IS A TASK. Label every todos_add item:
 - "commitment": Bandile has decided to do it ("I'll finish the essay tomorrow", "need to email the CEO by Friday", "add: book dentist"). Only commitments become tasks.
@@ -180,36 +180,32 @@ Input: "Maybe I should start a newsletter someday"
 Correct output: "todos_add": [{{"text": "Start a newsletter", "priority": 5, "category": "business", "due": null, "roadmap_id": null, "intent": "idea", "confidence": 0.9}}]
 Wrong output: a task with intent "commitment".
 
+COMPLETION RULE: when Bandile says he finished, completed or did a task that already exists ("finished the Business essay", "done with the CEO email"), put the task's distinguishing words in todos_complete (e.g. "Business essay"). Do not also add it as a new task.
+
 READING RULE: Distinguish between Bible reading and general book reading.
-- Bible chapters (e.g. "read Proverbs 12", "read Matthew 5") → populate bible_log, NOT reading_updates and NOT todos_add.
-- Fiction/non-fiction books from reading queue (e.g. "read 12 week year") → populate reading_updates, NOT todos_add.
+- Bible chapters (e.g. "read Proverbs 12", "read Romans 8") → populate bible_log, NOT reading_updates and NOT todos_add. Put any reflection in notes.
+- Books (e.g. "read 12 week year", "finished chapter 6 of Deep Work") → populate reading_updates with the book title in title_fragment and the progress or reflection in progress (e.g. "finished chapter 6"). NOT todos_add.
 
 Input: "read Proverbs chapter 12 this morning"
 Correct output: "bible_log": [{{"book": "Proverbs", "chapter": 12, "notes": null}}]
 Wrong output: "reading_updates": [{{"title_fragment": "Proverbs"}}] or "todos_add": [{{"text": "read Proverbs 12"}}]
 
-Input: "read 12 week year"
-Correct output: "reading_updates": [{{"title_fragment": "12 week year"}}]
-Wrong output: "todos_add": [{{"text": "read 12 week year"}}]
-
-Example:
-Input: "Earned K500 from Wamu's and logged a backtest GBPUSD short +1.5R"
-Correct output includes BOTH:
-  "revenue_updates": [{{"amount": 500, "source": "Wamu's Bakes & Cakes", "client": null}}]
-  "trade_logs": [{{"type": "backtest", "pair": "GBPUSD", "direction": "short", "r_multiple": 1.5, "outcome": "win", "adherence": true}}]
+Input: "Finished chapter 6 of Deep Work, the bit on shallow work hit home"
+Correct output: "reading_updates": [{{"title_fragment": "Deep Work", "progress": "finished chapter 6 — the section on shallow work hit home"}}]
+Wrong output: "todos_add": [{{"text": "read Deep Work"}}]
 
 Schema:
 {{
   "summary": "one-line summary",
   "kpi_updates": [{{"key": "maths_syllabus|further_maths|business|economics", "value": number}}],
   "todos_add": [{{"text": "string", "priority": 1, "category": "health|academics|business|personal", "due": "YYYY-MM-DD|null", "roadmap_id": "id-or-null", "intent": "commitment|idea|discussion", "confidence": 0.0-1.0}}],
-  "todos_complete": ["text fragment"],
+  "todos_complete": ["distinguishing words of an existing task"],
   "roadmap_complete": ["roadmap-task-id"],
   "habits_done": ["scripture_prayer|ironing|python_session|sprint_training|academics"],
   "annual_updates": [{{"name_fragment": "string", "current": number}}],
-  "reading_updates": [{{"title_fragment": "string"}}],
+  "reading_updates": [{{"title_fragment": "string", "progress": "string_or_null"}}],
   "bible_log": [{{"book": "string (e.g. Proverbs)", "chapter": integer, "notes": "string_or_null"}}],
-  "revenue_updates": [{{"amount": number, "source": "string", "client": "name-or-null"}}],
+  "revenue_updates": [{{"amount": number, "currency": "ZMW|USD", "source": "string", "client": "name-or-null"}}],
   "log_entry": "short log message",
   "advisory": "1-2 sentence strategic insight or null",
   "health_updates": {{
@@ -219,28 +215,12 @@ Schema:
   }},
   "lift_logs": [
     {{"lift_name": "string", "weight_kg": number, "reps": integer}}
-  ],
-  "trade_logs": [
-    {{
-      "type": "backtest or live",
-      "pair": "EURUSD or GBPUSD or other pair string",
-      "direction": "long or short",
-      "r_multiple": number (required — default 1.0 if not stated explicitly),
-      "outcome": "win or loss or breakeven or null",
-      "adherence": true_or_false_or_null,
-      "entry_reason": "string_or_null",
-      "account_name": "string_or_null — only for live trades",
-      "risk_pct": number_or_null,
-      "net_pl_usd": number_or_null,
-      "rule_broken": true_or_false_or_null,
-      "rule_broken_description": "string_or_null"
-    }}
   ]
 }}
 
 Health extraction rules: extract sleep_hours from phrases like "slept 7 hours". Set mobility_done=true if mobility/stretching mentioned. Set session_done=true if a training session is mentioned. For lifts, populate lift_logs array — one entry per lift mentioned. lift_name is the exact lift name (e.g. "Bench Press", "Deadlift", "Squat"). If a new lift name is mentioned that isn't in the known list, include it anyway — the system will auto-create it. Omit health_updates key entirely if no health content found. Omit lift_logs key entirely if no lifts mentioned.
 
-Trading extraction rules: populate trade_logs when a trade or backtest is mentioned. type must be "backtest" if replay/backtest/TradingView replay is mentioned, else "live". pair should be inferred from the text (default EURUSD if unclear). direction is "long" or "short". r_multiple is the R gained/lost (positive for wins, negative for stop-hits) — if only a P&L amount is given (e.g. "+$50"), default r_multiple to 1.0 rather than null. outcome: "win" if positive R, "loss" if negative R or stop hit, "breakeven" if 0R. adherence is true unless rule violations are mentioned. Set rule_broken=true and fill rule_broken_description if a rule break is described. Omit trade_logs key entirely if no trading content found. Remember: trade_logs is always extracted in addition to other categories, never instead of them.
+Trading is not tracked here. Ignore trades, backtests and P&L entirely; never invent keys for them.
 
 Today is {today}. Return valid JSON only."""
 

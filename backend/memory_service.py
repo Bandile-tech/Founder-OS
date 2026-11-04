@@ -54,6 +54,11 @@ def remember(db: Session, text: str, kind: str = "fact", tags: list[str] | None 
     db.flush()
     import change_log
     change_log.record_create(db, row, f"Remembered ({kind}): {text[:70]}")
+    try:
+        import retrieval
+        retrieval.index_one(db, "memory", row.id, f"{text} {row.tags or ''}")
+    except Exception as exc:  # noqa: BLE001
+        print(f"[memory] embedding skipped: {exc}")
     if commit:
         db.commit()
         db.refresh(row)

@@ -76,14 +76,13 @@ class TestRouteBrainDump:
 
 class TestDashboardState:
 
-    def test_returns_gate_status_field(self):
+    def test_returns_core_fields_without_trading(self):
         db = _db()
         state, summary = ot.get_dashboard_state(db)
         db.close()
-        assert "gate_status" in state
-        assert state["gate_status"] in ("LOCKED", "CLEARED")
+        assert "gate_status" not in state and "gate" not in state   # trading removed
         assert "habits" in state and "done" in state["habits"] and "total" in state["habits"]
-        assert "ten_k_progress" in state
+        assert "ten_k_progress" in state and "todos_overdue" in state
 
 
 class TestDetectOffTrack:
@@ -207,9 +206,9 @@ class TestIntegrationRouting:
         tools = [e["tool"] for e in events if e["type"] == "tool_call"]
         assert "route_brain_dump" not in tools
 
-    def test_gate_locked_refusal_no_db_write(self):
-        # Model refuses outright — no tool calls at all.
-        rounds = [_final_round("The gate is LOCKED. I can't log a live trade.")]
+    def test_trade_talk_writes_nothing(self):
+        # Trading is no longer tracked: the model answers in prose, no tool calls.
+        rounds = [_final_round("Trading isn't tracked here any more.")]
         with patch("main.get_parse_response") as parse:
             events = _collect(rounds, "log live trade +2R")
         assert not parse.called

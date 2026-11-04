@@ -124,6 +124,13 @@ def sync_vault(db: Session) -> dict:
 
     counts = index_vault(db)
     counts["errors"] = errors
+    # Meaning-based search: embed only chunks whose text is new or changed.
+    try:
+        import retrieval
+        counts["embeddings"] = retrieval.index_vault(db)
+    except Exception as exc:  # noqa: BLE001 — embedding problems never fail a sync
+        print(f"[vault_sync] embedding skipped: {redact_credentials(exc)}")
+        counts["embeddings"] = {"error": redact_credentials(exc)}
     return counts
 
 
@@ -198,9 +205,40 @@ def index_vault(db: Session) -> dict:
 # ── SEARCH ───────────────────────────────────────────────────
 
 def search_vault(query: str, db: Session, limit: int = 8) -> list:
-    """Case-insensitive keyword search. Title matches returned first."""
+    """Meaning-based search when embeddings are available (API key set and chunks
+    embedded), otherwise case-insensitive keyword search with title matches first."""
     if not query or len(query) < 2:
         return []
+
+    semantic = search_vault_semantic(query, db, limit)
+    if semantic:
+        return semantic
+    return search_vault_keyword(query, db, limit)
+
+
+def search_vault_semantic(query: str, db: Session, limit: int = 8) -> list | None:
+    """Cosine-ranked chunks, or None when embeddings are unavailable / nothing is indexed."""
+    try:
+        import retrieval
+        hits = retrieval.search(db, query, source_types=["vault"], limit=limit)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[vault_sync] semantic search failed: {redact_credentials(exc)}")
+        return None
+    if not hits:
+        return None
+    ids = [h["source_id"] for h in hits]
+    rows = {c.id: c for c in db.query(models.ColdArchiveChunk).filter(models.ColdArchiveChunk.id.in_(ids)).all()}
+    out = []
+    for h in hits:
+        c = rows.get(h["source_id"])
+        if c is not None:
+            out.append({"file_path": c.file_path, "file_title": c.file_title, "content": c.content,
+                        "chunk_index": c.chunk_index, "score": h["score"]})
+    return out or None
+
+
+def search_vault_keyword(query: str, db: Session, limit: int = 8) -> list:
+    """Case-insensitive keyword search. Title matches returned first."""
 
     from database import engine as _engine
     dialect = _engine.dialect.name

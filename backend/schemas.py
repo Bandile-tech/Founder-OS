@@ -228,6 +228,7 @@ class ClientUpdate(BaseModel):
 
 class RevenueCreate(BaseModel):
     amount: float
+    currency: str = "USD"
     source: str = ""
     client_id: Optional[int] = None
     date: date

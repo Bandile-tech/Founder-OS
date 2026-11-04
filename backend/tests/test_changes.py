@@ -69,7 +69,7 @@ class TestParseRevenueUpdates:
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "ok"
-        assert data["revenue_logged"] == [{"amount": 150.0, "source": "Wamu Bakes website"}]
+        assert data["revenue_logged"] == [{"amount": 150.0, "currency": "USD", "source": "Wamu Bakes website"}]
 
         db = _db()
         rows = db.query(models.Revenue).all()

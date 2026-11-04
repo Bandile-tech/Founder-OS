@@ -138,7 +138,8 @@ class Todo(Base):
     priority = Column(Integer, default=5)
     done = Column(Boolean, default=False)
     category = Column(String)
-    due = Column(String)
+    due = Column(String)                      # legacy free-text due; kept for compatibility
+    due_date = Column(Date, nullable=True)    # real date — overdue is computed server-side from this
     source = Column(String)
     roadmap_id = Column(String, nullable=True)
     completed_at = Column(Date, nullable=True)
@@ -259,6 +260,7 @@ class Revenue(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     amount = Column(Float, nullable=False)
+    currency = Column(String, default="USD")   # USD | ZMW
     source = Column(String, default="")
     client_id = Column(Integer, ForeignKey("clients.id"), nullable=True)
     date = Column(Date, nullable=False)
@@ -691,3 +693,32 @@ class Note(Base):
     tags       = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class Embedding(Base):
+    """Shared vector store for meaning-based retrieval across the vault, notes and
+    long-term memory. Vectors are JSON in a TEXT column; similarity is computed in
+    Python (the corpus is small; no pgvector). Keyed by content hash so re-indexing
+    unchanged text never re-embeds it."""
+    __tablename__ = "embeddings"
+
+    id           = Column(Integer, primary_key=True, index=True)
+    source_type  = Column(String, nullable=False, index=True)   # vault | note | memory
+    source_id    = Column(Integer, nullable=False)
+    chunk_index  = Column(Integer, default=0)
+    content_hash = Column(String, nullable=False, index=True)
+    model        = Column(String, nullable=False)
+    vector_json  = Column(Text, nullable=False)
+    updated_at   = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ExamDate(Base):
+    """Exam dates per subject paper. ``paper`` NULL means the whole subject; a
+    paper-level row wins over the subject-level row, which wins over Subject.exam_date."""
+    __tablename__ = "exam_dates"
+
+    id           = Column(Integer, primary_key=True, index=True)
+    subject_code = Column(String, nullable=False)
+    paper        = Column(String, nullable=True)
+    exam_date    = Column(Date, nullable=False)
+    updated_at   = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

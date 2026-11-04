@@ -48,9 +48,10 @@ def route_brain_dump(db, text: str):
         "summary": summary,
         "advisory": parsed.get("advisory"),
         "updates": updates,
+        "changes": updates.get("changes", []),
     }
-    if updates.get("gate_locked_warning"):
-        result["gate_locked_warning"] = updates["gate_locked_warning"]
+    if updates.get("suggestions"):
+        result["suggestions_pending"] = len(updates["suggestions"])
     return result, summary
 
 
@@ -59,47 +60,41 @@ def route_brain_dump(db, text: str):
 # ════════════════════════════════════════════════════════════════
 
 def get_dashboard_state(db):
-    """Live snapshot: KPIs, habits done/total, active todos, gate status, 10K progress,
-    weakest subject."""
+    """Live snapshot: KPIs, habits done/total, active todos, overdue count, 10K progress,
+    weakest subject, upcoming exams."""
     import main
+    import syllabus
 
     today = date.today()
-    gate = main._compute_gate(db)
-
     habits = db.query(models.Habit).filter(models.Habit.date == today).all()
     habits_done = sum(1 for h in habits if h.done)
-    todos_active = db.query(models.Todo).filter(models.Todo.done == False).count()
+    open_todos = db.query(models.Todo).filter(models.Todo.done == False).all()
+    overdue = sum(1 for t in open_todos if t.due_date and t.due_date < today)
 
-    ai_revenue = float(db.query(func.sum(models.Revenue.amount)).filter(
-        models.Revenue.date >= TEN_K_START_DATE
-    ).scalar() or 0.0)
-    trading_pl = float(db.query(func.sum(models.LiveTrade.net_pl_usd)).filter(
-        models.LiveTrade.date >= TEN_K_START_DATE,
-        models.LiveTrade.net_pl_usd.isnot(None),
-    ).scalar() or 0.0)
-    ten_k_total = round(ai_revenue + trading_pl, 2)
+    ai_revenue = main._revenue_usd_total(db, since=TEN_K_START_DATE)
 
     weakest, _ = surface_weakest_subtopic(db, limit=1)
     weak_list = weakest.get("subtopics", [])
     weakest_subject = weak_list[0]["subject_name"] if weak_list else None
 
+    exams = [e for e in syllabus.upcoming_exams(db, today) if e["days_away"] >= 0][:4]
+
     state = {
         "kpis": {k: v.get("value") for k, v in main._kpi_state.items()},
         "habits": {"done": habits_done, "total": len(habits)},
-        "todos_active": todos_active,
-        "gate_status": gate["status"],
-        "gate": gate,
+        "todos_active": len(open_todos),
+        "todos_overdue": overdue,
         "ten_k_progress": {
             "target_usd": 10000,
-            "total_progress_usd": ten_k_total,
-            "ai_revenue_usd": round(ai_revenue, 2),
-            "trading_pl_usd": round(trading_pl, 2),
+            "total_progress_usd": ai_revenue,
+            "ai_revenue_usd": ai_revenue,
         },
         "weakest_subject": weakest_subject,
+        "upcoming_exams": exams,
     }
     summary = (
-        f"gate {gate['status']}, habits {habits_done}/{len(habits)}, "
-        f"{todos_active} active todos, 10K at ${ten_k_total}"
+        f"habits {habits_done}/{len(habits)}, {len(open_todos)} active todos "
+        f"({overdue} overdue), 10K at ${ai_revenue}"
     )
     return state, summary
 
@@ -155,19 +150,6 @@ def _check_annual_target_status(db, params) -> bool:
     return False
 
 
-def _check_backtest_stalled(db, params) -> bool:
-    import main
-    gate = main._compute_gate(db)
-    if gate["status"] != "LOCKED":
-        return False
-    window = int(params.get("window_days", 7))
-    floor = date.today() - timedelta(days=window)
-    recent = db.query(models.BacktestTrade).filter(
-        models.BacktestTrade.date > floor
-    ).count()
-    return recent == 0
-
-
 def _check_zero_mastery_high_weight(db, params) -> bool:
     min_weight = int(params.get("min_weight", 7))
     row = (
@@ -184,7 +166,6 @@ _RULE_CHECKS = {
     "no_revenue_since": _check_no_revenue_since,
     "habit_completion_below": _check_habit_completion_below,
     "annual_target_status": _check_annual_target_status,
-    "backtest_stalled": _check_backtest_stalled,
     "zero_mastery_high_weight": _check_zero_mastery_high_weight,
 }
 
@@ -356,17 +337,15 @@ def add_todos(db, items: list, category: str = "personal", priority: int = 5):
 # ════════════════════════════════════════════════════════════════
 
 def query_cold_archive(db, query: str, limit: int = 5):
-    """Search Bandile's Obsidian vault (cold archive).
-
-    ONLY called when the user explicitly instructs a vault/notes/second-brain search.
-    Never called autonomously.
-    """
-    from vault_sync import search_vault
+    """Search Bandile's Obsidian vault (cold archive) by meaning, falling back to
+    keywords when embeddings are unavailable. Called whenever the vault is relevant."""
+    from vault_sync import search_vault, search_vault_semantic
 
     if not query or len(query) < 2:
         return {"query": query, "results": []}, "query too short"
 
-    raw = search_vault(query, db, limit=limit)
+    semantic = search_vault_semantic(query, db, limit)
+    raw = semantic if semantic else search_vault(query, db, limit=limit)
     results = []
     for r in raw:
         results.append({
@@ -374,10 +353,12 @@ def query_cold_archive(db, query: str, limit: int = 5):
             "file_path": r["file_path"],
             "excerpt": r["content"][:400] + ("…" if len(r["content"]) > 400 else ""),
             "chunk_index": r["chunk_index"],
+            "score": r.get("score"),
         })
 
-    summary = f"{len(results)} vault match(es) for '{query}'"
-    return {"query": query, "results": results}, summary
+    mode = "semantic" if semantic else "keyword"
+    summary = f"{len(results)} vault match(es) for '{query}' ({mode})"
+    return {"query": query, "mode": mode, "results": results}, summary
 
 
 # ════════════════════════════════════════════════════════════════
@@ -491,6 +472,123 @@ def cancel_action(db, pending_id: int):
 
 
 # ═══════════════════════════════════════════════════════════════
+# Tools 15-21 — tasks, notes, deadlines, exam dates
+# ═══════════════════════════════════════════════════════════════
+
+def complete_task(db, query: str | None = None, todo_id: int | None = None):
+    """Complete an open task by id or by fuzzy text. Ambiguity becomes suggestions."""
+    import main
+    import actions
+    import change_log
+
+    if todo_id:
+        todo = db.query(models.Todo).filter(models.Todo.id == int(todo_id)).first()
+        if todo is None:
+            return {"error": f"task {todo_id} not found"}, f"task {todo_id} not found"
+        candidates = []
+    else:
+        todo, candidates = main.resolve_todo_completion(db, query or "")
+
+    if todo is not None:
+        if todo.done:
+            return {"id": todo.id, "text": todo.text, "already_done": True}, f"'{todo.text}' was already done"
+        before = change_log.snapshot(todo)
+        todo.done = True
+        todo.completed_at = date.today()
+        change = change_log.record_update(db, todo, before, f"Completed task: {todo.text[:80]}")
+        db.commit()
+        return {"id": todo.id, "text": todo.text, "completed": True, "change": change}, f"completed '{todo.text}'"
+
+    if candidates:
+        suggestions = [actions.add_suggestion(
+            db, "todo_complete", {"todo_id": c.id, "text": c.text, "fragment": query, "score": score},
+            confidence=score, reason=f"'{query}' could mean this task — tap to complete it",
+            source_text=query, source="assistant",
+        ) for score, c in candidates]
+        db.commit()
+        return ({"completed": False, "ambiguous": True,
+                 "candidates": [{"id": c.id, "text": c.text, "score": sc} for sc, c in candidates],
+                 "suggestions": suggestions},
+                f"{len(candidates)} tasks could match '{query}' — suggestions created")
+    return {"completed": False, "matched": False}, f"no open task matches '{query}'"
+
+
+def notes_search(db, query: str, kind: str | None = None, limit: int = 5):
+    import notes
+    results = notes.search_notes(db, query, kind=kind, limit=limit)
+    return {"query": query, "results": results}, f"{len(results)} note(s) for '{query}'"
+
+
+def notes_read(db, title: str | None = None, note_id: int | None = None):
+    import notes
+    note = None
+    if note_id:
+        note = db.query(models.Note).filter(models.Note.id == int(note_id)).first()
+    elif title:
+        note = notes.find_note_fuzzy(db, title)
+    if note is None:
+        return {"error": f"note not found: {title or note_id}"}, "note not found"
+    return notes.serialize(note), f"read note '{note.title}' ({len(note.body)} chars)"
+
+
+def notes_append(db, title: str, text: str, kind: str = "general", date_str: str | None = None):
+    import notes
+    on = None
+    if date_str:
+        try:
+            on = date.fromisoformat(date_str)
+        except ValueError:
+            on = None
+    note = notes.append_entry(db, title, kind, text, on=on, fuzzy=True)
+    db.commit()
+    return notes.serialize(note, body=False), f"appended to note '{note.title}'"
+
+
+def notes_create(db, title: str, kind: str = "general", body: str = "", tags: list | None = None):
+    import notes
+    existing = notes.find_note(db, title, kind)
+    if existing:
+        return {**notes.serialize(existing, body=False), "already_exists": True}, f"note '{title}' already exists"
+    note = notes.create_note(db, title, kind, body, tags)
+    db.commit()
+    return notes.serialize(note, body=False), f"created note '{note.title}'"
+
+
+def get_deadlines(db, days: int = 14):
+    """Overdue and upcoming tasks (by real due date) plus exams within the window."""
+    import syllabus
+    today = date.today()
+    horizon = today + timedelta(days=int(days))
+    open_todos = db.query(models.Todo).filter(models.Todo.done == False).all()
+
+    def _t(t):
+        return {"id": t.id, "text": t.text, "due": t.due_date.isoformat() if t.due_date else None,
+                "days": (t.due_date - today).days if t.due_date else None,
+                "priority": t.priority, "category": t.category}
+
+    overdue = sorted([_t(t) for t in open_todos if t.due_date and t.due_date < today], key=lambda x: x["due"])
+    due_today = [_t(t) for t in open_todos if t.due_date == today]
+    upcoming = sorted([_t(t) for t in open_todos if t.due_date and today < t.due_date <= horizon], key=lambda x: x["due"])
+    undated = [_t(t) for t in open_todos if not t.due_date]
+    exams = [e for e in syllabus.upcoming_exams(db, today) if 0 <= e["days_away"] <= max(int(days), 60)]
+    result = {"today": today.isoformat(), "window_days": int(days), "overdue": overdue,
+              "due_today": due_today, "upcoming": upcoming, "undated_count": len(undated), "exams": exams}
+    summary = f"{len(overdue)} overdue, {len(due_today)} due today, {len(upcoming)} upcoming, {len(exams)} exam(s) soon"
+    return result, summary
+
+
+def set_exam_date(db, subject: str, date_text: str, paper: str | None = None):
+    import syllabus
+    d = syllabus.parse_date_text(date_text)
+    if d is None:
+        return {"error": f"could not read a date from '{date_text}'"}, "bad date"
+    result = syllabus.set_exam_date(db, subject, d, paper)
+    db.commit()
+    label = f"{result['subject']}{' ' + result['paper'] if result['paper'] else ''}"
+    return result, f"{label} exam set to {result['exam_date']}"
+
+
+# ═══════════════════════════════════════════════════════════════
 
 # Dispatch + JSON tool schemas for the model
 # ════════════════════════════════════════════════════════════════
@@ -534,6 +632,19 @@ _TOOL_DISPATCH = {
     ),
     "confirm_action": lambda db, a: confirm_action(db, int(a.get("pending_id", 0))),
     "cancel_action": lambda db, a: cancel_action(db, int(a.get("pending_id", 0))),
+    "complete_task": lambda db, a: complete_task(db, query=a.get("query"), todo_id=a.get("todo_id")),
+    "notes_search": lambda db, a: notes_search(db, a.get("query", ""), a.get("kind"), int(a.get("limit", 5))),
+    "notes_read": lambda db, a: notes_read(db, title=a.get("title"), note_id=a.get("note_id")),
+    "notes_append": lambda db, a: notes_append(
+        db, title=a.get("title", ""), text=a.get("text", ""), kind=a.get("kind", "general"), date_str=a.get("date"),
+    ),
+    "notes_create": lambda db, a: notes_create(
+        db, title=a.get("title", ""), kind=a.get("kind", "general"), body=a.get("body", ""), tags=a.get("tags"),
+    ),
+    "get_deadlines": lambda db, a: get_deadlines(db, int(a.get("days", 14))),
+    "set_exam_date": lambda db, a: set_exam_date(
+        db, subject=a.get("subject", ""), date_text=a.get("date", ""), paper=a.get("paper"),
+    ),
 }
 
 
@@ -583,8 +694,8 @@ TOOL_SCHEMAS = [
         "function": {
             "name": "get_dashboard_state",
             "description": (
-                "Get a live snapshot: KPIs, habits done/total, active todos, trading gate "
-                "status, 10K progress, and weakest subject."
+                "Get a live snapshot: KPIs, habits done/total, active and overdue todos, "
+                "10K revenue progress, weakest subject and upcoming exams."
             ),
             "parameters": {"type": "object", "properties": {}},
         },
@@ -676,13 +787,11 @@ TOOL_SCHEMAS = [
         "function": {
             "name": "query_cold_archive",
             "description": (
-                "Query the cold archive — Bandile's Obsidian vault containing Apple Notes dumps, "
-                "journal entries, past project documents, and personal archives. ONLY call this "
-                "tool when the user explicitly asks to search their second brain, memory, or vault. "
-                "Trigger phrases: 'look in my vault', 'check my notes', 'search my second brain', "
-                "'do I have anything about X in my archive', 'find in my obsidian'. Do NOT call "
-                "this tool during normal conversation, brain dumps, or when answering questions "
-                "from general knowledge. The vault is cold storage — it is never queried automatically."
+                "Search Bandile's Obsidian vault (Apple Notes exports, journal entries, past "
+                "project documents, personal archives) by meaning. Use it whenever past notes "
+                "could sharpen the answer: when he asks about something he wrote, planned or "
+                "researched before, when a question touches a project or person he has history "
+                "with, or when he asks what he thinks about a topic. Not needed for plain logging."
             ),
             "parameters": {
                 "type": "object",
@@ -843,6 +952,127 @@ TOOL_SCHEMAS = [
                     "pending_id": {"type": "integer"},
                 },
                 "required": ["pending_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "complete_task",
+            "description": (
+                "Mark an existing task done. Pass the distinguishing words of the task "
+                "('Business essay') or its id. One clear match is completed immediately; "
+                "several plausible matches become one-tap suggestions instead."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Words identifying the task."},
+                    "todo_id": {"type": "integer", "description": "Exact task id, if known."},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "notes_search",
+            "description": (
+                "Search Bandile's notes (books, Bible, journal, Inbox ideas, general) by meaning. "
+                "Use when he asks about something he noted, read or jotted down."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "kind": {"type": "string", "enum": ["book", "bible", "journal", "inbox", "general"]},
+                    "limit": {"type": "integer", "description": "Default 5."},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "notes_read",
+            "description": "Read one note in full, by title (fuzzy) or id.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "note_id": {"type": "integer"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "notes_append",
+            "description": (
+                "Append a dated entry to a note, creating the note if it does not exist. Use for "
+                "reflections, reading progress ('finished chapter 6'), journal lines and ideas. "
+                "Title is the book name for kind 'book', 'Bible' for kind 'bible', 'Inbox' for ideas."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "text": {"type": "string"},
+                    "kind": {"type": "string", "enum": ["book", "bible", "journal", "inbox", "general"]},
+                    "date": {"type": "string", "description": "YYYY-MM-DD; defaults to today."},
+                },
+                "required": ["title", "text"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "notes_create",
+            "description": "Create a new note with an optional body and tags.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "kind": {"type": "string", "enum": ["book", "bible", "journal", "inbox", "general"]},
+                    "body": {"type": "string"},
+                    "tags": {"type": "array", "items": {"type": "string"}},
+                },
+                "required": ["title"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_deadlines",
+            "description": "Overdue tasks, tasks due today, tasks due within N days, and upcoming exams.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "days": {"type": "integer", "description": "Look-ahead window in days. Default 14."},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_exam_date",
+            "description": (
+                "Set or correct an exam date from conversation, e.g. 'Further Maths P1 is on 12 May' → "
+                "subject 'Further Maths', paper 'P1', date '12 May'. Omit paper for the whole subject."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "subject": {"type": "string", "description": "Subject name or code (9709, Further Maths, Business…)."},
+                    "date": {"type": "string", "description": "The date as said: '12 May', '2026-05-12'."},
+                    "paper": {"type": "string", "description": "Paper such as P1, S1, P3. Optional."},
+                },
+                "required": ["subject", "date"],
             },
         },
     },
