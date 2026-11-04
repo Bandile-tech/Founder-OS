@@ -252,3 +252,66 @@ anything. RLS enabled on every new table on Postgres (m008 convention).
 - `get_dashboard_state` no longer reports the trading gate; the old UI's dashboard reads the
   `/trading/*` endpoints directly, which are unchanged.
 - The default thread means the frontend's `founderOS_session` id is informational only.
+
+---
+
+## 6. Stage 5 addendum — real-time voice
+
+Committed separately so Stage 4 is never at risk.
+
+### What was built
+- **`POST /voice/realtime/session`** mints a short-lived client secret through OpenAI's
+  `/v1/realtime/client_secrets` (TTL 600 s). The browser never sees the API key. The session
+  config sent upstream carries the orchestrator prompt plus a voice addendum, the **same tool
+  registry** (22 tools, converted to the realtime API's flat tool shape), server VAD with
+  `interrupt_response`, input transcription, and the output voice.
+  Response: `{client_secret:{value, expires_at}, model, voice, voice_session_id, calls_url,
+  silence_timeout_seconds, thread_id}`. 503 with no key; 502 with OpenAI's own message if the
+  session is rejected (e.g. an unknown model id).
+- **`POST /voice/realtime/tool`** `{name, arguments, call_id?, voice_session_id?}` runs one
+  function call through `orchestrator_tools.run_tool` inside a change batch — same change
+  log, same delete-confirmation rules — and persists the assistant tool-call row and the
+  tool-result row into the default thread. Returns `{call_id, name, result, summary, error,
+  changes, output}`; `output` is the JSON string to hand back to the model.
+- **`POST /voice/realtime/transcript`** `{role, text, voice_session_id?, changes?}` saves a
+  transcript line into the default thread (so typed and spoken history are one history).
+- **Frontend**: a `Live` button next to the mic. WebRTC peer connection, mic track with
+  echo cancellation, remote audio element, data channel `oai-events`. Visible states:
+  connecting / listening / thinking / speaking / acting, a running transcript under the
+  command box, barge-in handled by server VAD (`speech_started` drops the partial line and
+  returns to listening), tool calls bridged server-side then `function_call_output` +
+  `response.create`, auto-stop after **2 minutes** of silence, and a Stop button. The old
+  record → transcribe → speak loop on the mic button is untouched as the fallback.
+
+### Env vars
+| Var | Default | Purpose |
+|---|---|---|
+| `REALTIME_MODEL` | `gpt-realtime-mini` | Realtime model id — **see the caveat below** |
+| `REALTIME_VOICE` | `marin` | Output voice |
+| `REALTIME_TRANSCRIBE_MODEL` | `gpt-4o-mini-transcribe` | Input transcription model |
+| `OPENAI_REALTIME_BASE` | `https://api.openai.com/v1/realtime` | Override for proxies |
+
+### Caveat — not verified against OpenAI's docs
+This build environment's network policy blocks `developers.openai.com` and
+`platform.openai.com`, so the spec's instruction to "check the exact model ID in OpenAI's
+docs" could not be carried out from here. Web search results (secondary sources) indicate:
+- `gpt-realtime-mini` exists but is reported deprecated with shutdown on 20 Jan 2027;
+- Azure lists `gpt-realtime-2.1-mini` as the current mini realtime model.
+The default stays on `gpt-realtime-mini`; set `REALTIME_MODEL=gpt-realtime-2.1-mini` on
+Render once you have confirmed it on OpenAI's model page. If the id is wrong, the session
+endpoint returns 502 with OpenAI's message and the UI shows it in a toast — nothing else
+breaks.
+
+The same applies to the GA request/event shapes used (nested `session.audio.input.*`,
+`/v1/realtime/calls` SDP exchange, `response.function_call_arguments.done`,
+`conversation.item.input_audio_transcription.completed`,
+`response.output_audio_transcript.*`). They follow OpenAI's GA Realtime API as documented
+up to mid-2026; the frontend also accepts the older `response.audio_transcript.*` names.
+Expect to do one live smoke test with a real key before relying on it.
+
+### Not done
+- No browser-level automated test of the WebRTC flow (no network, no mic in CI). The suite
+  covers the three endpoints and asserts the frontend wiring.
+- No "choose a voice by ear" UI; `REALTIME_VOICE` is an env var.
+- Tool results from voice are not truncated before being sent back to the model (same
+  as the typed path's live turn; only replay is truncated).

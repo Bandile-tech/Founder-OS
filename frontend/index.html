@@ -559,6 +559,33 @@ input:hover:not(:focus), textarea:hover:not(:focus), select:hover:not(:focus){bo
   color:var(--muted);text-transform:uppercase;margin-top:7px;
   display:none;align-items:center;gap:8px;
 }
+/* LIVE VOICE — WebRTC session button, state chip, running transcript */
+.live-btn{
+  height:40px;padding:0 12px;flex-shrink:0;border-radius:20px;
+  border:1px solid var(--border-hi);background:var(--surface-hi);color:var(--glow);
+  cursor:pointer;font-size:10px;letter-spacing:0.12em;text-transform:uppercase;
+  font-family:var(--font-tech);display:flex;align-items:center;gap:6px;
+  transition:all var(--t-base) var(--ease-spring);
+}
+.live-btn:hover{transform:translateY(-1px);border-color:var(--glow)}
+.live-btn.on{background:var(--danger);border-color:var(--danger);color:#fff;animation:micPulse 1.4s var(--ease-smooth) infinite}
+.live-btn.connecting{opacity:0.6;cursor:wait}
+.live-state{
+  display:inline-flex;align-items:center;gap:6px;padding:2px 8px;border-radius:10px;
+  border:1px solid var(--border-hi);font-size:9.5px;letter-spacing:0.12em;text-transform:uppercase;
+}
+.live-state::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--muted)}
+.live-state.listening::before{background:var(--success);animation:pulse 1.2s infinite}
+.live-state.thinking::before{background:var(--glow);animation:pulse 0.8s infinite}
+.live-state.speaking::before{background:var(--interactive, var(--glow));animation:pulse 0.5s infinite}
+.live-state.acting::before{background:#f5a623;animation:pulse 0.6s infinite}
+.live-transcript{margin-top:8px;max-height:160px;overflow:auto;font-size:11.5px;line-height:1.45;display:none}
+.live-transcript.show{display:block}
+.live-transcript .lt-line{padding:3px 0;border-bottom:1px solid rgba(167,235,242,0.05)}
+.live-transcript .lt-you{color:var(--glow)}
+.live-transcript .lt-os{color:var(--text)}
+.live-transcript .lt-act{color:#f5a623;font-family:var(--font-tech);font-size:10px;letter-spacing:0.06em}
+.live-transcript .lt-partial{opacity:0.6}
 .voice-status.show{display:flex}
 .voice-bars{display:flex;gap:2px;align-items:center;height:12px}
 .voice-bars span{
@@ -2417,7 +2444,8 @@ tr:hover .td-del{opacity:1}
       <input id="ucmd-input" class="cmd-input"
         placeholder="Brain dump, ask anything, or tap the mic… Enter to send"
         onkeydown="ucmdKey(event)">
-      <button class="mic-btn" id="mic-btn" title="Talk to it instead of typing" onclick="toggleVoice()">◉</button>
+      <button class="mic-btn" id="mic-btn" title="Record a message (tap to stop)" onclick="toggleVoice()">◉</button>
+      <button class="live-btn" id="live-btn" title="Live conversation — talk and interrupt naturally" onclick="toggleLiveVoice()">Live</button>
       <button class="btn-parse cmd-send" onclick="submitUnifiedInput()" aria-label="Send">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 8h10.4M9.2 4.3 13 8l-3.8 3.7"/></svg>
       </button>
@@ -2425,7 +2453,9 @@ tr:hover .td-del{opacity:1}
     <div class="voice-status" id="voice-status">
       <div class="voice-bars"><span></span><span></span><span></span><span></span><span></span></div>
       <span id="voice-status-text">Listening…</span>
+      <span class="live-state" id="live-state" style="display:none">idle</span>
     </div>
+    <div class="live-transcript" id="live-transcript"></div>
   </div>
 </div>
 
@@ -6018,6 +6048,180 @@ async function speakText(text){
   }finally{
     _speakInFlight=false;
   }
+}
+
+/* ═══════════════════════════════════════════════════
+   LIVE VOICE — WebRTC realtime session
+   Server mints a short-lived client secret (the API key never reaches the browser);
+   the browser connects directly to OpenAI over WebRTC. Server VAD handles turn-taking
+   and barge-in. Tool calls run server-side through POST /voice/realtime/tool, which
+   reuses the orchestrator tool registry, change log and confirmation rules. The
+   transcript is saved into the same server-side conversation. The session ends after
+   two minutes of silence. The record → transcribe → speak loop above stays as a fallback.
+═══════════════════════════════════════════════════ */
+const LIVE={pc:null,dc:null,stream:null,audio:null,session:null,state:"idle",
+            silenceTimer:null,partial:"",partialEl:null,pendingChanges:[],lastActivity:0};
+
+function _liveSetState(state,label){
+  LIVE.state=state;
+  const chip=document.getElementById("live-state");
+  const btn=document.getElementById("live-btn");
+  if(chip){chip.className="live-state "+state;chip.textContent=label||state;chip.style.display=state==="idle"?"none":"inline-flex";}
+  if(btn){btn.className="live-btn"+(state==="idle"?"":state==="connecting"?" connecting":" on");btn.textContent=state==="idle"?"Live":state==="connecting"?"…":"Stop";}
+  const status=document.getElementById("voice-status");
+  const statusText=document.getElementById("voice-status-text");
+  if(status)status.className="voice-status"+(state==="idle"?"":" show");
+  if(statusText)statusText.textContent=
+    state==="listening"?"Listening — just talk, interrupt any time"
+   :state==="thinking"?"Thinking…"
+   :state==="speaking"?"Speaking — talk over it to interrupt"
+   :state==="acting"?"Acting…"
+   :state==="connecting"?"Connecting live session…":"";
+}
+
+function _liveLine(kind,text,partial=false){
+  const box=document.getElementById("live-transcript");
+  if(!box)return null;
+  box.classList.add("show");
+  const el=document.createElement("div");
+  el.className="lt-line "+(kind==="you"?"lt-you":kind==="act"?"lt-act":"lt-os")+(partial?" lt-partial":"");
+  el.textContent=(kind==="you"?"You: ":kind==="act"?"› ":"OS: ")+text;
+  box.appendChild(el);
+  box.scrollTop=box.scrollHeight;
+  return el;
+}
+
+function _liveTouch(){
+  LIVE.lastActivity=Date.now();
+  if(LIVE.silenceTimer)clearTimeout(LIVE.silenceTimer);
+  const limit=((LIVE.session&&LIVE.session.silence_timeout_seconds)||120)*1000;
+  LIVE.silenceTimer=setTimeout(()=>{
+    if(LIVE.state!=="idle"){showToast("Live session ended after 2 minutes of silence","info");stopLiveVoice();}
+  },limit);
+}
+
+function _liveSend(event){
+  if(LIVE.dc&&LIVE.dc.readyState==="open")LIVE.dc.send(JSON.stringify(event));
+}
+
+async function _liveSaveTranscript(role,text,changes){
+  try{
+    await fetch(`${API_BASE}/voice/realtime/transcript`,{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({role,text,voice_session_id:LIVE.session?.voice_session_id,changes:changes&&changes.length?changes:null})});
+  }catch(_){}
+}
+
+async function _liveRunTool(call){
+  _liveSetState("acting","acting");
+  _liveTouch();
+  let payload={call_id:call.call_id,name:call.name,result:{error:"tool bridge failed"},output:JSON.stringify({error:"tool bridge failed"}),changes:[]};
+  try{
+    const r=await fetch(`${API_BASE}/voice/realtime/tool`,{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({name:call.name,arguments:call.arguments,call_id:call.call_id,voice_session_id:LIVE.session?.voice_session_id})});
+    if(r.ok)payload=await r.json();
+  }catch(_){}
+  _liveLine("act",`${call.name}: ${payload.summary||payload.result?.error||"done"}`);
+  if(payload.changes&&payload.changes.length)LIVE.pendingChanges.push(...payload.changes);
+  // Hand the result back to the model and let it continue speaking.
+  _liveSend({type:"conversation.item.create",item:{type:"function_call_output",call_id:call.call_id,output:payload.output||JSON.stringify(payload.result)}});
+  _liveSend({type:"response.create"});
+  _liveSetState("thinking","thinking");
+}
+
+function _liveHandleEvent(ev){
+  const t=ev.type||"";
+  if(t==="input_audio_buffer.speech_started"){
+    _liveTouch();
+    // Barge-in: server VAD cancels the response; the remote audio stops on its own.
+    if(LIVE.partialEl){LIVE.partialEl.remove();LIVE.partialEl=null;LIVE.partial="";}
+    _liveSetState("listening","listening");
+  }else if(t==="input_audio_buffer.speech_stopped"){
+    _liveTouch();_liveSetState("thinking","thinking");
+  }else if(t==="conversation.item.input_audio_transcription.completed"){
+    const text=(ev.transcript||"").trim();
+    if(text){_liveLine("you",text);_liveSaveTranscript("user",text);}
+  }else if(t==="response.output_audio_transcript.delta"||t==="response.audio_transcript.delta"){
+    _liveTouch();
+    if(LIVE.state!=="speaking")_liveSetState("speaking","speaking");
+    LIVE.partial+=ev.delta||"";
+    if(!LIVE.partialEl)LIVE.partialEl=_liveLine("os","",true);
+    LIVE.partialEl.textContent="OS: "+LIVE.partial;
+  }else if(t==="response.output_audio_transcript.done"||t==="response.audio_transcript.done"){
+    const text=(ev.transcript||LIVE.partial||"").trim();
+    if(LIVE.partialEl){LIVE.partialEl.classList.remove("lt-partial");LIVE.partialEl.textContent="OS: "+text;LIVE.partialEl=null;}
+    LIVE.partial="";
+    if(text){const ch=LIVE.pendingChanges.splice(0);_liveSaveTranscript("assistant",text,ch);}
+  }else if(t==="response.function_call_arguments.done"){
+    _liveRunTool({call_id:ev.call_id,name:ev.name,arguments:ev.arguments});
+  }else if(t==="response.done"){
+    _liveTouch();
+    if(LIVE.state!=="acting")_liveSetState("listening","listening");
+    // Writes may have landed — refresh panels like the typed path does.
+    if(LIVE.pendingChanges.length===0){try{syncFromBackend();}catch(_){}}
+  }else if(t==="error"){
+    const msg=ev.error?.message||"realtime error";
+    showToast("Live voice: "+msg,"error");
+    _liveLine("act","error: "+msg);
+  }
+}
+
+async function startLiveVoice(){
+  if(LIVE.state!=="idle")return;
+  if(!window.RTCPeerConnection||!navigator.mediaDevices?.getUserMedia){showToast("Live voice needs a WebRTC-capable browser","error");return;}
+  if(_voiceAudio&&!_voiceAudio.paused){_voiceAudio.pause();_voiceAudio=null;_voiceUI("idle");}
+  _liveSetState("connecting","connecting");
+  try{
+    const sr=await fetch(`${API_BASE}/voice/realtime/session`,{method:"POST"});
+    if(!sr.ok){
+      const detail=(await sr.json().catch(()=>({})))?.detail||("HTTP "+sr.status);
+      throw new Error(detail);
+    }
+    LIVE.session=await sr.json();
+    LIVE.stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true}});
+    const pc=new RTCPeerConnection();
+    LIVE.pc=pc;
+    LIVE.audio=LIVE.audio||new Audio();
+    LIVE.audio.autoplay=true;
+    pc.ontrack=e=>{LIVE.audio.srcObject=e.streams[0];};
+    LIVE.stream.getTracks().forEach(tr=>pc.addTrack(tr,LIVE.stream));
+    const dc=pc.createDataChannel("oai-events");
+    LIVE.dc=dc;
+    dc.onmessage=e=>{try{_liveHandleEvent(JSON.parse(e.data));}catch(_){}};
+    dc.onopen=()=>{_liveSetState("listening","listening");_liveTouch();};
+    dc.onclose=()=>{if(LIVE.state!=="idle")stopLiveVoice();};
+    pc.onconnectionstatechange=()=>{if(["failed","disconnected","closed"].includes(pc.connectionState)&&LIVE.state!=="idle")stopLiveVoice();};
+    const offer=await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    const url=`${LIVE.session.calls_url}?model=${encodeURIComponent(LIVE.session.model)}`;
+    const ar=await fetch(url,{method:"POST",body:offer.sdp,
+      headers:{"Authorization":"Bearer "+LIVE.session.client_secret.value,"Content-Type":"application/sdp"}});
+    if(!ar.ok)throw new Error("OpenAI WebRTC handshake failed: HTTP "+ar.status);
+    const answer={type:"answer",sdp:await ar.text()};
+    await pc.setRemoteDescription(answer);
+    const box=document.getElementById("live-transcript");
+    if(box){box.innerHTML="";}
+    _liveLine("act","live session started — "+LIVE.session.model);
+  }catch(e){
+    showToast("Live voice failed: "+e.message,"error");
+    stopLiveVoice();
+  }
+}
+
+function stopLiveVoice(){
+  if(LIVE.silenceTimer){clearTimeout(LIVE.silenceTimer);LIVE.silenceTimer=null;}
+  try{LIVE.dc&&LIVE.dc.close();}catch(_){}
+  try{LIVE.pc&&LIVE.pc.close();}catch(_){}
+  if(LIVE.stream){LIVE.stream.getTracks().forEach(t=>t.stop());}
+  if(LIVE.audio){try{LIVE.audio.srcObject=null;}catch(_){}}
+  LIVE.pc=null;LIVE.dc=null;LIVE.stream=null;LIVE.session=null;LIVE.partial="";LIVE.partialEl=null;
+  const wasLive=LIVE.state!=="idle";
+  _liveSetState("idle");
+  _voiceUI("idle");
+  if(wasLive){_liveLine("act","live session ended");try{syncFromBackend();renderConversationHistory();}catch(_){}}
+}
+
+function toggleLiveVoice(){
+  if(LIVE.state==="idle")startLiveVoice();else stopLiveVoice();
 }
 
 /* ═══════════════════════════════════════════════════

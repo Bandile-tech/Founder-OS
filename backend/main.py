@@ -55,12 +55,14 @@ import actions as _actions
 import notes as _notes
 import syllabus as _syllabus
 import briefing as _briefing
+import voice_realtime as _voice_realtime
 app.include_router(_usage.router)
 app.include_router(_change_log.router)
 app.include_router(_actions.router)
 app.include_router(_notes.router)
 app.include_router(_syllabus.router)
 app.include_router(_briefing.router)
+app.include_router(_voice_realtime.router)
 
 # Serve frontend from ../frontend if it exists
 FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend")
