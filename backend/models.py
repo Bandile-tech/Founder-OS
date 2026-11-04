@@ -60,6 +60,9 @@ class WeeklyTargetSnapshot(Base):
 
 
 class AIMemory(Base):
+    """Long-term memory. Legacy rows hold prompt/response pairs; rows written by the
+    assistant's ``remember`` tool use context_type='memory' with the fact in
+    ``context_data`` and ``kind`` = fact | decision | preference."""
     __tablename__ = "ai_memory"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -68,6 +71,8 @@ class AIMemory(Base):
     context_type = Column(String)
     context_data = Column(Text)
     response = Column(Text)
+    kind = Column(String, nullable=True)
+    tags = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -140,14 +145,48 @@ class Todo(Base):
 
 
 class ChatMessage(Base):
-    """Replaces chat_memory.db — stores per-session chat history in founder_os.db."""
+    """Server-side conversation history. ``thread_id`` is the conversation (one default
+    thread shared across devices); ``session_id`` is the browser id kept for compatibility.
+    Tool-calling turns persist ``tool_calls_json`` on the assistant row and
+    ``tool_call_id`` on the following role='tool' rows."""
     __tablename__ = "chat_messages"
 
     id = Column(Integer, primary_key=True, index=True)
     session_id = Column(String, nullable=False, index=True)
-    role = Column(String, nullable=False)       # "user" | "assistant"
+    thread_id = Column(String, nullable=True, index=True)
+    role = Column(String, nullable=False)       # "user" | "assistant" | "tool"
     content = Column(Text, nullable=False)
+    tool_calls_json = Column(Text, nullable=True)
+    tool_call_id = Column(String, nullable=True)
+    changes_json = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class ConversationSummary(Base):
+    """Rolling summary of the turns that have fallen out of the verbatim history window."""
+    __tablename__ = "conversation_summaries"
+
+    id = Column(Integer, primary_key=True, index=True)
+    thread_id = Column(String, nullable=False, unique=True)
+    summary = Column(Text, nullable=False, default="")
+    covers_through_message_id = Column(Integer, nullable=True)
+    message_count = Column(Integer, default=0)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class LLMUsage(Base):
+    """One row per OpenAI call — feeds GET /usage/summary."""
+    __tablename__ = "llm_usage"
+
+    id = Column(Integer, primary_key=True, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    model = Column(String, nullable=False)
+    purpose = Column(String, nullable=True)
+    input_tokens = Column(Integer, default=0)
+    cached_input_tokens = Column(Integer, default=0)
+    output_tokens = Column(Integer, default=0)
+    estimated_cost_usd = Column(Float, default=0.0)
+    duration_ms = Column(Integer, nullable=True)
 
 
 class BibleEntry(Base):

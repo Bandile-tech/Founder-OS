@@ -1,14 +1,21 @@
 import os
 import re
 import json
-from openai import OpenAI
 from sqlalchemy.orm import Session
 from models import AIMemory
 from dotenv import load_dotenv
 
+import llm
+
 load_dotenv()
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+def __getattr__(name):
+    """Lazy ``client`` attribute for legacy ``from openai_client import client`` callers.
+    The client is only built on first use, so the module imports with no API key."""
+    if name == "client":
+        return llm.get_client()
+    raise AttributeError(name)
 
 SYSTEM_PROMPT = """
 You are Bandile's CEO-level personal AI operating system.
@@ -61,7 +68,7 @@ TTS_VOICE = "onyx"
 
 def transcribe_audio(file_bytes: bytes, filename: str = "audio.webm") -> str:
     """Transcribe recorded audio via OpenAI Whisper. Returns plain text."""
-    result = client.audio.transcriptions.create(
+    result = llm.get_client().audio.transcriptions.create(
         model=STT_MODEL,
         file=(filename, file_bytes),
     )
@@ -70,7 +77,7 @@ def transcribe_audio(file_bytes: bytes, filename: str = "audio.webm") -> str:
 
 def synthesize_speech(text: str) -> bytes:
     """Convert reply text to spoken audio (MP3 bytes) via OpenAI TTS."""
-    response = client.audio.speech.create(
+    response = llm.get_client().audio.speech.create(
         model=TTS_MODEL,
         voice=TTS_VOICE,
         input=text[:4000],
@@ -90,12 +97,7 @@ def clean_ai_output(text: str) -> str:
 
 def get_chat_response(messages: list) -> str:
     full_messages = [{"role": "system", "content": SYSTEM_PROMPT}] + messages
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=full_messages,
-        max_tokens=800
-    )
-    return response.choices[0].message.content
+    return llm.chat_text(full_messages, purpose="chat", max_tokens=800)
 
 
 def get_chat_response_with_memory(
@@ -115,19 +117,18 @@ def get_chat_response_with_memory(
     for m in reversed(recent_memories):
         memory_text += f"\n[Memory @ {m.created_at}]: {m.context_data}\nResponse: {m.response}\n"
 
-    system_prompt = ""
+    # Stable system prompt first (prompt caching), dynamic context second.
+    dynamic = ""
     if instruction_block:
-        system_prompt += f"[Temporary Instruction]\n{instruction_block}\n\n"
-    system_prompt += f"{memory_text}\n{SYSTEM_PROMPT}"
+        dynamic += f"[Temporary Instruction]\n{instruction_block}\n\n"
+    if memory_text:
+        dynamic += f"[Recent memory]{memory_text}"
+    full_messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    if dynamic.strip():
+        full_messages.append({"role": "system", "content": dynamic.strip()})
+    full_messages += messages
 
-    full_messages = [{"role": "system", "content": system_prompt}] + messages
-
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=full_messages,
-        max_tokens=800
-    )
-    raw = response.choices[0].message.content
+    raw = llm.chat_text(full_messages, db=db, purpose="chat", max_tokens=800)
     clean = clean_ai_output(raw)
 
     # Store in memory
@@ -233,32 +234,27 @@ Trading extraction rules: populate trade_logs when a trade or backtest is mentio
 
 Today is {today}. Return valid JSON only."""
 
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
+    raw = llm.chat_text(
+        [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": text}
         ],
-        max_tokens=1000
+        purpose="parse",
+        max_tokens=1000,
     )
-    raw = response.choices[0].message.content
     try:
-        return json.loads(raw.replace("```json", "").replace("```", "").strip())
-    except Exception:
-        return {
-            "summary": "Parse error",
-            "kpi_updates": [],
-            "todos_add": [],
-            "todos_complete": [],
-            "roadmap_complete": [],
-            "habits_done": [],
-            "annual_updates": [],
-            "reading_updates": [],
-            "bible_log": [],
-            "revenue_updates": [],
-            "log_entry": "Brain dump parse failed",
-            "advisory": None
-        }
+        parsed = json.loads(raw.replace("```json", "").replace("```", "").strip())
+    except Exception as exc:
+        # A failed parse must write nothing: surface the failure instead of returning
+        # an empty payload that looks like a successful no-op.
+        raise ParseFailed(f"Parser returned invalid JSON: {exc}") from exc
+    if not isinstance(parsed, dict):
+        raise ParseFailed("Parser returned a non-object payload.")
+    return parsed
+
+
+class ParseFailed(RuntimeError):
+    """The parser did not return usable JSON. Nothing has been written."""
 
 
 def get_proactive_brief(context: dict) -> str:
@@ -269,15 +265,15 @@ Plain text only. No markdown. No flattery. Surgical.
 
 State: {json.dumps(context)}"""
 
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
+    text = llm.chat_text(
+        [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": prompt}
         ],
-        max_tokens=300
+        purpose="proactive_brief",
+        max_tokens=300,
     )
-    return clean_ai_output(response.choices[0].message.content)
+    return clean_ai_output(text)
 
 
 def get_radar_scores(context: dict) -> dict:
@@ -375,7 +371,6 @@ def get_radar_scores(context: dict) -> dict:
 # Phase 6 — Orchestrator (streaming + tool-call loop)
 # ════════════════════════════════════════════════════════════════
 
-import os
 from pathlib import Path
 
 _ORCH_PROMPT_PATH = (
@@ -384,8 +379,8 @@ _ORCH_PROMPT_PATH = (
 
 
 def orchestrator_model() -> str:
-    """The model the orchestrator runs on. Never hardcoded — env-driven."""
-    return os.getenv("ORCHESTRATOR_MODEL", "gpt-5.4")
+    """The model the orchestrator runs on — ``ASSISTANT_MODEL`` (default gpt-5.4-mini)."""
+    return llm.assistant_model()
 
 
 def _load_orchestrator_prompt() -> str:
@@ -405,15 +400,23 @@ def _stream_completion(convo: list, tools: list):
       {"tool_calls": [{"index","id","name","arguments"}...]} — tool-call fragment(s)
       {"finish_reason": "<reason>"}                           — end of this completion
 
+    Usage is requested on the final chunk and logged to llm_usage.
     Tests patch this function to inject canned deltas.
     """
-    stream = client.chat.completions.create(
-        model=orchestrator_model(),
+    import time as _time
+    model = orchestrator_model()
+    started = _time.monotonic()
+    stream = llm.get_client().chat.completions.create(
+        model=model,
         messages=convo,
         tools=tools,
         stream=True,
+        stream_options={"include_usage": True},
     )
+    usage = None
     for chunk in stream:
+        if getattr(chunk, "usage", None):
+            usage = chunk.usage
         if not chunk.choices:
             continue
         choice = chunk.choices[0]
@@ -432,49 +435,87 @@ def _stream_completion(convo: list, tools: list):
             yield {"tool_calls": frags}
         if choice.finish_reason:
             yield {"finish_reason": choice.finish_reason}
+    inp, cached, out = llm.usage_from_response(usage)
+    llm.log_usage(None, model=model, purpose="assistant", input_tokens=inp,
+                  cached_input_tokens=cached, output_tokens=out,
+                  duration_ms=int((_time.monotonic() - started) * 1000))
 
 
-def get_orchestrator_response(messages: list, db, max_rounds: int = 6):
+AI_UNAVAILABLE_REPLY = (
+    "AI is not configured on this server (OPENAI_API_KEY is missing). "
+    "Everything else keeps working; the assistant is offline."
+)
+AI_FAILED_REPLY = "The assistant could not complete that request. Nothing was changed by this turn."
+
+
+def get_orchestrator_response(messages: list, db, max_rounds: int = 6,
+                              on_message=None, context: dict | None = None):
     """Drive the orchestrator: stream tokens, execute tool calls, loop until the model
     produces a final answer with no further tool calls.
+
+    ``messages``   — conversation history (already within the budget) + the new user turn
+    ``on_message`` — optional callback receiving every message appended to the
+                     conversation during this turn (assistant tool-call turns and tool
+                     results) so the caller can persist them
+    ``context``    — optional ``{"message": {...}}`` dynamic context (memory, summary)
+                     inserted after the stable system prompt
 
     Yields event dicts ready for SSE serialization:
       {"type": "reasoning", "content": "..."}
       {"type": "tool_call", "tool": "...", "args": {...}}
-      {"type": "tool_result", "tool": "...", "summary": "..."}
-      {"type": "final", "content": "..."}
+      {"type": "tool_result", "tool": "...", "summary": "...", "error": bool}
+      {"type": "error", "content": "..."}            (only when the model call fails)
+      {"type": "final", "content": "...", "changes": [...]}
     """
     import orchestrator_tools
+    import change_log
 
-    convo = [{"role": "system", "content": _load_orchestrator_prompt()}] + list(messages)
+    convo = [{"role": "system", "content": _load_orchestrator_prompt()}]
+    ctx_msg = (context or {}).get("message")
+    if ctx_msg:
+        convo.append(ctx_msg)
+    convo += list(messages)
     final_text = ""
+
+    def _final(text):
+        return {"type": "final", "content": text, "changes": change_log.current_batch_changes()}
 
     for _ in range(max_rounds):
         content_acc = ""
         # tool-call fragments accumulated by stream index
         calls: dict = {}
 
-        for delta in _stream_completion(convo, orchestrator_tools.TOOL_SCHEMAS):
-            if "content" in delta:
-                content_acc += delta["content"]
-                yield {"type": "reasoning", "content": delta["content"]}
-            if "tool_calls" in delta:
-                for frag in delta["tool_calls"]:
-                    slot = calls.setdefault(
-                        frag.get("index", 0), {"id": "", "name": "", "arguments": ""}
-                    )
-                    if frag.get("id"):
-                        slot["id"] = frag["id"]
-                    if frag.get("name"):
-                        slot["name"] = frag["name"]
-                    if frag.get("arguments"):
-                        slot["arguments"] += frag["arguments"]
-            # finish_reason is informational; loop control is driven by whether we
-            # accumulated any tool calls below.
+        try:
+            for delta in _stream_completion(convo, orchestrator_tools.TOOL_SCHEMAS):
+                if "content" in delta:
+                    content_acc += delta["content"]
+                    yield {"type": "reasoning", "content": delta["content"]}
+                if "tool_calls" in delta:
+                    for frag in delta["tool_calls"]:
+                        slot = calls.setdefault(
+                            frag.get("index", 0), {"id": "", "name": "", "arguments": ""}
+                        )
+                        if frag.get("id"):
+                            slot["id"] = frag["id"]
+                        if frag.get("name"):
+                            slot["name"] = frag["name"]
+                        if frag.get("arguments"):
+                            slot["arguments"] += frag["arguments"]
+                # finish_reason is informational; loop control is driven by whether we
+                # accumulated any tool calls below.
+        except llm.AIUnavailable as exc:
+            yield {"type": "error", "content": str(exc)}
+            yield _final(AI_UNAVAILABLE_REPLY)
+            return
+        except Exception as exc:  # noqa: BLE001 — network / API failure
+            print(f"[orchestrator] model call failed: {type(exc).__name__}: {exc}")
+            yield {"type": "error", "content": f"{type(exc).__name__}: {exc}"}
+            yield _final(content_acc or AI_FAILED_REPLY)
+            return
 
         if not calls:
             final_text = content_acc
-            yield {"type": "final", "content": final_text}
+            yield _final(final_text)
             return
 
         # Record the assistant turn (with its tool calls) before appending tool results.
@@ -486,11 +527,14 @@ def get_orchestrator_response(messages: list, db, max_rounds: int = 6):
                 "type": "function",
                 "function": {"name": slot["name"], "arguments": slot["arguments"] or "{}"},
             })
-        convo.append({
+        assistant_msg = {
             "role": "assistant",
             "content": content_acc or None,
             "tool_calls": assistant_tool_calls,
-        })
+        }
+        convo.append(assistant_msg)
+        if on_message:
+            on_message(assistant_msg)
 
         # Execute each tool, emit events, feed results back into the conversation.
         for idx in sorted(calls):
@@ -502,13 +546,16 @@ def get_orchestrator_response(messages: list, db, max_rounds: int = 6):
                 args = {}
             yield {"type": "tool_call", "tool": name, "args": args}
             result, summary = orchestrator_tools.run_tool(name, args, db)
-            yield {"type": "tool_result", "tool": name, "summary": summary}
-            convo.append({
+            is_error = isinstance(result, dict) and "error" in result
+            yield {"type": "tool_result", "tool": name, "summary": summary, "error": is_error}
+            tool_msg = {
                 "role": "tool",
                 "tool_call_id": slot["id"] or f"call_{idx}",
                 "content": json.dumps(result, default=str),
-            })
+            }
+            convo.append(tool_msg)
+            if on_message:
+                on_message(tool_msg)
 
     # Safety valve — hit max rounds without a clean final.
-    yield {"type": "final", "content": final_text or "Unable to complete the request."}
-
+    yield _final(final_text or "Unable to complete the request.")

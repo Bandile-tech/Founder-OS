@@ -228,7 +228,8 @@ def synthesize_weekly_review(db, week_start: str | None = None):
     end_dt = datetime_max(end)
 
     # SHIPPED — roadmap tasks completed + habits done this week
-    shipped = [t.title for t in db.query(models.RoadmapTask).filter(
+    # RoadmapTask has no title column — task_id is the human-readable key (e.g. "sprint-acc").
+    shipped = [t.task_id for t in db.query(models.RoadmapTask).filter(
         models.RoadmapTask.done == True
     ).all()]
     habit_done = db.query(models.Habit).filter(
@@ -449,6 +450,18 @@ def promote_research_opportunity(db, finding_id: int, notes: str = None):
 
 
 # ═══════════════════════════════════════════════════════════════
+# Tool 11 — remember  (long-term memory)
+# ═══════════════════════════════════════════════════════════════
+
+def remember(db, text: str, kind: str = "fact", tags: list | None = None):
+    """Store a durable fact, decision or preference in long-term memory."""
+    import memory_service
+    row = memory_service.remember(db, text, kind=kind, tags=tags)
+    result = {"id": row.id, "kind": row.kind, "text": row.context_data, "tags": row.tags}
+    return result, f"remembered ({row.kind}): {row.context_data[:80]}"
+
+
+# ═══════════════════════════════════════════════════════════════
 
 # Dispatch + JSON tool schemas for the model
 # ════════════════════════════════════════════════════════════════
@@ -481,19 +494,35 @@ _TOOL_DISPATCH = {
         finding_id=int(a.get("finding_id", 0)),
         notes=a.get("notes"),
     ),
+    "remember": lambda db, a: remember(
+        db,
+        text=a.get("text", ""),
+        kind=a.get("kind", "fact"),
+        tags=a.get("tags"),
+    ),
 }
 
 
 def run_tool(name: str, args: dict, db):
     """Execute a tool by name. Returns ``(result_dict, summary_str)``.
 
-    Unknown tools return an error payload rather than raising, so a hallucinated tool
-    name never crashes the stream.
+    Never raises. Unknown tools and tools that throw both return a structured
+    ``{"error": ...}`` payload so the model can recover and the reply still completes
+    and is saved. A failed tool's partial writes are rolled back.
     """
     fn = _TOOL_DISPATCH.get(name)
     if fn is None:
         return {"error": f"unknown tool: {name}"}, f"unknown tool: {name}"
-    return fn(db, args or {})
+    try:
+        return fn(db, args or {})
+    except Exception as exc:  # noqa: BLE001
+        try:
+            db.rollback()
+        except Exception:  # noqa: BLE001
+            pass
+        msg = f"{type(exc).__name__}: {exc}"
+        print(f"[orchestrator] tool {name} failed: {msg}")
+        return {"error": msg, "tool": name, "args": args or {}}, f"{name} failed — {msg}"
 
 
 TOOL_SCHEMAS = [
@@ -691,6 +720,37 @@ TOOL_SCHEMAS = [
                     },
                 },
                 "required": ["finding_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "remember",
+            "description": (
+                "Store something durable in long-term memory: a fact about Bandile or his "
+                "world, a decision he has made, or a preference about how he wants things "
+                "done. Use it when he states something that should still be true next week "
+                "(e.g. 'my Further Maths exam is 12 May', 'I prefer evening study blocks', "
+                "'decided to drop the newsletter idea'). Do not store transient chatter or "
+                "things already tracked as tasks."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string", "description": "The memory, as one self-contained sentence."},
+                    "kind": {
+                        "type": "string",
+                        "enum": ["fact", "decision", "preference"],
+                        "description": "What kind of memory this is. Default 'fact'.",
+                    },
+                    "tags": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional short tags, e.g. ['exams', 'further-maths'].",
+                    },
+                },
+                "required": ["text"],
             },
         },
     },

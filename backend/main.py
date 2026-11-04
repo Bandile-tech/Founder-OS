@@ -30,7 +30,9 @@ from openai_client import (
     get_radar_scores,
     transcribe_audio,
     synthesize_speech,
+    ParseFailed,
 )
+import llm
 
 # ── CREATE TABLES ────────────────────────────────────────────
 models.Base.metadata.create_all(bind=engine)
@@ -45,6 +47,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── Routers (rebuild modules) ────────────────────────────────
+import usage as _usage
+app.include_router(_usage.router)
 
 # Serve frontend from ../frontend if it exists
 FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend")
@@ -116,6 +122,8 @@ async def startup():
         run_m007(db)        # m007 — cold_archive_chunks table
         from migrations.m009_market_intel import run as run_m009
         run_m009(db)        # m009 — market intelligence agent tables
+        from migrations.m010_assistant_core import run as run_m010
+        run_m010(db)        # m010 — chat thread/tool columns, summaries, llm_usage
         _validate_schema(engine)   # raises if any ORM column is absent from the live DB
         _seed_non_negotiables_if_empty(db)
         _verify_seed_integrity(db)
@@ -324,7 +332,7 @@ def _seed_roadmap_tasks_if_empty(db: Session):
 
 @app.get("/health")
 def health():
-    return {"ok": True}
+    return {"ok": True, "ai_configured": llm.is_configured(), "assistant_model": llm.assistant_model()}
 
 
 @app.get("/ping")
@@ -1465,13 +1473,31 @@ def apply_parse_updates(db: Session, parsed: dict, today: date) -> dict:
     return result
 
 
+# ── AI FAILURE HANDLING ──────────────────────────────────────
+def _ai_http_error(exc: Exception) -> HTTPException:
+    """Map an AI-layer failure to a clean HTTP error instead of a 500 traceback."""
+    if isinstance(exc, llm.AIUnavailable):
+        return HTTPException(status_code=503, detail=str(exc))
+    if isinstance(exc, ParseFailed):
+        return HTTPException(status_code=502, detail=f"Parser failed: {exc}. Nothing was written.")
+    return HTTPException(status_code=502, detail=f"AI request failed: {type(exc).__name__}: {exc}")
+
+
+def _run_parse(db: Session, text: str) -> dict:
+    """Call the parser with the standard context. Raises AIUnavailable / ParseFailed /
+    SDK errors to the caller — callers translate via ``_ai_http_error``."""
+    roadmap_ids = [t.task_id for t in db.query(RoadmapTask).all()]
+    context = {"roadmap_ids": roadmap_ids, "today": str(date.today())}
+    return get_parse_response(text, context)
+
+
 # ── PARSE (Brain Dump) ───────────────────────────────────────
 @app.post("/parse")
 def parse_brain_dump(payload: schemas.ParseRequest, db: Session = Depends(get_db)):
-    roadmap_ids = [t.task_id for t in db.query(RoadmapTask).all()]
-    context = {"roadmap_ids": roadmap_ids, "today": str(date.today())}
-
-    parsed = get_parse_response(payload.text, context)
+    try:
+        parsed = _run_parse(db, payload.text)
+    except Exception as exc:  # noqa: BLE001
+        raise _ai_http_error(exc)
     updates = apply_parse_updates(db, parsed, date.today())
 
     # Backward-compatible response: keep existing top-level fields, add "updates" object
@@ -1529,15 +1555,19 @@ def unified_input(request: schemas.UnifiedInputRequest, db: Session = Depends(ge
         if context_parts:
             messages[-1]["content"] += "\n\n" + "\n\n".join(context_parts)
 
-        reply = get_chat_response_with_memory(messages, db=db, context_type="chat")
+        try:
+            reply = get_chat_response_with_memory(messages, db=db, context_type="chat")
+        except Exception as exc:  # noqa: BLE001
+            raise _ai_http_error(exc)
         db.add(models.ChatMessage(session_id=session, role="assistant", content=reply))
         db.commit()
         return {"type": "query", "reply": reply}
     else:
         # ── PARSE path ─────────────────────────────────────────
-        roadmap_ids = [t.task_id for t in db.query(RoadmapTask).all()]
-        context = {"roadmap_ids": roadmap_ids, "today": str(date.today())}
-        parsed = get_parse_response(text, context)
+        try:
+            parsed = _run_parse(db, text)
+        except Exception as exc:  # noqa: BLE001
+            raise _ai_http_error(exc)
         updates = apply_parse_updates(db, parsed, date.today())
 
         resp: dict = {
@@ -1576,7 +1606,10 @@ def orchestrator_alerts(db: Session = Depends(get_db)):
 # ── PROACTIVE BRIEF ──────────────────────────────────────────
 @app.post("/proactive-brief")
 def proactive_brief(payload: schemas.ProactiveBriefRequest):
-    brief = get_proactive_brief(payload.context)
+    try:
+        brief = get_proactive_brief(payload.context)
+    except Exception as exc:  # noqa: BLE001
+        raise _ai_http_error(exc)
     return {"brief": brief}
 
 
@@ -1612,7 +1645,11 @@ def chat_endpoint(request: schemas.ChatRequest, db: Session = Depends(get_db)):
     if context_parts:
         messages[-1]["content"] += "\n\n" + "\n\n".join(context_parts)
 
-    bot_reply = get_chat_response_with_memory(messages, db=db, context_type="chat")
+    try:
+        bot_reply = get_chat_response_with_memory(messages, db=db, context_type="chat")
+    except Exception as exc:  # noqa: BLE001
+        # The user turn is already saved; surface a clean error instead of a 500.
+        raise _ai_http_error(exc)
 
     db.add(models.ChatMessage(session_id=session, role="assistant", content=bot_reply))
     db.commit()
@@ -1630,6 +1667,8 @@ def voice_transcribe(audio: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="Empty audio upload")
     try:
         text = transcribe_audio(data, filename=audio.filename or "audio.webm")
+    except llm.AIUnavailable as e:
+        raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Transcription failed: {e}")
     if not text:
@@ -1644,6 +1683,8 @@ def voice_speak(request: schemas.SpeakRequest):
         raise HTTPException(status_code=400, detail="Text required")
     try:
         audio_bytes = synthesize_speech(text)
+    except llm.AIUnavailable as e:
+        raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Speech synthesis failed: {e}")
     return Response(content=audio_bytes, media_type="audio/mpeg")
@@ -2894,7 +2935,10 @@ Rules: Plain text only. No markdown. Precise and strategic."""
         messages.append({"role": "system", "content": temp_instruction})
     messages.append({"role": "user", "content": prompt})
 
-    ai_response = get_chat_response_with_memory(messages, db=db, context_type="weekly_ai_review")
+    try:
+        ai_response = get_chat_response_with_memory(messages, db=db, context_type="weekly_ai_review")
+    except Exception as exc:  # noqa: BLE001
+        raise _ai_http_error(exc)
     return {"week": str(week), "ai_review": ai_response}
 
 
