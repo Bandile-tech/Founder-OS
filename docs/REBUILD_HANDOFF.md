@@ -315,3 +315,71 @@ Expect to do one live smoke test with a real key before relying on it.
 - No "choose a voice by ear" UI; `REALTIME_VOICE` is an env var.
 - Tool results from voice are not truncated before being sent back to the model (same
   as the typed path's live turn; only replay is truncated).
+
+---
+
+## 7. Stage 6 addendum — UI, security, clean-up
+
+One commit per item (6.1 … 6.7), all on the same branch.
+
+### 6.1 Login
+- `FOUNDER_OS_PASSWORD` gates every route except `/health`, `/ping`, `/auth/*`, CORS
+  preflights and the static frontend. Unset → the API is open (local dev) and startup logs a
+  warning. **Set it on Render.**
+- `POST /auth/login {password}` → `{auth_required, token, expires_at}`; `GET /auth/status` →
+  `{auth_required, authenticated}`. Tokens are HMAC-signed and expire after
+  `FOUNDER_OS_SESSION_DAYS` (30). Secret = `FOUNDER_OS_SECRET` or a hash of the password, so
+  changing the password invalidates every session.
+- Clients send `Authorization: Bearer <token>` (or `X-Founder-Token`). The frontend wraps
+  `fetch` to add it and reopens the login gate on 401. Sign out lives in Settings.
+- CORS: `FOUNDER_OS_ORIGINS` (comma-separated), default local dev origins only. **Set the
+  Netlify origin** if the frontend is served from there.
+
+### 6.2 Home screen (Command Centre)
+Built on `GET /briefing/today` (shape in section 2). Checkboxes call the new
+`POST /todos/{id}/complete` → `{id, done, completed_at, change}` (logged, undoable). Header
+bell shows `alert_count` and lists `alerts` plus overdue tasks; the AI pill reads `/health`.
+Only the Academics tile exists; it opens the syllabus page.
+
+### 6.3 Changes and suggestions in the dock
+The final SSE event's `changes` render with Undo / Undo all (`POST /changes/{id}/undo`,
+`POST /changes/batch/{batch_id}/undo`). Pending `GET /suggestions` render with Accept
+(`POST /suggestions/{id}/accept`) and Dismiss.
+
+### 6.4 Syllabus tracker
+`GET /syllabus` grouped rows, four colours, tap → `POST /syllabus/{id}/advance`. Import CSV
+modal → `POST /syllabus/import` (multipart: file, subject_code, subject_name, level, papers).
+
+### 6.5 Removed from the UI
+Trading Desk, Aether Command (Business tab), Reading Queue, Bible Plan, the $10K September
+hero band and countdown strip, hardcoded exam/regionals dates, browser notifications, the
+hidden agent-alerts panel and client-side urgent flags, the header drift badge. **No backend
+tables or endpoints were removed**; `/trading/*`, `/books`, `/reading-plans`, `/clients`,
+`/revenue`, `/scoreboard/ten-k` still answer.
+
+### 6.6 Escaping and cold starts
+Every user-text interpolation into `innerHTML` goes through `escHtml`; `mdHtml` escapes raw
+HTML before markdown and strips non-http link schemes. The 10-second timeout is gone: sync
+and ping wait up to 90 s with a "waking backend" header state after 2.5 s.
+
+### 6.7 Docs
+`CLAUDE.md` rewritten; `ROADMAP.md` added with six phases (1–4 core built).
+
+### Env vars added in Stage 6
+| Var | Default | Purpose |
+|---|---|---|
+| `FOUNDER_OS_PASSWORD` | unset (open) | Login password — set in production |
+| `FOUNDER_OS_SECRET` | derived from password | Token signing secret (set to keep sessions across password changes) |
+| `FOUNDER_OS_SESSION_DAYS` | `30` | Token lifetime |
+| `FOUNDER_OS_ORIGINS` | local dev origins | CORS allow-list |
+
+### Known issues after Stage 6
+- The command dock is slightly wider than a 390 px phone viewport (the Live button is
+  clipped); it was like that before the Live button and needs a responsive pass.
+- The old Dashboard page is kept as a second page; it still renders KPIs, todos and the
+  radar from local state. Decide whether it stays once the Command Centre covers it.
+- The Academic Roadmap (legacy subject/topic/subtopic) page is still in the nav; the
+  assistant no longer reads those tables.
+- No automated browser tests; the UI was checked with headless Chromium screenshots and
+  click-throughs (home, suggestions accept → undo, syllabus tap-to-advance) during the build.
+- Login has no rate limiting.
