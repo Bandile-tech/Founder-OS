@@ -2,16 +2,19 @@
 Vault sync — clone/pull the Obsidian vault from GitHub and index markdown into
 the cold_archive_chunks table.
 
-Three public functions:
-  sync_vault(db)    — clone or pull, then index. Returns a result dict.
-  index_vault(db)   — walk the local clone and upsert chunks.
-  search_vault(...) — case-insensitive keyword search across chunks.
+Public functions:
+  sync_vault(db)          — clone or pull, then index. Returns a result dict.
+  index_vault(db)         — walk the local clone and upsert chunks.
+  search_vault(...)       — case-insensitive keyword search across chunks.
+  redact_credentials(...) — strip tokens from text before it is logged or returned.
 """
 
 import os
+import re
 import subprocess
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from sqlalchemy.orm import Session
 
@@ -24,6 +27,35 @@ VAULT_REPO_URL = os.environ.get(
 )
 VAULT_LOCAL_PATH = os.environ.get("VAULT_LOCAL_PATH", "/tmp/bandile-vault")
 VAULT_SYNC_INTERVAL_HOURS = int(os.environ.get("VAULT_SYNC_INTERVAL_HOURS", "6"))
+
+# ── REDACTION ────────────────────────────────────────────────
+# In production VAULT_REPO_URL embeds a GitHub token
+# (https://x-access-token:<token>@github.com/...). The URL, git's output and
+# exception text can all contain it, so every one of them goes through
+# redact_credentials() before it is printed or returned.
+
+_REDACTED = "***"
+_URL_USERINFO = re.compile(r"([a-zA-Z][a-zA-Z0-9+.-]*://)[^/\s@'\"]+@")
+_GITHUB_TOKEN = re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]+|github_pat_[A-Za-z0-9_]+)")
+
+
+def _configured_secrets() -> list[str]:
+    """The token in VAULT_REPO_URL: its password, or a username used as the token."""
+    try:
+        parts = urlsplit(VAULT_REPO_URL)
+    except ValueError:
+        return []
+    secret = parts.password or parts.username
+    return [secret] if secret and len(secret) >= 8 else []
+
+
+def redact_credentials(text) -> str:
+    """Remove credentials from any text before it is logged or returned."""
+    text = str(text)
+    for secret in _configured_secrets():
+        text = text.replace(secret, _REDACTED)
+    text = _URL_USERINFO.sub(rf"\1{_REDACTED}@", text)
+    return _GITHUB_TOKEN.sub(_REDACTED, text)
 
 # ── CHUNK SETTINGS (match main._chunk_text) ──────────────────
 _CHUNK_SIZE = 600
@@ -57,7 +89,7 @@ def sync_vault(db: Session) -> dict:
 
     try:
         if not local.exists():
-            print(f"[vault_sync] Cloning {VAULT_REPO_URL}")
+            print(f"[vault_sync] Cloning {redact_credentials(VAULT_REPO_URL)}")
             result = subprocess.run(
                 ["git", "clone", VAULT_REPO_URL, str(local)],
                 capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
@@ -70,7 +102,7 @@ def sync_vault(db: Session) -> dict:
             )
 
         if result.returncode != 0:
-            msg = (result.stderr or result.stdout or "unknown git error").strip()
+            msg = redact_credentials((result.stderr or result.stdout or "unknown git error").strip())
             print(f"[vault_sync] git error: {msg}")
             errors.append(msg)
             return {
@@ -81,7 +113,7 @@ def sync_vault(db: Session) -> dict:
             }
 
     except Exception as exc:
-        msg = str(exc)
+        msg = redact_credentials(exc)  # TimeoutExpired's text includes the clone URL
         print(f"[vault_sync] Exception during git operation: {msg}")
         return {
             "files_processed": 0,

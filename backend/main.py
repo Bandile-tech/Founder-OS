@@ -217,13 +217,13 @@ async def run_freeze_on_startup():
 # ── VAULT SYNC — startup (non-blocking) + APScheduler ────────
 
 def _vault_sync_job():
-    from vault_sync import sync_vault as _sync
+    from vault_sync import sync_vault as _sync, redact_credentials
     db = SessionLocal()
     try:
         result = _sync(db)
-        print(f"[vault_scheduler] sync complete: {result}")
+        print(f"[vault_scheduler] sync complete: {redact_credentials(result)}")
     except Exception as exc:
-        print(f"[vault_scheduler] sync error: {exc}")
+        print(f"[vault_scheduler] sync error: {redact_credentials(exc)}")
     finally:
         db.close()
 
