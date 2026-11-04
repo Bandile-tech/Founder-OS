@@ -576,6 +576,26 @@ def create_todo(todo: dict, db: Session = Depends(get_db)):
     db.refresh(new_todo)
     return new_todo
 
+@app.post("/todos/{todo_id}/complete")
+def complete_todo(todo_id: int, db: Session = Depends(get_db)):
+    """One-tap completion from the briefing. Recorded in the change log so it can be undone."""
+    import change_log
+    todo = db.query(models.Todo).filter(models.Todo.id == todo_id).first()
+    if not todo:
+        raise HTTPException(404, "Todo not found")
+    with change_log.batch_scope(db, "ui"):
+        if todo.done:
+            change = None
+        else:
+            before = change_log.snapshot(todo)
+            todo.done = True
+            todo.completed_at = date.today()
+            change = change_log.record_update(db, todo, before, f"Completed task: {todo.text[:80]}")
+        db.commit()
+    return {"id": todo.id, "done": todo.done, "completed_at": str(todo.completed_at) if todo.completed_at else None,
+            "change": change}
+
+
 @app.post("/todos/{todo_id}/toggle")
 def toggle_todo(todo_id: int, db: Session = Depends(get_db)):
     todo = db.query(models.Todo).filter(models.Todo.id == todo_id).first()

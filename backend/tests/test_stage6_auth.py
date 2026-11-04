@@ -97,3 +97,24 @@ class TestCORS:
     def test_env_overrides(self, monkeypatch):
         monkeypatch.setenv("FOUNDER_OS_ORIGINS", "https://founder-os.netlify.app, https://founderos.app")
         assert auth.allowed_origins() == ["https://founder-os.netlify.app", "https://founderos.app"]
+
+
+class TestCompleteTodo:
+
+    def test_complete_is_logged_and_undoable(self):
+        import models
+        from tests.conftest import TestSessionLocal
+        db = TestSessionLocal()
+        t = models.Todo(text="Finalise Bel Baby delivery", priority=1, category="business", due="2026-11-07", source="manual")
+        db.add(t); db.commit(); tid = t.id; db.close()
+        r = client.post(f"/todos/{tid}/complete")
+        assert r.status_code == 200 and r.json()["done"] is True
+        change = r.json()["change"]
+        assert change["table"] == "todos" and change["action"] == "update"
+        again = client.post(f"/todos/{tid}/complete").json()
+        assert again["done"] is True and again["change"] is None
+        client.post(f"/changes/{change['id']}/undo")
+        db = TestSessionLocal()
+        assert db.query(models.Todo).filter(models.Todo.id == tid).first().done is False
+        db.close()
+        assert client.post("/todos/99999/complete").status_code == 404
