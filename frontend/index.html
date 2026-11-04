@@ -2576,7 +2576,31 @@ async function checkAuth(){
 }
 function signOut(){setAuthToken("");showLogin();showToast("Signed out","info");}
 
-function fetchWithTimeout(url, timeoutMs=10000){
+const BACKEND_WAIT_MS=90000;   // Render cold starts can take a minute; wait rather than fail at 10s
+let _coldStartTimer=null,_backendReady=false;
+function _setConnecting(on){
+  let el=document.getElementById("h-connecting");
+  if(!on){if(el)el.remove();return;}
+  if(el)return;
+  el=document.createElement("div");
+  el.id="h-connecting";
+  el.style.cssText="font-family:var(--font-tech);font-size:10px;color:var(--glow);letter-spacing:0.12em;text-transform:uppercase;display:flex;align-items:center;gap:7px";
+  el.innerHTML='<span class="live-state thinking" style="display:inline-flex">waking backend</span>';
+  const right=document.querySelector(".h-right");
+  if(right)right.insertBefore(el,right.firstChild);
+}
+function _coldStartWatch(start){
+  if(start){
+    if(_backendReady||_coldStartTimer)return;
+    _coldStartTimer=setTimeout(()=>{_coldStartTimer=null;if(!_backendReady)_setConnecting(true);},2500);
+  }else{
+    if(_coldStartTimer){clearTimeout(_coldStartTimer);_coldStartTimer=null;}
+    _backendReady=true;
+    _setConnecting(false);
+  }
+}
+
+function fetchWithTimeout(url, timeoutMs=BACKEND_WAIT_MS){
   const ctrl=new AbortController();
   const tid=setTimeout(()=>ctrl.abort(),timeoutMs);
   return fetch(url,{signal:ctrl.signal})
@@ -2609,6 +2633,7 @@ async function syncFromBackend() {
     {key:"nonNeg",     url:`${API_BASE}/non-negotiables`},
   ];
 
+  _coldStartWatch(true);
   const results=await Promise.allSettled(ENDPOINTS.map(e=>fetchWithTimeout(e.url)));
 
   const data={};
@@ -2617,6 +2642,7 @@ async function syncFromBackend() {
     if(r.status==="fulfilled"){data[ENDPOINTS[i].key]=r.value;}
     else{failed.push(ENDPOINTS[i].key);console.warn(`OS: sync failed — ${ENDPOINTS[i].key}:`,r.reason);}
   });
+  if(failed.length<ENDPOINTS.length)_coldStartWatch(false);
 
   if(data.kpis){
     Object.entries(data.kpis).forEach(([key,kpi])=>{
@@ -2970,7 +2996,8 @@ async function loadBriefing(refresh=false){
     renderHome();
   }catch(e){
     const line=document.getElementById("cc-line");
-    if(line&&!_briefing)line.textContent="Waiting for the backend… it may be waking up.";
+    if(line&&!_briefing)line.textContent="Waking the backend — this can take up to a minute on a cold start.";
+    setTimeout(()=>{if(!_briefing)loadBriefing();},6000);
   }finally{_ccLoading=false;}
 }
 
@@ -3100,8 +3127,8 @@ function kpiRow(k){
   const vc=pct>75?"var(--success)":"var(--glow)";
   return`<div class="kpi-row">
     <div class="kpi-head">
-      <span style="font-size:11px;color:var(--muted);letter-spacing:0.02em">${kpi.label}</span>
-      <span class="kpi-v" style="font-size:12.5px;color:${vc}">${kpi.value}${kpi.unit}<span class="kpi-t"> / ${kpi.target}${kpi.unit}</span></span>
+      <span style="font-size:11px;color:var(--muted);letter-spacing:0.02em">${escHtml(kpi.label)}</span>
+      <span class="kpi-v" style="font-size:12.5px;color:${vc}">${escHtml(String(kpi.value))}${escHtml(kpi.unit||"")}<span class="kpi-t"> / ${escHtml(String(kpi.target))}${escHtml(kpi.unit||"")}</span></span>
     </div>
     <div class="pbar"><div class="pfill ${pfClass(pct)}" style="width:${pct}%"></div></div>
   </div>`;
@@ -3140,13 +3167,13 @@ function renderTodos(){
     const urgBadge=t.urgent&&!t.done?`<span class="tag tag-urgent">URGENT</span>`:"";
     return`<div class="todo-item ${t.done?"done-item":""}">
       <div class="cb ${t.done?"checked":""}" onclick="toggleTodo('${t.id}')">${t.done?"✓":""}</div>
-      <div class="cat-dot cat-${t.category}"></div>
+      <div class="cat-dot cat-${escHtml(t.category||"")}"></div>
       <div style="flex:1;min-width:0">
-        <div class="todo-text ${t.done?"strike":""}">${rank}${t.text}</div>
+        <div class="todo-text ${t.done?"strike":""}">${rank}${escHtml(t.text)}</div>
         <div class="todo-meta">
-          <span class="tag tag-${t.category}">${t.category}</span>
+          <span class="tag tag-${escHtml(t.category||"")}">${escHtml(t.category||"")}</span>
           ${urgBadge}
-          ${t.due?`<span class="todo-due">${t.due}</span>`:""}
+          ${t.due?`<span class="todo-due">${escHtml(t.due)}</span>`:""}
           ${t.source==="ai"?`<span class="ai-src">AI</span>`:""}
         </div>
       </div>
@@ -3288,7 +3315,7 @@ function renderAnnualDash(){
       const pct=(at.target!=null&&at.current!=null)?Math.min(100,(at.current/at.target*100)):(at.progress_pct??0);
       return`<div class="at-row">
         <div style="flex:1;min-width:0">
-          <div class="at-name">${at.name}</div>
+          <div class="at-name">${escHtml(at.name)}</div>
           <div style="margin-top:4px"><div class="pbar"><div class="pfill ${pfClass(pct)}" style="width:${pct}%"></div></div></div>
         </div>
         <div class="at-vals">${at.current??0} / ${at.target} ${at.unit||""}</div>
@@ -3296,7 +3323,7 @@ function renderAnnualDash(){
       </div>`;
     } else {
       return`<div class="at-row">
-        <div style="flex:1;min-width:0"><div class="at-name">${at.name}</div>
+        <div style="flex:1;min-width:0"><div class="at-name">${escHtml(at.name)}</div>
           <div style="font-size:10px;color:var(--muted);margin-top:2px">${at.display_value||"Descriptive target"}</div>
         </div>
         <span class="badge ${at.is_complete?"b-suc":"b-muted"}">${at.is_complete?"Done":"Pending"}</span>
@@ -3315,7 +3342,7 @@ function renderAnnualTargets(){
     const pct=isNumeric?((at.target!=null&&at.current!=null)?Math.min(100,(at.current/at.target*100)):(at.progress_pct??0)):0;
     return`<div class="card">
       <div class="card-title">
-        <span>${at.name}</span>
+        <span>${escHtml(at.name)}</span>
         <div style="display:flex;gap:6px">
           <span class="badge ${st.cls}">${st.label}</span>
           ${isNumeric?`<span class="badge b-muted">${Math.round(pct)}%</span>`:""}
@@ -3325,7 +3352,7 @@ function renderAnnualTargets(){
       <div style="margin-bottom:8px">
         <div class="pbar" style="height:6px"><div class="pfill ${pfClass(pct)}" style="width:${pct}%"></div></div>
         <div style="display:flex;justify-content:space-between;margin-top:4px;font-size:10px;color:var(--muted)">
-          <span>${at.current??0} / ${at.target} ${at.unit||""}</span>
+          <span>${escHtml(String(at.current??0))} / ${escHtml(String(at.target))} ${escHtml(at.unit||"")}</span>
           <span>Year ${expected}% elapsed</span>
         </div>
       </div>
@@ -3334,7 +3361,7 @@ function renderAnnualTargets(){
         <button class="at-add-btn" onclick="updateAT('${at.id}')">Update</button>
         <button class="at-add-btn btn-danger" style="margin-left:auto" onclick="deleteAT('${at.id}')">Delete</button>
       </div>`:`
-      <div style="font-size:10px;color:var(--muted);margin-bottom:8px">${at.display_value||""}</div>
+      <div style="font-size:10px;color:var(--muted);margin-bottom:8px">${escHtml(at.display_value||"")}</div>
       <div style="display:flex;gap:8px">
         <button class="at-add-btn" onclick="toggleATComplete('${at.id}',${!at.is_complete})">${at.is_complete?"Mark Pending":"Mark Done"}</button>
         <button class="at-add-btn btn-danger" style="margin-left:auto" onclick="deleteAT('${at.id}')">Delete</button>
@@ -3668,13 +3695,13 @@ function _renderDailyCard(d,todayLogs){
 
   const logRows=(todayLogs||[]).map(l=>
     `<div class="health-log-row" id="llrow-${l.id}">
-      <span class="health-log-lift">${l.lift_name}</span>
+      <span class="health-log-lift">${escHtml(l.lift_name)}</span>
       <span class="health-log-set">${l.weight_kg}kg × ${l.reps}</span>
       <button class="health-log-del" onclick="deleteLiftLog(${l.id})">✕</button>
     </div>`
   ).join("");
 
-  const liftOptions=_availableLifts.map(l=>`<option value="${l.name}">${l.name}</option>`).join("");
+  const liftOptions=_availableLifts.map(l=>`<option value="${escHtml(l.name)}">${escHtml(l.name)}</option>`).join("");
 
   document.getElementById("health-daily-body").innerHTML=`
     <div class="health-field-row">
@@ -3777,7 +3804,7 @@ function _renderLiftsPanel(lifts){
       ?`${cnt} session${cnt!==1?"s":""} · last ${l.best_date}`
       :`${cnt} sessions`;
     return`<div class="kpi-row"><div class="kpi-head">
-      <span>${l.lift_name}</span>
+      <span>${escHtml(l.lift_name)}</span>
       <span class="kpi-v" style="color:var(--glow)">${best}</span>
     </div><div style="font-size:10px;color:var(--muted);margin-top:2px">${sub}</div></div>`;
   }).join("");
@@ -3788,7 +3815,7 @@ function _renderLiftList(){
   if(!el)return;
   el.innerHTML=_availableLifts.map(l=>
     `<div style="display:flex;align-items:center;gap:8px;margin-bottom:5px">
-      <span style="font-size:11px;color:var(--text);flex:1">${l.name}</span>
+      <span style="font-size:11px;color:var(--text);flex:1">${escHtml(l.name)}</span>
       <button class="ar-btn-sm" onclick="deactivateLift(${l.id})">Deactivate</button>
     </div>`
   ).join("")||'<div style="font-size:10px;color:var(--muted)">No active lifts.</div>';
@@ -4452,7 +4479,7 @@ async function parseDump() {
     await syncFromBackend();
     fetchAndRenderRadar(); // Refresh radar after brain dump updates data
 
-    resEl.innerHTML = `<div class="advisory-inner">🧠 ${result.advisory}</div>`;
+    resEl.innerHTML = `<div class="advisory-inner">🧠 ${escHtml(result.advisory)}</div>`;
     resEl.style.display = "block";
     addChatMsg(`Parsed: ${result.summary}`, "bot");
   } catch (e) {
@@ -4478,7 +4505,7 @@ function appendChatDOM(msg){
   const el=document.getElementById("chat-msgs");
   const d=document.createElement("div");
   d.className=`msg ${msg.role} fade-up`;
-  d.innerHTML=`<div class="msg-bubble ${msg.role==="bot"?"md-body":""}">${msg.role==="bot"?mdHtml(msg.text):escHtml(msg.text)}</div><div class="msg-time">${msg.time}</div>`;
+  d.innerHTML=`<div class="msg-bubble ${msg.role==="bot"?"md-body":""}">${msg.role==="bot"?mdHtml(msg.text):escHtml(msg.text)}</div><div class="msg-time">${escHtml(msg.time||"")}</div>`;
   el.appendChild(d);
   el.scrollTop=el.scrollHeight;
 }
@@ -4973,10 +5000,13 @@ function escHtml(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").
 
 /** Render markdown to safe HTML — strips <script> tags before injection. */
 function mdHtml(text){
-  if(typeof marked==="undefined")return escHtml(text).replace(/\n/g,"<br>");
-  const raw=marked.parse(String(text));
-  // Strip <script> blocks as a safety measure; an unterminated tag is stripped to end-of-string
-  return raw.replace(/<script[\s\S]*?(?:<\/script>|$)/gi,"");
+  // Raw HTML in the source is shown as text (angle brackets escaped before markdown runs),
+  // so only markdown-generated markup reaches the page. Links to non-http schemes are dropped.
+  const src=String(text??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  if(typeof marked==="undefined")return src.replace(/\n/g,"<br>");
+  let html=marked.parse(src);
+  html=html.replace(/href="(?!https?:\/\/|mailto:|#)[^"]*"/gi,'href="#"').replace(/\son\w+="[^"]*"/gi,"");
+  return html.replace(/<script[\s\S]*?(?:<\/script>|$)/gi,"");
 }
 
 /* ═══════════════════════════════════════════════════
@@ -5243,7 +5273,7 @@ function renderSettings(){
   if(!kpiEl)return;
   kpiEl.innerHTML=Object.entries(S.kpis).map(([k,kpi])=>`
     <div class="settings-row">
-      <div><div class="sr-label">${kpi.label}</div><div class="sr-sub">Current: ${kpi.value}${kpi.unit}</div></div>
+      <div><div class="sr-label">${escHtml(kpi.label)}</div><div class="sr-sub">Current: ${escHtml(String(kpi.value))}${escHtml(kpi.unit||"")}</div></div>
       <div style="display:flex;gap:8px;align-items:center">
         <input class="sr-input" type="number" id="kt-${k}" value="${kpi.target}" style="width:100px">
         <button class="sr-btn" onclick="saveKpiTarget('${k}')">Save</button>
@@ -5569,7 +5599,8 @@ function initialRender(){
 let _lastPingSuccess=0;
 async function keepAlive(){
   try{
-    await fetch(`${API_BASE}/ping`,{signal:AbortSignal.timeout?AbortSignal.timeout(8000):undefined});
+    await fetch(`${API_BASE}/ping`,{signal:AbortSignal.timeout?AbortSignal.timeout(BACKEND_WAIT_MS):undefined});
+    _coldStartWatch(false);
     const now=Date.now();
     if(_lastPingSuccess>0&&now-_lastPingSuccess>12*60*1000)syncFromBackend();
     _lastPingSuccess=now;
@@ -5584,10 +5615,13 @@ renderHeader();
   keepAlive();
   // Race the first sync against a 5-second fallback so offline users
   // still see their localStorage data promptly.
+  // Render immediately from localStorage; the sync fills in when the backend answers
+  // (a cold start is shown in the header rather than treated as a failure).
   const syncPromise=syncFromBackend();
-  const fallback=new Promise(res=>setTimeout(res,5000));
+  const fallback=new Promise(res=>setTimeout(res,1500));
   await Promise.race([syncPromise,fallback]);
   initialRender();
+  syncPromise.then(()=>{try{renderPage(getActivePageName());}catch(_){}});
   // Entrance animations are scoped to .page.fade-up — drop the flag after boot
   // so the 30s background sync never replays them.
   setTimeout(()=>{const pd=document.getElementById("p-dashboard");if(pd)pd.classList.remove("fade-up");},900);
