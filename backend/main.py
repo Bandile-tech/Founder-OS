@@ -40,13 +40,21 @@ models.Base.metadata.create_all(bind=engine)
 # ── APP ──────────────────────────────────────────────────────
 app = FastAPI(title="Founder OS API", version="2.0")
 
+import auth as _auth
+# CORS is restricted to the app's own origin(s): FOUNDER_OS_ORIGINS (comma-separated),
+# defaulting to the local dev origins. Same-origin requests (the backend serving the
+# frontend) need no CORS at all.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_auth.allowed_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# Login: every route except /health, /ping, /auth/* and the static frontend needs a
+# session token once FOUNDER_OS_PASSWORD is set. Added after CORS so preflights pass.
+app.add_middleware(_auth.AuthMiddleware)
+app.include_router(_auth.router)
 
 # ── Routers (rebuild modules) ────────────────────────────────
 import usage as _usage
@@ -117,6 +125,8 @@ async def startup():
     from migrations.m002_academic_roadmap import seed_subjects
     from migrations.m003_lift_log import run as run_m003
     from migrations.m004_warroom import run as run_m004
+    if not _auth.auth_required():
+        print("[startup] WARNING: FOUNDER_OS_PASSWORD is not set — the API is open. Set it on Render.")
     db = SessionLocal()
     try:
         load_kpi_state(db)

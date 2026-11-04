@@ -559,6 +559,22 @@ input:hover:not(:focus), textarea:hover:not(:focus), select:hover:not(:focus){bo
   color:var(--muted);text-transform:uppercase;margin-top:7px;
   display:none;align-items:center;gap:8px;
 }
+/* LOGIN — full-screen gate shown when the backend requires a password */
+#login-screen{position:fixed;inset:0;z-index:5000;display:none;align-items:center;justify-content:center;
+  background:rgba(10,11,13,0.72);backdrop-filter:blur(24px) saturate(140%)}
+#login-screen.show{display:flex}
+.login-card{width:min(360px,calc(100vw - 32px));padding:28px 26px;border-radius:18px;
+  background:linear-gradient(150deg,rgba(255,255,255,0.06),rgba(255,255,255,0.015) 42%,rgba(167,235,242,0.03));
+  border:1px solid rgba(167,235,242,0.14);box-shadow:inset 0 1px 0 rgba(255,255,255,0.06),0 24px 60px -20px rgba(0,0,0,0.7)}
+.login-card .h-logo{margin-bottom:4px}
+.login-sub{font-size:11px;color:var(--muted);letter-spacing:0.08em;text-transform:uppercase;margin-bottom:18px}
+.login-input{width:100%;box-sizing:border-box;padding:12px 14px;border-radius:12px;font-size:14px;
+  background:var(--surface-hi);border:1px solid var(--border-hi);color:var(--text);font-family:inherit;outline:none}
+.login-input:focus{border-color:var(--glow);box-shadow:0 0 0 3px rgba(167,235,242,0.12)}
+.login-btn{margin-top:12px;width:100%;padding:12px;border-radius:12px;border:1px solid var(--glow);
+  background:var(--interactive);color:#fff;font-family:inherit;font-size:12px;letter-spacing:0.14em;text-transform:uppercase;cursor:pointer}
+.login-btn:disabled{opacity:0.5;cursor:wait}
+.login-err{margin-top:10px;font-size:11.5px;color:var(--danger);min-height:16px}
 /* LIVE VOICE — WebRTC session button, state chip, running transcript */
 .live-btn{
   height:40px;padding:0 12px;flex-shrink:0;border-radius:20px;
@@ -1559,6 +1575,17 @@ tr:hover .td-del{opacity:1}
 <!-- ═══ AMBIENT DEPTH FIELD ═══ -->
 <div id="ambient" aria-hidden="true"></div>
 
+<!-- ═══ LOGIN GATE ═══ -->
+<div id="login-screen" aria-hidden="true">
+  <form class="login-card" onsubmit="submitLogin(event)">
+    <div class="h-logo">Founder OS</div>
+    <div class="login-sub">Sign in to continue</div>
+    <input id="login-password" class="login-input" type="password" autocomplete="current-password" placeholder="Password" autofocus>
+    <button id="login-btn" class="login-btn" type="submit">Enter</button>
+    <div id="login-err" class="login-err"></div>
+  </form>
+</div>
+
 <!-- ═══ HEADER ═══ -->
 <div id="header">
   <div style="display:flex;align-items:center">
@@ -2391,6 +2418,13 @@ tr:hover .td-del{opacity:1}
         <div><div class="eco-title">Settings</div><div class="eco-sub">System configuration</div></div>
       </div>
       <div class="card">
+        <div class="card-title"><span>Session</span><span class="badge b-muted">Login</span></div>
+        <div class="settings-row">
+          <div><div class="sr-label">Signed in on this device</div><div class="sr-sub">The session token lives in this browser only</div></div>
+          <button class="sr-btn" onclick="signOut()">Sign out</button>
+        </div>
+      </div>
+      <div class="card">
         <div class="card-title"><span>Social Score</span><span class="badge b-glow">Feeds Radar</span></div>
         <div class="settings-row">
           <div>
@@ -2542,6 +2576,71 @@ let S=loadState();
 const API_BASE = (location.hostname==="127.0.0.1"||location.hostname==="localhost")
   ? location.origin
   : "https://founder-os-backend-f6qn.onrender.com";
+
+/* ═══════════════════════════════════════════════════
+   AUTH — session token on every backend call; login gate on 401
+═══════════════════════════════════════════════════ */
+const TOKEN_KEY="founderOS_token";
+function authToken(){try{return localStorage.getItem(TOKEN_KEY)||"";}catch(_){return "";}}
+function setAuthToken(t){try{t?localStorage.setItem(TOKEN_KEY,t):localStorage.removeItem(TOKEN_KEY);}catch(_){}}
+const _nativeFetch=window.fetch.bind(window);
+window.fetch=async function(input,init){
+  const url=typeof input==="string"?input:(input&&input.url)||"";
+  const isApi=url.startsWith(API_BASE);
+  if(isApi){
+    init=init||{};
+    const headers=new Headers(init.headers||{});
+    const t=authToken();
+    if(t&&!headers.has("Authorization"))headers.set("Authorization","Bearer "+t);
+    init.headers=headers;
+  }
+  const r=await _nativeFetch(input,init);
+  if(isApi&&r.status===401&&!url.endsWith("/auth/login"))showLogin();
+  return r;
+};
+let _loginShown=false;
+function showLogin(){
+  const el=document.getElementById("login-screen");
+  if(!el||_loginShown)return;
+  _loginShown=true;
+  el.classList.add("show");el.setAttribute("aria-hidden","false");
+  setTimeout(()=>{const i=document.getElementById("login-password");if(i)i.focus();},50);
+}
+function hideLogin(){
+  const el=document.getElementById("login-screen");
+  if(el){el.classList.remove("show");el.setAttribute("aria-hidden","true");}
+  _loginShown=false;
+}
+async function submitLogin(ev){
+  if(ev)ev.preventDefault();
+  const pw=document.getElementById("login-password");
+  const btn=document.getElementById("login-btn");
+  const err=document.getElementById("login-err");
+  if(!pw.value){err.textContent="Enter the password.";return;}
+  btn.disabled=true;err.textContent="";
+  try{
+    const r=await _nativeFetch(`${API_BASE}/auth/login`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({password:pw.value})});
+    if(r.status===401){err.textContent="Wrong password.";return;}
+    if(!r.ok)throw new Error("HTTP "+r.status);
+    const d=await r.json();
+    if(d.token)setAuthToken(d.token);
+    pw.value="";
+    hideLogin();
+    syncFromBackend();
+    try{initialRender();}catch(_){}
+  }catch(e){err.textContent="Could not reach the backend ("+e.message+").";}
+  finally{btn.disabled=false;}
+}
+async function checkAuth(){
+  try{
+    const r=await _nativeFetch(`${API_BASE}/auth/status`,{headers:authToken()?{"Authorization":"Bearer "+authToken()}:{}});
+    if(!r.ok)return;
+    const d=await r.json();
+    if(d.auth_required&&!d.authenticated){setAuthToken("");showLogin();}
+    else hideLogin();
+  }catch(_){/* offline — the 401 handler will catch it later */}
+}
+function signOut(){setAuthToken("");showLogin();showToast("Signed out","info");}
 
 function fetchWithTimeout(url, timeoutMs=10000){
   const ctrl=new AbortController();
@@ -6249,6 +6348,7 @@ dailyReset();
 renderHeader();
 
 (async()=>{
+  await checkAuth();
   keepAlive();
   // Race the first sync against a 5-second fallback so offline users
   // still see their localStorage data promptly.
