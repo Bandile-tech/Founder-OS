@@ -1,75 +1,129 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code (claude.ai/code) when working in this repository. It describes the
+system as it is after the intelligence-layer rebuild (branch `claude/rebuild-spec-review-vfrg4o`).
+`docs/REBUILD_SPEC.md` is the spec that produced it; `docs/REBUILD_HANDOFF.md` has every endpoint
+shape; `ROADMAP.md` has the phases.
+
+## Product principles (these govern every decision)
+
+1. **Founder OS must never need maintaining.** Information gets in through conversation or a
+   single tap, never through forms or sliders.
+2. **Conversation is the primary input.** Screens are for viewing and one-tap corrections.
+3. **Not every sentence is a task.** Distinguish commitments from ideas and discussion.
+4. **Act, then show what changed, with undo.** Ask first only before deleting anything.
+5. **Keep running costs low.** One model gateway, a history budget, one briefing summary per
+   day, embed only new or changed text, log every call.
 
 ## Running the project
 
-**Frontend only** (no backend required):
-```
-open frontend/index.html in a browser
-```
-
-**With backend** (required for AI chat, persistence, KPIs):
 ```
 cd backend
+pip install -r requirements.txt      # Python 3.12 (the pins do not build on 3.13)
 uvicorn main:app --reload
 ```
-Then visit `http://127.0.0.1:8000` — the backend serves the frontend at `/` and the API at its endpoints.
+Visit `http://127.0.0.1:8000` — the backend serves `frontend/index.html` at `/` and the API on
+the same origin. Frontend-only use (`open frontend/index.html`) still works for viewing local
+state but every feature that matters needs the backend.
 
-**Environment**: Create `backend/.env` with:
-```
-OPENAI_API_KEY=your_key_here
-```
+Environment (`backend/.env` locally, Render env vars in production):
 
-**Install dependencies**:
+| Var | Default | Purpose |
+|---|---|---|
+| `OPENAI_API_KEY` | unset | Without it everything non-AI works; AI endpoints return 503 |
+| `FOUNDER_OS_PASSWORD` | unset | **Set in production.** Gates every route except /health, /ping, /auth/* |
+| `FOUNDER_OS_ORIGINS` | local dev origins | Comma-separated CORS allow-list (the Netlify origin) |
+| `ASSISTANT_MODEL` | `gpt-5.4-mini` | Assistant, parser, summaries, briefing |
+| `EMBEDDING_MODEL` | `text-embedding-3-small` | Vault / notes / memory retrieval |
+| `ZMW_PER_USD` | `27` | Kwacha → dollar for the revenue scoreboard |
+| `REALTIME_MODEL` | `gpt-realtime-mini` | Live voice (verify the id on OpenAI's model page) |
+| `ASSISTANT_HISTORY_TURNS` / `ASSISTANT_SUMMARY_BATCH` | `20` / `10` | History budget |
+| `INTENT_CONFIDENCE_MIN` | `0.7` | Below this an extracted item becomes a suggestion |
+
+Tests (OpenAI is always mocked; the suite must pass with no key set):
 ```
 cd backend
-pip install -r requirements.txt
+python -m pytest -q
 ```
+`TestClient(app)` without a context manager never fires startup, so migrations are exercised
+by `test_startup_handler_runs_with_no_key`, which calls `main.startup()` directly. After any
+migration change, also run `python -c "import asyncio, main; asyncio.run(main.startup())"`.
 
 ## Architecture
 
 ### Frontend
-A single self-contained file: `frontend/index.html` with all CSS and JavaScript inline. No build step, no framework. Design uses the "Luna palette" — `#011C40` background, IBM Plex Mono + Syne fonts. The frontend calls the backend API at `http://127.0.0.1:8000`.
+One self-contained file, `frontend/index.html` (inline CSS and vanilla JS, no build step).
+Luna palette: near-black base, cyan `#A7EBF2` for signal only, Bricolage Grotesque for display
+numerals, Geist for body. Pages: Command Centre (home, built on `GET /briefing/today`),
+Dashboard, Timetable, Health, Syllabus, Academic Roadmap (legacy), Agents, War Room, Annual
+Targets, Design Guide, Settings. The global command dock at the bottom is the talk bar: typed
+input, record-and-transcribe mic, and Live (WebRTC real-time voice). Every backend call goes
+through a `fetch` wrapper that attaches the session token; a 401 opens the login gate.
+All user text is escaped with `escHtml` before it reaches `innerHTML`; `mdHtml` escapes raw HTML
+before markdown runs.
 
-### Backend
-FastAPI app in `backend/main.py`. Modules:
+### Backend (FastAPI, `backend/`)
 
 | File | Role |
-|------|------|
-| `main.py` | All API endpoints + startup seeding logic |
-| `models.py` | SQLAlchemy ORM models |
-| `schemas.py` | Pydantic request/response models |
-| `database.py` | SQLite engine (`founder_os.db`) + session factory |
-| `openai_client.py` | GPT-4o-mini integration + system prompt |
-| `memory_service.py` | Fetches recent AI memory from DB |
-| `ai_formatter.py` | Strips markdown from AI output |
+|---|---|
+| `main.py` | App, startup (migrations → schema check → seeds), legacy endpoints, `apply_parse_updates` |
+| `llm.py` | The only OpenAI gateway: lazy client, model config, usage logging, cost estimates |
+| `openai_client.py` | Prompts: parser schema, orchestrator loop (`get_orchestrator_response`) |
+| `orchestrator.py` | `POST /orchestrator` SSE bridge: history budget, memory, persistence of tool calls |
+| `orchestrator_tools.py` | The tool registry (22 tools) and `run_tool` (never raises) |
+| `conversation.py` | One default thread, verbatim window + rolling summary, replay of tool results |
+| `memory_service.py` | Long-term memory (`remember` tool, recall) |
+| `change_log.py` | Every write recorded with before/after snapshots; undo; batches live on `db.info` |
+| `actions.py` | Pending deletes needing confirmation; suggestions accepted with one tap |
+| `notes.py` | Notes (book / bible / journal / inbox / general), search, endpoints |
+| `retrieval.py` | Shared `embeddings` table, cosine in Python, keyword fallback |
+| `syllabus.py` | `syllabus_points` four-state tracker, CSV import, exam dates, weakest topics |
+| `briefing.py` | `GET /briefing/today`: deterministic ranked items, progress, alerts, cached summary |
+| `auth.py` | Password login, HMAC session tokens, route protection, CORS origins |
+| `voice_realtime.py` | Client secret for WebRTC voice, server-side tool bridge, transcript save |
+| `usage.py` | `GET /usage/summary` from `llm_usage` |
+| `vault_sync.py` | Obsidian vault clone/index; semantic search when embedded |
+| `models.py` / `schemas.py` / `database.py` | ORM, Pydantic, engine (SQLite locally, Postgres on Supabase) |
+| `migrations/` | Hand-written, re-runnable, wired into startup (`m010`–`m013` are the rebuild) |
+| `market_intel/` | Research agent (out of scope for the rebuild; still uses the lazy client) |
 
-### Database
-SQLite at `backend/founder_os.db`. Tables are auto-created on startup via `models.Base.metadata.create_all()`. On first run, startup handlers seed default habits, annual targets, roadmap tasks, a 20-entry bible plan, and books.
+### How a message flows
+`POST /orchestrator` → `orchestrator.orchestrator_stream` builds history (last N turns verbatim +
+summary) and recalls memories → `get_orchestrator_response` streams the model, executes tool
+calls through `run_tool` inside one change-log batch → every message of the turn (user,
+assistant tool calls, tool results, final) is saved to the default thread → the final SSE
+event carries `changes`, which the UI shows with Undo.
 
-### KPI state
-KPIs (sprint times, academic syllabus %) are kept in `_kpi_state` (in-memory dict in `main.py`) loaded at startup from `KPISnapshot` table. Defaults are defined in `KPI_DEFAULTS`. Sprint KPIs use `lower_is_better: True` — this flag affects progress calculation throughout.
+`route_brain_dump` → parser (`get_parse_response`) → `apply_parse_updates` (atomic, one
+commit, everything logged). Commitments become tasks, ideas go to the Inbox note, discussion
+writes nothing, low-confidence items become suggestions.
 
-### AI / Brain dump
-`POST /parse` accepts free-text, sends to GPT-4o-mini, and atomically applies extracted updates to KPIs, todos, habits, roadmap tasks, and annual targets in one transaction. The parse schema is defined inline in `openai_client.get_parse_response()`.
-
-`POST /chat` stores full session history in `chat_messages` table and injects recent `AIMemory` entries as a memory block into the system prompt.
-
-`GET /radar` computes 6 domain scores (core, physical, intellect, business, skills, social) from live DB data and passes them to GPT for interpretation.
-
-### Week freezing
-`WeeklyTargetSnapshot.frozen = True` is set on startup for any snapshots whose `week_end` has passed. Frozen weeks reject new impact logs with HTTP 400. This runs automatically on startup via `run_freeze_on_startup`.
+### Data
+SQLite at `backend/founder_os.db` locally; Postgres on Supabase in production with RLS enabled
+on every table. Never rely on `create_all` for a new column: add a migration following
+`migrations/m010_assistant_core.py` and the helpers in `migrations/_helpers.py`, and enable RLS
+on new tables. No destructive migrations.
 
 ## Critical components — treat with care
-
-- **KPI aggregation logic**: `_kpi_state`, `KPI_DEFAULTS`, `_at_progress_pct()` in `main.py`, and `kpi_pct()` in `openai_client.py` — these feed the radar and weekly reviews.
-- **Weekly target structure**: `WeeklyTarget` + `WeeklyTargetSnapshot` + `LogImpact` — the snapshot/freeze lifecycle is non-trivial.
-- **Execution log schema**: `DailyLog` → `LogImpact` → `WeeklyTargetSnapshot` update chain in `POST /log-impact`.
+- `apply_parse_updates` (atomicity, change logging, intent handling) and the parser schema in
+  `openai_client.get_parse_response`.
+- `change_log` snapshot/undo and the batch-on-session mechanism (SSE generator steps run on
+  separate threads, so context variables do not survive between them).
+- The orchestrator prompt in `context/core/orchestrator_prompt.md` and the tool schemas: keep
+  them byte-stable where possible so prompt caching applies; dynamic context goes in the second
+  system message.
+- `briefing.build_briefing` ranking and `syllabus.weakest_topics` scoring — the home screen and
+  the assistant's study advice depend on them.
+- `auth.AuthMiddleware` exemptions.
 
 ## Key domain concepts
-
-- **Annual targets**: Year-level goals with `lower_is_better` flag (used for sprint PBs). Progress is compared against year-elapsed % to produce `ahead / on_track / behind / critical` status.
-- **Roadmaps**: `sprint` and `academic` types, each with phases (`sprint-p1`, `acad-maths`, etc.) and task IDs like `sprint-acc`, `m-calc`.
-- **Habit keys**: `scripture_prayer`, `ironing`, `python_session`, `sprint_training`, `academics` — these exact strings are referenced by the parse engine.
-- **KPI keys**: `sprint_100m`, `sprint_200m`, `sprint_400m`, `maths_syllabus`, `further_maths`, `business`, `economics` — referenced by name throughout AI prompts.
+- **Syllabus states**: `not_started` (red) → `learned` (yellow) → `revised` (blue) →
+  `bulletproof` (green). One tap or `update_syllabus` advances; `last_revised` is automatic.
+- **Exam dates** per `(subject_code, paper)` in `exam_dates`, falling back to `subjects.exam_date`.
+- **Currency**: revenue rows carry `USD` or `ZMW`; conversions use `ZMW_PER_USD`.
+- **Habit keys** (non-negotiables): `scripture_prayer`, `ironing`, `python_session`,
+  `sprint_training`, `academics` — referenced by the parser.
+- **KPI keys**: `maths_syllabus`, `further_maths`, `business`, `economics` (sprint KPIs and
+  trading are no longer tracked by the assistant).
+- **Trading** tables and `/trading/*` endpoints still exist but nothing in the UI or the
+  assistant reads them.
