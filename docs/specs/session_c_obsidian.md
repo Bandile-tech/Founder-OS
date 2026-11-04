@@ -85,7 +85,7 @@ APScheduler (already in `requirements.txt`) runs `sync_vault` every `VAULT_SYNC_
 | Method | Path | Description |
 |--------|------|-------------|
 | `POST` | `/vault/sync` | Manual trigger — clones/pulls and indexes |
-| `GET` | `/vault/status` | `{last_synced, chunk_count, file_count, repo_url}` |
+| `GET` | `/vault/status` | `{last_synced, chunk_count, file_count}` (never the repo URL: it can carry a token) |
 | `GET` | `/vault/search?q=` | Keyword search, returns top 8 chunks |
 
 ## Tests (tests/test_vault.py)

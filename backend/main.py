@@ -2098,8 +2098,10 @@ def vault_sync_endpoint(db: Session = Depends(get_db)):
 
 @app.get("/vault/status")
 def vault_status(db: Session = Depends(get_db)):
-    """Return sync status: last synced time, chunk count, file count, repo URL."""
-    from vault_sync import VAULT_REPO_URL
+    """Return sync status: last synced time, chunk count, file count.
+
+    Never include VAULT_REPO_URL: in production it embeds a GitHub token.
+    """
     chunk_count = db.query(models.ColdArchiveChunk).count()
     file_count = (
         db.query(models.ColdArchiveChunk.file_path)
@@ -2116,7 +2118,6 @@ def vault_status(db: Session = Depends(get_db)):
         "last_synced": last_synced,
         "chunk_count": chunk_count,
         "file_count": file_count,
-        "repo_url": VAULT_REPO_URL,
     }
 
 
