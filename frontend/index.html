@@ -559,6 +559,28 @@ input:hover:not(:focus), textarea:hover:not(:focus), select:hover:not(:focus){bo
   color:var(--muted);text-transform:uppercase;margin-top:7px;
   display:none;align-items:center;gap:8px;
 }
+/* CHANGES + SUGGESTIONS — act, then show what changed, with undo */
+.chg-strip{margin-top:10px;display:flex;flex-direction:column;gap:5px}
+.chg-row{display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:10px;background:rgba(62,220,180,0.06);border:1px solid rgba(62,220,180,0.18);font-size:11.5px}
+.chg-row.undone{opacity:0.45;background:rgba(255,255,255,0.02);border-color:rgba(255,255,255,0.08)}
+.chg-row.undone .chg-text{text-decoration:line-through}
+.chg-row .chg-act{font-family:var(--font-tech);font-size:9px;letter-spacing:0.14em;text-transform:uppercase;color:var(--success);flex-shrink:0}
+.chg-row.undone .chg-act{color:var(--muted)}
+.chg-text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)}
+.chg-undo,.sug-btn{background:none;border:1px solid var(--border-hi);color:var(--glow);border-radius:100px;padding:3px 10px;font-family:var(--font-tech);font-size:9.5px;letter-spacing:0.12em;text-transform:uppercase;cursor:pointer;flex-shrink:0;transition:all var(--t-fast) var(--ease-out)}
+.chg-undo:hover,.sug-btn:hover{border-color:var(--glow);background:rgba(167,235,242,0.08)}
+.chg-undo:disabled,.sug-btn:disabled{opacity:0.4;cursor:default}
+.sug-btn.dismiss{color:var(--muted);border-color:rgba(255,255,255,0.12)}
+.sug-btn.accept{color:var(--success);border-color:rgba(62,220,180,0.4)}
+.chg-head{display:flex;align-items:center;justify-content:space-between;font-family:var(--font-tech);font-size:9.5px;letter-spacing:0.16em;text-transform:uppercase;color:var(--muted);margin:10px 0 4px}
+.sug-strip{display:flex;flex-direction:column;gap:5px}
+.sug-row{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:10px;background:rgba(245,200,66,0.06);border:1px solid rgba(245,200,66,0.22);font-size:11.5px}
+.sug-main{flex:1;min-width:0}
+.sug-text{color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sug-reason{font-size:10px;color:var(--muted);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#ucmd-pending{display:none;padding:0 0 8px}
+#ucmd-pending.show{display:block}
+
 /* COMMAND CENTRE — home screen built on GET /briefing/today */
 .cc-eyebrow{font-family:var(--font-tech);font-size:10.5px;letter-spacing:0.22em;text-transform:uppercase;color:var(--muted)}
 .cc-greeting{font-family:var(--font-display);font-size:clamp(28px,4vw,44px);font-weight:700;letter-spacing:-0.03em;line-height:1.05;margin:6px 0 10px}
@@ -2318,6 +2340,7 @@ tr:hover .td-del{opacity:1}
     <div class="cmd-result-wrap" id="cmd-result-wrap">
       <div id="ucmd-result"></div>
     </div>
+    <div id="ucmd-pending"></div>
     <div class="cmd-row">
       <span class="badge b-glow" id="ucmd-mode-badge">Ready</span>
       <input id="ucmd-input" class="cmd-input"
@@ -4515,6 +4538,117 @@ async function fetchOrchestratorAlerts(){
   }catch(_){/* offline — leave card as-is */}
 }
 
+/* ── Changes (with Undo) and Suggestions (one-tap Accept) ── */
+function _afterWriteRefresh(){
+  try{syncFromBackend();}catch(_){}
+  try{loadBriefing();}catch(_){}
+  try{if(document.getElementById("p-syllabus")&&document.getElementById("p-syllabus").classList.contains("active")&&typeof renderSyllabus==="function")renderSyllabus();}catch(_){}
+}
+
+function renderChangesStrip(changes,container){
+  if(!changes||!changes.length)return;
+  let host=container||document.getElementById("ucmd-changes");
+  if(!host){showToast(changes.map(c=>c.summary).join(" · "),"info");return;}
+  const batch=changes[0].batch_id;
+  const undoAll=changes.length>1&&batch?`<button class="chg-undo" onclick="undoBatch('${escHtml(batch)}',this)">Undo all</button>`:"";
+  host.innerHTML=`<div class="chg-head"><span>${changes.length} change${changes.length>1?"s":""}</span>${undoAll}</div>
+    <div class="chg-strip">${changes.map(c=>`
+      <div class="chg-row ${c.undone?"undone":""}" id="chg-${Number(c.id)}">
+        <span class="chg-act">${escHtml(c.action)}</span>
+        <span class="chg-text">${escHtml(c.summary||`${c.table} #${c.record_id}`)}</span>
+        <button class="chg-undo" onclick="undoChange(${Number(c.id)},this)" ${c.undone?"disabled":""}>${c.undone?"Undone":"Undo"}</button>
+      </div>`).join("")}</div>`;
+}
+
+async function undoChange(id,btn){
+  if(btn){btn.disabled=true;btn.textContent="…";}
+  try{
+    const r=await fetch(`${API_BASE}/changes/${id}/undo`,{method:"POST"});
+    if(!r.ok)throw new Error("HTTP "+r.status);
+    const row=document.getElementById(`chg-${id}`);
+    if(row){row.classList.add("undone");}
+    if(btn)btn.textContent="Undone";
+    showToast("Undone","info");
+    _afterWriteRefresh();
+  }catch(e){
+    if(btn){btn.disabled=false;btn.textContent="Undo";}
+    showToast("Undo failed: "+e.message,"error");
+  }
+}
+
+async function undoBatch(batchId,btn){
+  if(btn){btn.disabled=true;btn.textContent="…";}
+  try{
+    const r=await fetch(`${API_BASE}/changes/batch/${encodeURIComponent(batchId)}/undo`,{method:"POST"});
+    if(!r.ok)throw new Error("HTTP "+r.status);
+    const d=await r.json();
+    (d.changes||[]).forEach(c=>{const row=document.getElementById(`chg-${c.id}`);if(row){row.classList.add("undone");const b=row.querySelector(".chg-undo");if(b){b.disabled=true;b.textContent="Undone";}}});
+    if(btn)btn.textContent="Undone";
+    showToast(`Undid ${d.undone} change${d.undone===1?"":"s"}`,"info");
+    _afterWriteRefresh();
+  }catch(e){
+    if(btn){btn.disabled=false;btn.textContent="Undo all";}
+    showToast("Undo failed: "+e.message,"error");
+  }
+}
+
+let _suggestions=[];
+function renderSuggestions(){
+  const host=document.getElementById("ucmd-pending");
+  if(!host)return;
+  if(!_suggestions.length){host.className="";host.innerHTML="";return;}
+  host.className="show";
+  const kindLabel=k=>k==="todo_add"?"Add task":k==="todo_complete"?"Complete":k==="inbox_add"?"Inbox idea":k;
+  host.innerHTML=`<div class="chg-head"><span>${_suggestions.length} suggestion${_suggestions.length>1?"s":""} waiting</span></div>
+    <div class="sug-strip">${_suggestions.map(sg=>`
+      <div class="sug-row" id="sug-${Number(sg.id)}">
+        <span class="chg-act" style="color:var(--warn)">${escHtml(kindLabel(sg.kind))}</span>
+        <div class="sug-main"><div class="sug-text">${escHtml(sg.text||"")}</div><div class="sug-reason">${escHtml(sg.reason||"")}${sg.confidence!=null?` · ${Math.round(sg.confidence*100)}%`:""}</div></div>
+        <button class="sug-btn accept" onclick="acceptSuggestion(${Number(sg.id)},this)">Accept</button>
+        <button class="sug-btn dismiss" onclick="dismissSuggestion(${Number(sg.id)},this)" aria-label="Dismiss">✕</button>
+      </div>`).join("")}</div>`;
+}
+
+async function loadSuggestions(){
+  try{
+    const r=await fetch(`${API_BASE}/suggestions`);
+    if(!r.ok)return;
+    const d=await r.json();
+    _suggestions=Array.isArray(d)?d:[];
+    renderSuggestions();
+  }catch(_){}
+}
+
+async function acceptSuggestion(id,btn){
+  if(btn)btn.disabled=true;
+  try{
+    const r=await fetch(`${API_BASE}/suggestions/${id}/accept`,{method:"POST"});
+    if(!r.ok)throw new Error("HTTP "+r.status);
+    const d=await r.json();
+    _suggestions=_suggestions.filter(s=>s.id!==id);
+    renderSuggestions();
+    if(d.changes&&d.changes.length){
+      const result=document.getElementById("ucmd-result");
+      if(result){
+        result.style.display="block";
+        if(!document.getElementById("ucmd-changes")){result.innerHTML=`<div id="ucmd-changes"></div>`;}
+        renderChangesStrip(d.changes);
+      }
+    }
+    showToast("Accepted","info");
+    _afterWriteRefresh();
+  }catch(e){if(btn)btn.disabled=false;showToast("Accept failed: "+e.message,"error");}
+}
+
+async function dismissSuggestion(id,btn){
+  if(btn)btn.disabled=true;
+  try{
+    await fetch(`${API_BASE}/suggestions/${id}/dismiss`,{method:"POST"});
+    _suggestions=_suggestions.filter(s=>s.id!==id);
+    renderSuggestions();
+  }catch(e){if(btn)btn.disabled=false;}
+}
+
 // Phase 6 — orchestrator. The model decides log-vs-query; we stream its reasoning,
 // tool calls, and final answer over SSE. No client-side routing.
 async function submitUnifiedInput(){
@@ -4544,6 +4678,7 @@ async function submitUnifiedInput(){
 
   let reasoning="";
   let finalText="";
+  let finalChanges=[];
   let loggedSummary=null;      // set when route_brain_dump runs
   const toolsUsed=[];
 
@@ -4561,6 +4696,9 @@ async function submitUnifiedInput(){
       if(indicatorEl)indicatorEl.textContent="";
     } else if(ev.type==="final"){
       finalText=ev.content||"";
+      finalChanges=Array.isArray(ev.changes)?ev.changes:[];
+    } else if(ev.type==="error"){
+      if(indicatorEl)indicatorEl.textContent="⚠ "+(ev.content||"assistant error");
     }
   };
 
@@ -4609,6 +4747,9 @@ async function submitUnifiedInput(){
       badge.className="badge b-glow";
     }
     result.style.display="block";
+    result.insertAdjacentHTML("beforeend",`<div id="ucmd-changes"></div>`);
+    renderChangesStrip(finalChanges);
+    loadSuggestions();
     saveState();
 
     // Voice loop: speak the reply if this input came from the mic.
@@ -5229,7 +5370,7 @@ function toggleLiveVoice(){
    INIT
 ═══════════════════════════════════════════════════ */
 function initialRender(){
-  renderHome();loadBriefing();refreshAiPill();
+  renderHome();loadBriefing();refreshAiPill();loadSuggestions();
   renderDash();
   fetchAndRenderRadar();
   renderConversationHistory();
