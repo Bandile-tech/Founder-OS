@@ -1,0 +1,254 @@
+# Founder OS — Rebuild hand-off (Stages 1–4)
+
+Branch: `claude/rebuild-spec-review-vfrg4o`. One commit per stage. Suite: 391 tests, all
+passing with **no `OPENAI_API_KEY` set**, under Python 3.12 with the pinned requirements.
+
+The spec's "done when" for each stage holds. Stage 5 (real-time voice) follows in a
+separate commit and has its own addendum at the end.
+
+---
+
+## 1. What was built, per stage
+
+### Stage 1 — reliable assistant
+- **`llm.py`** is the single gateway to OpenAI. Lazy client: the app boots, migrations
+  run, every non-AI endpoint works with no key. AI endpoints return **503** with a clear
+  message. All calls log to `llm_usage`.
+- **`ASSISTANT_MODEL`** (default `gpt-5.4-mini`) drives the assistant, parser, summaries
+  and briefing. `ORCHESTRATOR_MODEL` still works as a legacy fallback. The hardcoded
+  `gpt-5.4` default is gone.
+- **Per-tool error handling.** A tool that raises returns `{"error": ...}` to the model;
+  the stream finishes, the reply is saved, and the SSE `tool_result` event carries
+  `"error": true`.
+- **Weekly-review crash fixed** (`RoadmapTask.title` → `task_id`).
+- **Server-side conversation.** One thread (`default`) for every device. The browser's
+  `session_id` is still accepted and stored on each row, never used to partition history.
+  m010 merged all existing rows into the default thread.
+- **Tool calls and results persist** (`chat_messages.tool_calls_json`, role `tool` rows with
+  `tool_call_id`) and are replayed to the model; tool results are truncated to 1,500 chars on
+  replay.
+- **History budget.** Last `ASSISTANT_HISTORY_TURNS` (default 20) user turns verbatim, plus
+  a rolling summary of older turns stored in `conversation_summaries`. The summary is
+  refreshed only once `ASSISTANT_SUMMARY_BATCH` (default 10) messages have fallen out of
+  the window, so it is not an LLM call every turn.
+- **Long-term memory.** `remember` tool (fact / decision / preference) on `ai_memory`; the
+  top 5 relevant memories are injected each turn as a **second** system message, so the main
+  prompt and tool definitions stay byte-stable for prompt caching.
+- Graceful failures in `/chat`, `/parse`, `/input`, `/proactive-brief`, `/weekly-ai-review`
+  and the voice endpoints. A parser that returns invalid JSON raises instead of silently
+  returning an empty payload.
+
+### Stage 2 — change log, undo, confirmation, intent
+- `change_log` records every write by the assistant, parser or tools with before/after
+  snapshots. One assistant turn = one batch (the batch lives on the SQLAlchemy session,
+  because Starlette drives SSE generators one step per worker thread and context variables do
+  not survive between steps).
+- Undo endpoints restore the before-state; a create is removed; a delete is re-inserted with
+  its original id. Idempotent. Undoing a KPI snapshot reloads the in-memory KPI state.
+- The orchestrator's final SSE event and the saved assistant message carry `changes`.
+- **Deletes need confirmation**: `propose_delete` → pending action, deletes nothing;
+  `confirm_action` only after an explicit yes; `cancel_action`. One-tap endpoints too.
+- **Intent classification** in the parser (`intent`, `confidence` per `todos_add` item).
+  Commitments → tasks; ideas → the `Inbox` note; discussion → nothing. Below
+  `INTENT_CONFIDENCE_MIN` (default 0.7) → `suggestions`, written only on accept.
+- `apply_parse_updates` is now **atomic**: one commit, full rollback on any failure, in-memory
+  KPI state updated only after the commit.
+
+### Stage 3 — brain-dump rework, notes, retrieval
+- `todos_complete` is applied with fuzzy matching; ambiguity becomes `todo_complete`
+  suggestions (one per candidate), no match is reported as `todos_complete_unmatched`.
+- **Currency.** `revenue.currency` (USD / ZMW). The parser keeps the stated currency; "Got
+  K500" stores 500 ZMW. `/revenue` and the $10K scoreboard convert with `ZMW_PER_USD`.
+- **Trading removed** from the parser, the tools and the alert rules. `/trading/*` endpoints
+  and tables untouched; no data deleted.
+- **`todos.due_date`** (real DATE) added and backfilled in Python from the free-text `due`.
+  Both columns are written going forward. Overdue is computed server-side.
+- **Notes** (`notes` table + endpoints + tools). Reading progress appends dated entries to the
+  book's note (created if missing); Bible readings append to the `Bible` note. Books and the
+  Bible log were copied once into notes (idempotent; originals untouched).
+- **Meaning-based retrieval.** One shared `embeddings` table (`text-embedding-3-small`, JSON
+  vectors, cosine in Python, keyed by content hash so unchanged text is never re-embedded;
+  vault re-index just moves pointers). Vault, notes and memory share it. Keyword fallback
+  with no key. Vault sync embeds new/changed chunks after indexing.
+- New tools: `complete_task`, `notes_search`, `notes_read`, `notes_append`, `notes_create`,
+  `get_deadlines`, `set_exam_date`. Prompt: vault / notes / memory are searched whenever
+  relevant, not only on command.
+
+### Stage 4 — syllabus and briefing
+- `syllabus_points` with four states; CSV importer; grouped GET; one-tap advance; PATCH.
+- `update_syllabus` tool; `surface_weakest_topics` (status, staleness, notes, exam proximity).
+  The assistant no longer reads `subjects/topics/subtopics` (tables kept; `/subjects/*`
+  endpoints untouched for the old UI).
+- `exam_dates` keyed on (subject_code, paper) with fallback to `subjects.exam_date`.
+- `GET /briefing/today`: deterministic ranked items, progress, alert count, greeting line;
+  optional LLM summary cached once per day.
+- Alerts: `backtest_stalled` removed; `habit_drift_7d` now checks active `non_negotiables`;
+  `zero_mastery_high_weight` replaced by `syllabus_weak_before_exam`. Alerts are inside the
+  briefing (`alerts`, `alert_count`, and `category: "alert"` items).
+
+### Not finished / deliberately left
+- The market-intelligence agent still hardcodes `gpt-4o-mini` (agent management is out of
+  scope). It uses the lazy client, so it no longer breaks boot.
+- Legacy `/input` keyword router and `/chat` kept as-is apart from graceful failures.
+- Embeddings for notes/memory are written when a key exists at write time; run
+  `retrieval.index_notes(db)` / `index_memories(db)` once after setting the key to backfill
+  (a `POST /vault/sync` embeds the vault). No endpoint for that backfill yet.
+
+---
+
+## 2. Endpoints — new or changed
+
+All responses are JSON. Dates are ISO strings. `changes` entries have the shape
+`{id, summary, table, action, record_id, batch_id, undone}`.
+
+### Assistant
+- `POST /orchestrator` `{text, session_id, context?}` → SSE `data:` events:
+  - `{"type":"reasoning","content"}`
+  - `{"type":"tool_call","tool","args"}`
+  - `{"type":"tool_result","tool","summary","error": bool}`
+  - `{"type":"error","content"}` (only when the model call fails; still followed by `final`)
+  - `{"type":"final","content","changes":[...]}`
+- `POST /chat`, `POST /parse`, `POST /input` unchanged shapes; 503 when AI unconfigured,
+  502 on upstream failure (`detail` explains). `/parse` and `/input` responses now include
+  `updates.changes`, `updates.batch_id`, `updates.suggestions`, `updates.ideas_inboxed`,
+  `updates.discussion_skipped`, `updates.todos_completed`, `updates.todos_complete_unmatched`,
+  `updates.reading_notes_appended`; `revenue_logged[]` items include `currency`.
+- `GET /health` → `{ok, ai_configured, assistant_model}`.
+
+### Changes / undo
+- `GET /changes?limit=50&batch_id=` → `[{...change, source, created_at}]`
+- `POST /changes/{id}/undo` → `{...change, already_undone: bool}`
+- `POST /changes/batch/{batch_id}/undo` → `{batch_id, undone, already_undone, changes:[...]}`
+
+### Pending actions (deletes)
+- `GET /actions/pending` → `[{id, kind, table, record_id, summary, status, created_at, expires_at, requires_confirmation}]`
+- `POST /actions/{id}/confirm` → `{...pending, executed: bool, change?|reason?}`
+- `POST /actions/{id}/cancel` → `{...pending}`
+
+### Suggestions
+- `GET /suggestions?status=pending|accepted|dismissed|all` →
+  `[{id, kind, payload, confidence, reason, status, created_at, source_text, text}]`
+  kinds: `todo_add` (payload `{text, priority, category, due, roadmap_id}`), `inbox_add`
+  (`{text}`), `todo_complete` (`{todo_id, text, fragment, score}`)
+- `POST /suggestions/{id}/accept` → `{...suggestion, applied: bool, updates, changes}`
+- `POST /suggestions/{id}/dismiss` → `{...suggestion}`
+
+### Notes
+- `GET /notes?kind=&q=&limit=` → `[{id, title, kind, tags[], created_at, updated_at, preview, score?}]`
+- `GET /notes/{id}` → `{id, title, kind, tags[], body, created_at, updated_at}`
+- `POST /notes` `{title, kind?, body?, tags?[]}` → 201 note
+- `PATCH /notes/{id}` `{title?, kind?, body?, tags?[]}` → note
+- `POST /notes/{id}/append` `{text, date?}` → note
+
+### Revenue / scoreboard
+- `GET /revenue` → `{total (raw sum, legacy), total_usd, by_currency{USD,ZMW}, zmw_per_usd, records[{..., currency}]}`
+- `POST /revenue` accepts `currency` (default USD) → `{id, amount, currency}`
+- `GET /scoreboard/ten-k` → adds `zmw_per_usd`; `ai_revenue_usd` is converted.
+- `GET /todos` rows now include `due_date`; `POST /todos` sets it from `due`.
+
+### Syllabus
+- `GET /syllabus` →
+  ```
+  {"subjects":[{"subject_code","subject_name","level","exam_date",
+                "papers":[{"paper","exam_date","progress":{total,pct,bulletproof_pct,counts{...}},
+                           "points":[{id, subject_code, subject_name, level, paper, topic_code, title,
+                                      status, colour, past_paper_score, last_revised, weakness_notes, updated_at}]}],
+                "progress":{...}}],
+   "progress":{...}}
+  ```
+- `POST /syllabus/import` multipart: `file`, `subject_code`, `subject_name`, `level?`,
+  `papers?` ("P1,S1") → `{created, updated, skipped, total_rows, papers[]}`
+- `POST /syllabus/{id}/advance` → point (status moves to the next state, wrapping)
+- `PATCH /syllabus/{id}` `{status?, weakness_notes?, past_paper_score?, last_revised?, title?}` → point
+- `GET /syllabus/weakest?limit=5` → `[{...point, score, reason, exam_days_away}]`
+
+### Briefing
+- `GET /briefing/today?refresh=0|1` →
+  ```
+  {"date","weekday","badge":"EXECUTION DAY|BUILD DAY|REVIEW DAY",
+   "greeting":"Good morning|afternoon|evening",
+   "greeting_line": "You're 26% through your November targets. Two items need your attention.",
+   "summary": "3–5 sentences" | null, "summary_source":"llm|deterministic", "summary_cached": bool,
+   "items":[{"id","title","category":"task|deadline|non_negotiable|exam|syllabus|target|alert",
+             "due_label":"Today|Tomorrow|Due 7 Nov|2d overdue|19 days|CRITICAL",
+             "due_date", "reason", "suggested_action", "target_type":"todo|habit|exam|syllabus_point|annual_target|alert",
+             "target_id", "completable": bool, "score", ...}],
+   "attention_count", "alert_count", "alerts":[{rule_id, severity, message}],
+   "progress":{"academics": int|null, "business": int, "targets": int|null, "habits": int},
+   "counts":{overdue, today, upcoming, undated, items, non_negotiables_done, non_negotiables_total, exams_upcoming},
+   "exams":[{subject_code, subject, paper, exam_date, days_away}],
+   "non_negotiables":[{key, label, done, habit_id}],
+   "weakness_notes":[{syllabus_point_id, subject, paper, topic, note, date, status}]}
+  ```
+  A checkbox on a `completable` item calls the assistant's `complete_task` with
+  `todo_id = target_id` (or `POST /todos/{id}/toggle`).
+
+### Usage
+- `GET /usage/summary?days=90` → `{days, total{calls,input_tokens,cached_input_tokens,output_tokens,estimated_cost_usd}, by_day[], by_month[], by_model[]}`
+
+### Tool registry (for the UI's reference)
+`route_brain_dump, get_dashboard_state, detect_off_track, synthesize_weekly_review,
+surface_weakest_topics, query_war_room, add_todos, query_cold_archive,
+run_market_research_agent, promote_research_opportunity, remember, propose_delete,
+confirm_action, cancel_action, complete_task, notes_search, notes_read, notes_append,
+notes_create, get_deadlines, set_exam_date, update_syllabus`
+
+---
+
+## 3. Migrations
+
+Run automatically at startup, in order, before the schema check. All re-runnable; none drops
+anything. RLS enabled on every new table on Postgres (m008 convention).
+
+| Migration | Adds |
+|---|---|
+| m010 | `chat_messages.thread_id/tool_calls_json/tool_call_id/changes_json` (+ merge into `default`), `ai_memory.kind/tags`, `conversation_summaries`, `llm_usage` |
+| m011 | `change_log`, `pending_actions`, `suggestions`, `notes` |
+| m012 | `revenue.currency` (backfilled USD), `todos.due_date` (Python backfill), `embeddings`, `exam_dates`; one-off copy of books + Bible log into notes |
+| m013 | `syllabus_points`, `briefing_summaries` |
+
+**Postgres notes**
+- All ADD COLUMN use `IF NOT EXISTS`; all tables `CREATE TABLE IF NOT EXISTS`.
+- `todos.due_date` backfill is row-by-row in Python; no SQL cast, so non-ISO strings cannot
+  fail the migration (they stay NULL).
+- `syllabus_points` unique index uses `COALESCE(paper, '')` because Postgres treats NULLs as
+  distinct.
+- Fuzzy matching uses `lower()`/Python, not `ILIKE`, so SQLite and Postgres behave the same.
+- Boolean literals are handled via the ORM, not raw SQL.
+- Existing Postgres rows: `revenue.currency` is set to `USD` for every existing row. If any
+  historic rows were actually Kwacha logged as a bare number, fix them by hand.
+
+---
+
+## 4. Env vars to set on Render
+
+| Var | Default | Purpose |
+|---|---|---|
+| `OPENAI_API_KEY` | unset | Without it everything non-AI works; AI endpoints 503 |
+| `ASSISTANT_MODEL` | `gpt-5.4-mini` | Assistant, parser, summaries, briefing summary |
+| `EMBEDDING_MODEL` | `text-embedding-3-small` | Vault / notes / memory embeddings |
+| `ASSISTANT_HISTORY_TURNS` | `20` | Verbatim history window |
+| `ASSISTANT_SUMMARY_BATCH` | `10` | Messages that must fall out of the window before the summary refreshes |
+| `INTENT_CONFIDENCE_MIN` | `0.7` | Below this an extracted item becomes a suggestion |
+| `ZMW_PER_USD` | `27.0` | Kwacha→dollar rate for the $10K scoreboard. **Set this.** |
+| `LLM_PRICING_JSON` | built-in table | Override per-model prices for `llm_usage` cost estimates |
+| `ORCHESTRATOR_MODEL` | — | Legacy; still honoured if `ASSISTANT_MODEL` is unset |
+
+---
+
+## 5. Known issues
+
+- **Pricing table is an estimate.** `llm.py` ships default prices for gpt-5.4-mini / gpt-5.4 /
+  gpt-4o-mini / embeddings; check against OpenAI's current pricing and override with
+  `LLM_PRICING_JSON` if they differ. Costs are "estimated", never billed figures.
+- **Streaming usage** relies on `stream_options={"include_usage": true}`; if the SDK/model
+  doesn't return it, the call is logged with zero tokens (still counted as a call).
+- **Test harness never fires startup.** `TestClient(app)` without a context manager does not
+  run `on_event("startup")`, so the suite exercises migrations only through
+  `test_startup_handler_runs_with_no_key`, which calls `main.startup()` directly against
+  the local SQLite file. I also ran the startup chain by hand after each stage.
+- **Requirements pins vs Python 3.13.** The pinned `pydantic==2.7.1` / `psycopg2-binary`
+  will not build on 3.13; use 3.12 (as the spec says).
+- `get_dashboard_state` no longer reports the trading gate; the old UI's dashboard reads the
+  `/trading/*` endpoints directly, which are unchanged.
+- The default thread means the frontend's `founderOS_session` id is informational only.
