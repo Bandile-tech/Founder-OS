@@ -559,6 +559,40 @@ input:hover:not(:focus), textarea:hover:not(:focus), select:hover:not(:focus){bo
   color:var(--muted);text-transform:uppercase;margin-top:7px;
   display:none;align-items:center;gap:8px;
 }
+/* SYLLABUS TRACKER — four states, one tap to advance */
+.sy-subject{margin-bottom:18px}
+.sy-subject-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:0 0 10px}
+.sy-subject-head .n{font-family:var(--font-display);font-size:20px;font-weight:700;letter-spacing:-0.02em}
+.sy-subject-head .x{font-family:var(--font-tech);font-size:10.5px;letter-spacing:0.14em;text-transform:uppercase;color:var(--muted)}
+.sy-paper{margin-bottom:12px}
+.sy-paper-head{display:flex;align-items:center;gap:10px;margin-bottom:6px}
+.sy-paper-head .p{font-family:var(--font-tech);font-size:11px;letter-spacing:0.16em;text-transform:uppercase;color:var(--text-2)}
+.sy-paper-head .bar{flex:1;height:5px;border-radius:100px;background:rgba(167,235,242,0.08);overflow:hidden;display:flex}
+.sy-paper-head .bar span{height:100%;display:block}
+.sy-paper-head .pct{font-family:var(--font-tech);font-size:11px;color:var(--text);font-variant-numeric:tabular-nums;min-width:36px;text-align:right}
+.sy-row{display:grid;grid-template-columns:14px 52px minmax(0,1fr) auto auto;align-items:center;gap:10px;padding:9px 10px;border-radius:10px;cursor:pointer;
+  border:1px solid transparent;transition:background var(--t-base) var(--ease-out),border-color var(--t-base)}
+@media(hover:hover) and (pointer:fine){.sy-row:hover{background:rgba(255,255,255,0.03);border-color:rgba(167,235,242,0.12)}}
+.sy-row:active{transform:scale(0.995)}
+.sy-dot{width:12px;height:12px;border-radius:50%;box-shadow:0 0 8px var(--sy-c, transparent);background:var(--sy-c)}
+.sy-row[data-status="not_started"]{--sy-c:var(--danger)}
+.sy-row[data-status="learned"]{--sy-c:var(--warn)}
+.sy-row[data-status="revised"]{--sy-c:#4DA3FF}
+.sy-row[data-status="bulletproof"]{--sy-c:var(--success)}
+.sy-code{font-family:var(--font-tech);font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+.sy-title{font-size:13px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sy-note{font-size:10.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sy-meta{font-family:var(--font-tech);font-size:10px;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);white-space:nowrap}
+.sy-state{font-family:var(--font-tech);font-size:9.5px;letter-spacing:0.14em;text-transform:uppercase;padding:3px 9px;border-radius:100px;border:1px solid var(--sy-c);color:var(--sy-c);white-space:nowrap}
+.sy-legend{display:flex;flex-wrap:wrap;gap:14px;font-family:var(--font-tech);font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);margin:4px 0 16px}
+.sy-legend span{display:flex;align-items:center;gap:6px}
+.sy-legend i{width:9px;height:9px;border-radius:50%;display:inline-block}
+.sy-empty{padding:28px 10px;color:var(--muted);font-size:12.5px;text-align:center}
+.sy-import-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
+.sy-import-grid .full{grid-column:1 / -1}
+.sy-file{font-size:12px;color:var(--text-2)}
+@media(max-width:640px){.sy-row{grid-template-columns:12px 44px minmax(0,1fr) auto}.sy-row .sy-meta{display:none}}
+
 /* CHANGES + SUGGESTIONS — act, then show what changed, with undo */
 .chg-strip{margin-top:10px;display:flex;flex-direction:column;gap:5px}
 .chg-row{display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:10px;background:rgba(62,220,180,0.06);border:1px solid rgba(62,220,180,0.18);font-size:11.5px}
@@ -1743,6 +1777,10 @@ tr:hover .td-del{opacity:1}
         <span class="ni"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M1.6 8h2.9l1.7-4.2 3.1 8.4L11 8h3.4"/></svg></span>
         <span class="nav-label">Health</span>
       </div>
+      <div class="nav-item" onclick="nav('syllabus',this)">
+        <span class="ni"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2.2" y="2.2" width="11.6" height="11.6" rx="2"/><path d="M5 6h6M5 8.5h6M5 11h3.5"/></svg></span>
+        <span class="nav-label">Syllabus</span>
+      </div>
       <div class="nav-item" onclick="nav('academic',this)">
         <span class="ni"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.8 14.6 6 8 9.2 1.4 6Z"/><path d="M4.2 7.4v3c0 1.1 1.7 2 3.8 2s3.8-.9 3.8-2v-3"/><path d="M14.6 6v3.2"/></svg></span>
         <span class="nav-label">Academic Roadmap</span>
@@ -1992,6 +2030,42 @@ tr:hover .td-del{opacity:1}
     </div>
 
     <!-- ── ACADEMIC ROADMAP ── -->
+    <!-- ── SYLLABUS TRACKER ── -->
+    <div class="page" id="p-syllabus">
+      <div class="eco-header">
+        <div><div class="eco-title">Syllabus</div><div class="eco-sub">Tap a topic to move it to the next state · Red → Yellow → Blue → Green</div></div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <span class="badge b-glow" id="sy-overall">—</span>
+          <button class="ar-btn-sm" onclick="openSyllabusImport()">Import CSV</button>
+        </div>
+      </div>
+      <div class="sy-legend">
+        <span><i style="background:var(--danger)"></i>Not started</span>
+        <span><i style="background:var(--warn)"></i>Learned, weak</span>
+        <span><i style="background:#4DA3FF"></i>Revised, not 100%</span>
+        <span><i style="background:var(--success)"></i>Bulletproof</span>
+      </div>
+      <div id="sy-body"><div class="skel cc-skel"></div><div class="skel cc-skel" style="opacity:0.6"></div><div class="skel cc-skel" style="opacity:0.35"></div></div>
+      <div id="sy-import-modal" class="ar-modal-overlay" style="display:none" onclick="if(event.target===this)closeSyllabusImport()">
+        <div class="ar-modal" style="width:440px">
+          <div class="ar-modal-title">Import tracker CSV</div>
+          <div style="font-size:11.5px;color:var(--muted);line-height:1.5">Export the sheet as CSV. Header: Topic, Learned, Revised, Bulletproof, Past Paper Score %, Last Revised, Weakness Notes. Repeated header blocks map to the papers below, in order. Re-importing updates rather than duplicates.</div>
+          <div class="sy-import-grid">
+            <input class="ar-input" id="sy-imp-code" placeholder="Subject code (9709)">
+            <input class="ar-input" id="sy-imp-name" placeholder="Subject name (Maths 9709)">
+            <select class="ar-input" id="sy-imp-level"><option value="">Level</option><option>AS</option><option>A2</option></select>
+            <input class="ar-input" id="sy-imp-papers" placeholder="Papers in block order (P1,S1)">
+            <input class="full sy-file" id="sy-imp-file" type="file" accept=".csv,text/csv">
+          </div>
+          <div id="sy-imp-msg" style="font-size:11.5px;color:var(--muted);margin-top:8px;min-height:16px"></div>
+          <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px">
+            <button class="ar-btn-sm" onclick="closeSyllabusImport()">Cancel</button>
+            <button class="ar-btn" id="sy-imp-go" onclick="submitSyllabusImport()">Import</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div class="page" id="p-academic">
       <div class="eco-header">
         <div><div class="eco-title">Academic Roadmap</div><div class="eco-sub">CIE Oct–Nov 2026 · Per-subject syllabus tracker</div></div>
@@ -2685,6 +2759,120 @@ function dailyReset(){
 }
 
 /* ═══════════════════════════════════════════════════
+   SYLLABUS TRACKER — GET /syllabus · POST /syllabus/{id}/advance · POST /syllabus/import
+═══════════════════════════════════════════════════ */
+const SY_STATES=["not_started","learned","revised","bulletproof"];
+const SY_LABEL={not_started:"Not started",learned:"Learned",revised:"Revised",bulletproof:"Bulletproof"};
+const SY_COLOUR={not_started:"var(--danger)",learned:"var(--warn)",revised:"#4DA3FF",bulletproof:"var(--success)"};
+let _syllabus=null;
+
+function _syBar(counts,total){
+  if(!total)return "";
+  return SY_STATES.map(st=>`<span style="width:${(100*(counts[st]||0)/total).toFixed(1)}%;background:${SY_COLOUR[st]}"></span>`).join("");
+}
+function _syLastNote(p){
+  const n=(p.weakness_notes||"").trim();
+  if(!n)return "";
+  const last=n.split("\n").filter(Boolean).pop()||"";
+  return last.replace(/^-\s*\d{4}-\d{2}-\d{2}:\s*/,"").replace(/^-\s*/,"");
+}
+function _syRow(p){
+  const rev=p.last_revised?new Date(p.last_revised).toLocaleDateString("en-GB",{day:"numeric",month:"short"}):"never";
+  const note=_syLastNote(p);
+  return `<div class="sy-row" id="sy-${Number(p.id)}" data-status="${escHtml(p.status)}" role="button" tabindex="0" title="Tap to move to the next state"
+      onclick="syllabusAdvance(${Number(p.id)})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();syllabusAdvance(${Number(p.id)});}">
+    <span class="sy-dot"></span>
+    <span class="sy-code">${escHtml(p.topic_code)}</span>
+    <div style="min-width:0"><div class="sy-title">${escHtml(p.title)}</div>${note?`<div class="sy-note">${escHtml(note)}</div>`:""}</div>
+    <span class="sy-meta">${p.past_paper_score!=null?escHtml(String(Math.round(p.past_paper_score)))+"% · ":""}${escHtml(rev)}</span>
+    <span class="sy-state">${escHtml(SY_LABEL[p.status]||p.status)}</span>
+  </div>`;
+}
+
+function renderSyllabusData(){
+  const d=_syllabus;
+  const body=document.getElementById("sy-body");
+  const overall=document.getElementById("sy-overall");
+  if(!body||!d)return;
+  if(overall)overall.textContent=d.progress&&d.progress.total?`${d.progress.pct}% · ${d.progress.total} topics`:"No topics yet";
+  if(!d.subjects||!d.subjects.length){
+    body.innerHTML=`<div class="card"><div class="sy-empty">No syllabus imported yet. Use <b>Import CSV</b> with the tracker sheet export, or tell Founder OS what you revised.</div></div>`;
+    return;
+  }
+  body.innerHTML=d.subjects.map(sub=>{
+    const ex=sub.exam_date?(()=>{const days=Math.ceil((new Date(sub.exam_date)-new Date().setHours(0,0,0,0))/864e5);return `${new Date(sub.exam_date).toLocaleDateString("en-GB",{day:"numeric",month:"short"})} · ${days} days`;})():"exam date not set";
+    return `<div class="card sy-subject">
+      <div class="sy-subject-head"><span class="n">${escHtml(sub.subject_name)}</span><span class="x">${escHtml(sub.level||"")} · ${escHtml(ex)} · ${sub.progress.pct}%</span></div>
+      ${sub.papers.map(pp=>`<div class="sy-paper">
+        <div class="sy-paper-head"><span class="p">${escHtml(pp.paper||"General")}${pp.exam_date&&pp.exam_date!==sub.exam_date?` · ${escHtml(new Date(pp.exam_date).toLocaleDateString("en-GB",{day:"numeric",month:"short"}))}`:""}</span><div class="bar">${_syBar(pp.progress.counts,pp.progress.total)}</div><span class="pct">${pp.progress.pct}%</span></div>
+        ${pp.points.map(_syRow).join("")}
+      </div>`).join("")}
+    </div>`;
+  }).join("");
+}
+
+async function renderSyllabus(){
+  try{
+    const r=await fetch(`${API_BASE}/syllabus`);
+    if(!r.ok)throw new Error("HTTP "+r.status);
+    _syllabus=await r.json();
+    renderSyllabusData();
+  }catch(e){
+    const body=document.getElementById("sy-body");
+    if(body&&!_syllabus)body.innerHTML=`<div class="card"><div class="sy-empty">Waiting for the backend…</div></div>`;
+  }
+}
+
+async function syllabusAdvance(id){
+  const row=document.getElementById(`sy-${id}`);
+  const cur=row?row.getAttribute("data-status"):null;
+  const next=cur?SY_STATES[(SY_STATES.indexOf(cur)+1)%SY_STATES.length]:null;
+  if(row&&next){row.setAttribute("data-status",next);const st=row.querySelector(".sy-state");if(st)st.textContent=SY_LABEL[next];}
+  try{
+    const r=await fetch(`${API_BASE}/syllabus/${id}/advance`,{method:"POST"});
+    if(!r.ok)throw new Error("HTTP "+r.status);
+    const p=await r.json();
+    if(row){row.setAttribute("data-status",p.status);const st=row.querySelector(".sy-state");if(st)st.textContent=SY_LABEL[p.status];}
+    // refresh progress bars without re-fetching everything
+    if(_syllabus){_syllabus.subjects.forEach(sub=>sub.papers.forEach(pp=>pp.points.forEach(x=>{if(x.id===p.id)Object.assign(x,p);})));}
+    renderSyllabus();
+    try{loadBriefing();}catch(_){}
+  }catch(e){
+    if(row&&cur){row.setAttribute("data-status",cur);const st=row.querySelector(".sy-state");if(st)st.textContent=SY_LABEL[cur];}
+    showToast("Could not update — backend unreachable","error");
+  }
+}
+
+function openSyllabusImport(){const m=document.getElementById("sy-import-modal");if(m){m.style.display="flex";document.getElementById("sy-imp-msg").textContent="";}}
+function closeSyllabusImport(){const m=document.getElementById("sy-import-modal");if(m)m.style.display="none";}
+async function submitSyllabusImport(){
+  const code=document.getElementById("sy-imp-code").value.trim();
+  const name=document.getElementById("sy-imp-name").value.trim();
+  const level=document.getElementById("sy-imp-level").value;
+  const papers=document.getElementById("sy-imp-papers").value.trim();
+  const file=document.getElementById("sy-imp-file").files[0];
+  const msg=document.getElementById("sy-imp-msg");
+  if(!code||!name||!file){msg.textContent="Subject code, name and a CSV file are required.";return;}
+  const btn=document.getElementById("sy-imp-go");
+  btn.disabled=true;msg.textContent="Importing…";
+  try{
+    const fd=new FormData();
+    fd.append("file",file,file.name||"tracker.csv");
+    fd.append("subject_code",code);fd.append("subject_name",name);
+    if(level)fd.append("level",level);
+    if(papers)fd.append("papers",papers);
+    const r=await fetch(`${API_BASE}/syllabus/import`,{method:"POST",body:fd});
+    if(!r.ok){const d=await r.json().catch(()=>({}));throw new Error(d.detail||("HTTP "+r.status));}
+    const d=await r.json();
+    msg.textContent=`Imported: ${d.created} new, ${d.updated} updated, ${d.skipped} unchanged.`;
+    showToast(`Syllabus: ${d.created} new · ${d.updated} updated · ${d.skipped} unchanged`,"info");
+    await renderSyllabus();
+    setTimeout(closeSyllabusImport,900);
+  }catch(e){msg.textContent="Import failed: "+e.message;}
+  finally{btn.disabled=false;}
+}
+
+/* ═══════════════════════════════════════════════════
    COMMAND CENTRE — home screen on GET /briefing/today
 ═══════════════════════════════════════════════════ */
 let _briefing=null,_ccShowAll=false,_ccLoading=false;
@@ -2855,6 +3043,7 @@ window.addEventListener("resize",()=>{
 
 function renderPage(page){
   if(page==="home"){renderHome();loadBriefing();}
+  else if(page==="syllabus"){renderSyllabus()}
   else if(page==="dashboard"){renderDash();fetchAndRenderRadar();renderConversationHistory();if(_recentActOpen)renderRecentActivity()}
   else if(page==="timetable"){renderTimetable()}
   else if(page==="health"){renderHealth()}
