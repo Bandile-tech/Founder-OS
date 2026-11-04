@@ -108,6 +108,12 @@ If a task seems to require one of these, stop and say so rather than building it
    - Every item has a title, category, reason (why it matters), suggested action and target id. The list is ranked.
    - **Optional summary**: at most one LLM call per day, cached for that day, producing 3–5 sentences. Regenerate only on request.
    - Works fully with no OpenAI key.
+   - **It must power the target home screen**, `docs/design/command-centre.png`. Don't build that screen; it's built separately against this endpoint. The response must include:
+     - `greeting_line`: one sentence for under the greeting (deterministic fallback when there's no LLM summary)
+     - `items`: brief items, each with title, due label (e.g. "Due 7 Nov", "Today", "19:00"), category, reason, and the task id so a checkbox can complete it through `complete_task`
+     - `progress`: percentages per area, at minimum `academics` (from `syllabus_points`) and `targets` (from annual targets)
+     - `alert_count`: for the notification bell
+   - Put the full response shape in the hand-off report.
 9. **Alerts.** The backend is the single source. Drop the trading rule, point the habits rule at `non_negotiables`, and use the syllabus-based academic rule. Alerts appear inside the briefing.
 
 **After Stage 4: stop, post the hand-off report, and wait for my go-ahead before Stage 5.**
