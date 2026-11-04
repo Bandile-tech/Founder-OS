@@ -51,11 +51,12 @@ def remember(db: Session, text: str, kind: str = "fact", tags: list[str] | None 
         created_at=datetime.utcnow(),
     )
     db.add(row)
+    db.flush()
+    import change_log
+    change_log.record_create(db, row, f"Remembered ({kind}): {text[:70]}")
     if commit:
         db.commit()
         db.refresh(row)
-    else:
-        db.flush()
     return row
 
 

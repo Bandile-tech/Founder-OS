@@ -327,6 +327,7 @@ def add_todos(db, items: list, category: str = "personal", priority: int = 5):
 
     Never called for advisory or query responses. Source is always "orchestrator".
     """
+    import change_log
     today = str(date.today())
     created = []
     for text in items:
@@ -342,6 +343,7 @@ def add_todos(db, items: list, category: str = "personal", priority: int = 5):
         )
         db.add(todo)
         db.flush()
+        change_log.record_create(db, todo, f"Added task: {str(text)[:80]}")
         created.append({"id": todo.id, "text": todo.text})
     db.commit()
     result = {"created": len(created), "todos": created}
@@ -462,6 +464,33 @@ def remember(db, text: str, kind: str = "fact", tags: list | None = None):
 
 
 # ═══════════════════════════════════════════════════════════════
+# Tools 12-14 — deletes need confirmation
+# ═══════════════════════════════════════════════════════════════
+
+def propose_delete(db, table: str, record_id: int, reason: str | None = None):
+    """Record a delete the user asked for as a pending action. Deletes NOTHING.
+    The assistant must ask for an explicit yes, then call confirm_action."""
+    import actions
+    pending = actions.propose_delete(db, table, int(record_id), reason)
+    return pending, f"awaiting confirmation: {pending['summary']}"
+
+
+def confirm_action(db, pending_id: int):
+    """Execute a pending action after the user has explicitly confirmed it."""
+    import actions
+    result = actions.confirm_action(db, int(pending_id))
+    if result.get("executed"):
+        return result, f"done: {result['summary']}"
+    return result, f"not executed: {result.get('reason', 'unknown')}"
+
+
+def cancel_action(db, pending_id: int):
+    import actions
+    result = actions.cancel_action(db, int(pending_id))
+    return result, f"cancelled: {result['summary']}"
+
+
+# ═══════════════════════════════════════════════════════════════
 
 # Dispatch + JSON tool schemas for the model
 # ════════════════════════════════════════════════════════════════
@@ -500,6 +529,11 @@ _TOOL_DISPATCH = {
         kind=a.get("kind", "fact"),
         tags=a.get("tags"),
     ),
+    "propose_delete": lambda db, a: propose_delete(
+        db, table=a.get("table", ""), record_id=int(a.get("record_id", 0)), reason=a.get("reason"),
+    ),
+    "confirm_action": lambda db, a: confirm_action(db, int(a.get("pending_id", 0))),
+    "cancel_action": lambda db, a: cancel_action(db, int(a.get("pending_id", 0))),
 }
 
 
@@ -751,6 +785,64 @@ TOOL_SCHEMAS = [
                     },
                 },
                 "required": ["text"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "propose_delete",
+            "description": (
+                "Propose deleting one record. This deletes NOTHING — it registers a pending "
+                "action and returns its id and a summary. You must then ask Bandile to confirm "
+                "in plain words and only call confirm_action after he explicitly says yes. "
+                "Use it whenever he asks to remove, delete or clear something."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "table": {
+                        "type": "string",
+                        "enum": ["todos", "notes", "revenue", "ai_memory", "books",
+                                 "daily_bible_log", "clients", "lift_logs", "daily_logs"],
+                        "description": "Which table the record lives in.",
+                    },
+                    "record_id": {"type": "integer", "description": "The record's id."},
+                    "reason": {"type": "string", "description": "Why, in Bandile's words. Optional."},
+                },
+                "required": ["table", "record_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "confirm_action",
+            "description": (
+                "Execute a pending action (a delete) AFTER Bandile has explicitly confirmed it "
+                "in this conversation ('yes', 'do it', 'confirm'). Never call it without that "
+                "explicit yes."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "pending_id": {"type": "integer", "description": "The pending action id from propose_delete."},
+                },
+                "required": ["pending_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "cancel_action",
+            "description": "Cancel a pending action when Bandile says no or changes his mind.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "pending_id": {"type": "integer"},
+                },
+                "required": ["pending_id"],
             },
         },
     },

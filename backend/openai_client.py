@@ -170,6 +170,16 @@ Correct output includes BOTH:
   "habits_done": ["scripture_prayer"]
   "trade_logs": [{{"type": "live", "pair": "EURUSD", "direction": "long", "net_pl_usd": 50, "adherence": true, "outcome": "win", "r_multiple": 1.0}}]
 
+INTENT RULE — NOT EVERY SENTENCE IS A TASK. Label every todos_add item:
+- "commitment": Bandile has decided to do it ("I'll finish the essay tomorrow", "need to email the CEO by Friday", "add: book dentist"). Only commitments become tasks.
+- "idea": a possibility, a maybe, a someday ("maybe I should start a newsletter", "it might be worth trying X", "idea: ..."). Ideas go to the Inbox note, never to tasks.
+- "discussion": reflection, opinion, questions, or things that already happened ("I've been thinking about pricing", "wonder if that was right"). Discussion writes nothing.
+confidence is your 0.0-1.0 certainty in that label. Hedged language ("maybe", "might", "someday", "could") lowers confidence for commitment and raises it for idea. When genuinely unsure, give a low confidence rather than guessing a commitment.
+
+Input: "Maybe I should start a newsletter someday"
+Correct output: "todos_add": [{{"text": "Start a newsletter", "priority": 5, "category": "business", "due": null, "roadmap_id": null, "intent": "idea", "confidence": 0.9}}]
+Wrong output: a task with intent "commitment".
+
 READING RULE: Distinguish between Bible reading and general book reading.
 - Bible chapters (e.g. "read Proverbs 12", "read Matthew 5") → populate bible_log, NOT reading_updates and NOT todos_add.
 - Fiction/non-fiction books from reading queue (e.g. "read 12 week year") → populate reading_updates, NOT todos_add.
@@ -192,7 +202,7 @@ Schema:
 {{
   "summary": "one-line summary",
   "kpi_updates": [{{"key": "maths_syllabus|further_maths|business|economics", "value": number}}],
-  "todos_add": [{{"text": "string", "priority": 1, "category": "health|academics|business|personal", "due": "YYYY-MM-DD|null", "roadmap_id": "id-or-null"}}],
+  "todos_add": [{{"text": "string", "priority": 1, "category": "health|academics|business|personal", "due": "YYYY-MM-DD|null", "roadmap_id": "id-or-null", "intent": "commitment|idea|discussion", "confidence": 0.0-1.0}}],
   "todos_complete": ["text fragment"],
   "roadmap_complete": ["roadmap-task-id"],
   "habits_done": ["scripture_prayer|ironing|python_session|sprint_training|academics"],
@@ -478,7 +488,7 @@ def get_orchestrator_response(messages: list, db, max_rounds: int = 6,
     final_text = ""
 
     def _final(text):
-        return {"type": "final", "content": text, "changes": change_log.current_batch_changes()}
+        return {"type": "final", "content": text, "changes": change_log.current_batch_changes(db)}
 
     for _ in range(max_rounds):
         content_acc = ""

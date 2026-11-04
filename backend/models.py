@@ -622,3 +622,72 @@ class ResearchMemoryNote(Base):
     times_reinforced = Column(Integer, default=1)
     created_at       = Column(DateTime, default=datetime.utcnow)
     updated_at       = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+# ── REBUILD: CHANGE LOG, CONFIRMATIONS, SUGGESTIONS, NOTES ───
+
+class ChangeLog(Base):
+    """Every write made by the assistant, the parser or a tool. One assistant turn is
+    one batch. ``before_json``/``after_json`` are column snapshots used by undo."""
+    __tablename__ = "change_log"
+
+    id          = Column(Integer, primary_key=True, index=True)
+    created_at  = Column(DateTime, default=datetime.utcnow, index=True)
+    batch_id    = Column(String, nullable=False, index=True)
+    source      = Column(String, nullable=False, default="assistant")  # assistant|parser|ui
+    table_name  = Column(String, nullable=False)
+    record_id   = Column(Integer, nullable=True)
+    action      = Column(String, nullable=False)                        # create|update|delete
+    before_json = Column(Text, nullable=True)
+    after_json  = Column(Text, nullable=True)
+    summary     = Column(String, nullable=True)
+    undone_at   = Column(DateTime, nullable=True)
+
+
+class PendingAction(Base):
+    """A destructive action the assistant proposed and must not execute until the
+    user explicitly confirms it (deletes)."""
+    __tablename__ = "pending_actions"
+
+    id           = Column(Integer, primary_key=True, index=True)
+    created_at   = Column(DateTime, default=datetime.utcnow)
+    thread_id    = Column(String, nullable=True)
+    kind         = Column(String, nullable=False, default="delete")
+    table_name   = Column(String, nullable=False)
+    record_id    = Column(Integer, nullable=False)
+    summary      = Column(String, nullable=True)
+    payload_json = Column(Text, nullable=True)
+    status       = Column(String, nullable=False, default="pending")  # pending|confirmed|cancelled|expired
+    expires_at   = Column(DateTime, nullable=True)
+    resolved_at  = Column(DateTime, nullable=True)
+    batch_id     = Column(String, nullable=True)
+
+
+class Suggestion(Base):
+    """A low-confidence or ambiguous extraction. Nothing is written until accepted."""
+    __tablename__ = "suggestions"
+
+    id           = Column(Integer, primary_key=True, index=True)
+    created_at   = Column(DateTime, default=datetime.utcnow)
+    kind         = Column(String, nullable=False)       # todo_add|todo_complete|inbox_add|...
+    payload_json = Column(Text, nullable=False)
+    confidence   = Column(Float, nullable=True)
+    reason       = Column(String, nullable=True)
+    source_text  = Column(Text, nullable=True)
+    status       = Column(String, nullable=False, default="pending")  # pending|accepted|dismissed
+    source       = Column(String, nullable=True)        # parser|assistant
+    batch_id     = Column(String, nullable=True)
+    resolved_at  = Column(DateTime, nullable=True)
+
+
+class Note(Base):
+    """Free-form markdown notes: books, bible, journal, inbox, general."""
+    __tablename__ = "notes"
+
+    id         = Column(Integer, primary_key=True, index=True)
+    title      = Column(String, nullable=False)
+    kind       = Column(String, nullable=False, default="general")  # book|bible|journal|inbox|general
+    body       = Column(Text, nullable=False, default="")
+    tags       = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

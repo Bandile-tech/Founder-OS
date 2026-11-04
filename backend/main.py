@@ -50,7 +50,11 @@ app.add_middleware(
 
 # ── Routers (rebuild modules) ────────────────────────────────
 import usage as _usage
+import change_log as _change_log
+import actions as _actions
 app.include_router(_usage.router)
+app.include_router(_change_log.router)
+app.include_router(_actions.router)
 
 # Serve frontend from ../frontend if it exists
 FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend")
@@ -124,6 +128,8 @@ async def startup():
         run_m009(db)        # m009 — market intelligence agent tables
         from migrations.m010_assistant_core import run as run_m010
         run_m010(db)        # m010 — chat thread/tool columns, summaries, llm_usage
+        from migrations.m011_change_log import run as run_m011
+        run_m011(db)        # m011 — change_log, pending_actions, suggestions, notes
         _validate_schema(engine)   # raises if any ORM column is absent from the live DB
         _seed_non_negotiables_if_empty(db)
         _verify_seed_integrity(db)
@@ -1149,19 +1155,56 @@ def delete_lift_log(log_id: int, db: Session = Depends(get_db)):
 
 
 # ── SHARED PARSE-APPLICATION HELPER ─────────────────────────
+def _intent_confidence_min() -> float:
+    try:
+        return float(os.getenv("INTENT_CONFIDENCE_MIN", "0.7"))
+    except ValueError:
+        return 0.7
+
+
 def apply_parse_updates(db: Session, parsed: dict, today: date) -> dict:
     """
     Apply every update extracted by the AI parser to the database.
 
-    Called by both /parse and /input so there is exactly one copy of
-    this logic.  Returns a structured summary of what was applied.
+    Called by /parse, /input, the orchestrator's route_brain_dump tool and
+    suggestion acceptance, so there is exactly one copy of this logic.
+
+    Atomic: everything is applied in one transaction and committed once at the end;
+    any failure rolls back every write. Every write is recorded in the change log
+    (one batch per call unless an assistant batch is already open). The in-memory KPI
+    state is only updated after the commit succeeds so a rollback can never desync it.
+
+    Returns a structured summary of what was applied, plus ``changes`` and ``batch_id``.
     """
-    global _kpi_state
+    import change_log
+
+    with change_log.batch_scope(db, "parser"):
+        try:
+            result = _apply_parse_updates_inner(db, parsed, today)
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        for key, value in result.pop("_kpi_pending", {}).items():
+            _kpi_state[key]["value"] = value
+        result["changes"] = change_log.current_batch_changes(db)
+        result["batch_id"] = change_log.current_batch_id(db)
+    return result
+
+
+def _apply_parse_updates_inner(db: Session, parsed: dict, today: date) -> dict:
+    import change_log
+    import actions
+    import notes as notes_mod
 
     result: dict = {
         "habits_updated":          [],   # list of {key, label, strategy}
         "kpi_updates_applied":     [],   # list of key strings
         "todos_added":             [],   # list of text strings
+        "todos_completed":         [],   # list of {id, text}
+        "ideas_inboxed":           [],   # list of idea texts appended to the Inbox note
+        "discussion_skipped":      [],   # list of texts classified as discussion (nothing written)
+        "suggestions":             [],   # low-confidence items awaiting one-tap acceptance
         "roadmap_completed":       [],   # list of task_id strings
         "annual_updates_applied":  [],   # list of name_fragment strings
         "reading_updates_applied":    [],   # list of book titles marked currently-reading
@@ -1169,27 +1212,29 @@ def apply_parse_updates(db: Session, parsed: dict, today: date) -> dict:
         "bible_log_entries_created":  0,    # count of DailyBibleLog rows created
         "revenue_logged":             [],   # list of {amount, source}
         "log_entry_created":       False,
+        "_kpi_pending":            {},   # key -> value, applied to _kpi_state after commit
     }
+    source_text = parsed.get("summary") or parsed.get("log_entry")
 
     # ── KPI updates ──────────────────────────────────────────
-    if parsed.get("kpi_updates"):
-        for u in parsed["kpi_updates"]:
-            if u.get("key") in _kpi_state:
-                _kpi_state[u["key"]]["value"] = u["value"]
-                db.add(KPISnapshot(key=u["key"], value=u["value"], date=today))
-                result["kpi_updates_applied"].append(u["key"])
-        if result["kpi_updates_applied"]:
-            db.commit()
+    for u in parsed.get("kpi_updates") or []:
+        if u.get("key") in _kpi_state and u.get("value") is not None:
+            snap = KPISnapshot(key=u["key"], value=u["value"], date=today)
+            db.add(snap)
+            change_log.record_create(db, snap, f"KPI {u['key']} → {u['value']}")
+            result["_kpi_pending"][u["key"]] = u["value"]
+            result["kpi_updates_applied"].append(u["key"])
 
     # ── Roadmap completions ───────────────────────────────────
-    if parsed.get("roadmap_complete"):
-        for task_id in parsed["roadmap_complete"]:
-            task = db.query(RoadmapTask).filter(RoadmapTask.task_id == task_id).first()
-            if task:
-                task.done = True
-                result["roadmap_completed"].append(task_id)
-        if result["roadmap_completed"]:
-            db.commit()
+    for task_id in parsed.get("roadmap_complete") or []:
+        task = db.query(RoadmapTask).filter(RoadmapTask.task_id == task_id).first()
+        if task and not task.done:
+            before = change_log.snapshot(task)
+            task.done = True
+            change_log.record_update(db, task, before, f"Roadmap task {task_id} completed")
+            result["roadmap_completed"].append(task_id)
+        elif task:
+            result["roadmap_completed"].append(task_id)
 
     # ── Habit updates — three-tier fuzzy matching ─────────────
     if parsed.get("habits_done"):
@@ -1223,7 +1268,9 @@ def apply_parse_updates(db: Session, parsed: dict, today: date) -> dict:
                         break
 
             if matched_habit:
+                before = change_log.snapshot(matched_habit)
                 matched_habit.done = True
+                change_log.record_update(db, matched_habit, before, f"Habit done: {matched_habit.label}")
                 result["habits_updated"].append({
                     "key":      matched_habit.key,
                     "label":    matched_habit.label,
@@ -1233,129 +1280,182 @@ def apply_parse_updates(db: Session, parsed: dict, today: date) -> dict:
             else:
                 print(f"[parse] habit '{ai_key}' — no match (today: {[h.key for h in today_habits]})")
 
-        if result["habits_updated"]:
-            db.commit()
-
     # ── Annual target updates ─────────────────────────────────
-    if parsed.get("annual_updates"):
-        for u in parsed["annual_updates"]:
-            frag = u.get("name_fragment", "").lower()
-            if not frag:
-                continue
-            target = db.query(AnnualTarget).filter(
-                func.lower(AnnualTarget.name).contains(frag)
-            ).first()
-            if target:
-                target.current_value = u["current"]
-                target.updated_at = datetime.utcnow()
-                result["annual_updates_applied"].append(frag)
-        if result["annual_updates_applied"]:
-            db.commit()
+    for u in parsed.get("annual_updates") or []:
+        frag = (u.get("name_fragment") or "").lower()
+        if not frag or u.get("current") is None:
+            continue
+        target = db.query(AnnualTarget).filter(
+            func.lower(AnnualTarget.name).contains(frag)
+        ).first()
+        if target:
+            before = change_log.snapshot(target)
+            target.current_value = u["current"]
+            target.updated_at = datetime.utcnow()
+            change_log.record_update(db, target, before, f"Annual target '{target.name}' → {u['current']}")
+            result["annual_updates_applied"].append(frag)
 
     # ── Reading updates ───────────────────────────────────────
-    if parsed.get("reading_updates"):
-        for u in parsed["reading_updates"]:
-            frag = u.get("title_fragment", "").lower()
-            if not frag:
-                continue
-            book = db.query(models.Book).filter(
-                func.lower(models.Book.title).contains(frag)
-            ).first()
-            if book:
-                # Clear current flag on all books, set only the matched one
-                db.query(models.Book).filter(models.Book.is_currently_reading == True).update(
-                    {"is_currently_reading": False}
-                )
-                book.is_currently_reading = True
-                result["reading_updates_applied"].append(book.title)
-            else:
-                result["reading_match_failures"].append(frag)
-        if result["reading_updates_applied"]:
-            db.commit()
+    for u in parsed.get("reading_updates") or []:
+        frag = (u.get("title_fragment") or "").lower()
+        if not frag:
+            continue
+        book = db.query(models.Book).filter(
+            func.lower(models.Book.title).contains(frag)
+        ).first()
+        if book:
+            # Clear current flag on all books, set only the matched one
+            for other in db.query(models.Book).filter(models.Book.is_currently_reading == True).all():
+                if other.id != book.id:
+                    b4 = change_log.snapshot(other)
+                    other.is_currently_reading = False
+                    change_log.record_update(db, other, b4, f"'{other.title}' no longer current")
+            before = change_log.snapshot(book)
+            book.is_currently_reading = True
+            change_log.record_update(db, book, before, f"Now reading '{book.title}'")
+            result["reading_updates_applied"].append(book.title)
+        else:
+            result["reading_match_failures"].append(frag)
 
     # ── Bible log entries ─────────────────────────────────────
-    if parsed.get("bible_log"):
-        for bl in parsed["bible_log"]:
-            book_name = (bl.get("book") or "").strip()
-            chapter   = bl.get("chapter")
-            if not book_name or not chapter:
-                continue
-            db.add(DailyBibleLog(date=today, book=book_name, chapter=int(chapter), notes=bl.get("notes")))
-            result["bible_log_entries_created"] += 1
-            # Advance matching active ReadingPlan if current_book matches
-            plan = db.query(ReadingPlan).filter(
-                ReadingPlan.is_active == True,
-                func.lower(ReadingPlan.current_book) == book_name.lower(),
-            ).first()
-            if plan:
-                plan.current_chapter = int(chapter)
-        if result["bible_log_entries_created"]:
-            db.commit()
+    for bl in parsed.get("bible_log") or []:
+        book_name = (bl.get("book") or "").strip()
+        chapter   = bl.get("chapter")
+        if not book_name or not chapter:
+            continue
+        entry = DailyBibleLog(date=today, book=book_name, chapter=int(chapter), notes=bl.get("notes"))
+        db.add(entry)
+        change_log.record_create(db, entry, f"Bible: {book_name} {chapter}")
+        result["bible_log_entries_created"] += 1
+        # Advance matching active ReadingPlan if current_book matches
+        plan = db.query(ReadingPlan).filter(
+            ReadingPlan.is_active == True,
+            func.lower(ReadingPlan.current_book) == book_name.lower(),
+        ).first()
+        if plan and plan.current_chapter != int(chapter):
+            before = change_log.snapshot(plan)
+            plan.current_chapter = int(chapter)
+            change_log.record_update(db, plan, before, f"Reading plan '{plan.name}' at {book_name} {chapter}")
 
-    # ── Todo additions ────────────────────────────────────────
-    if parsed.get("todos_add"):
-        for t in parsed["todos_add"]:
-            db.add(models.Todo(
-                text=t["text"],
-                priority=t.get("priority", 5),
-                category=t.get("category", "personal"),
-                due=t.get("due", str(today)),
-                source="ai",
-                roadmap_id=t.get("roadmapId"),
+    # ── Todo additions — intent-classified ────────────────────
+    #   commitment → task (if confident)   idea → Inbox note   discussion → nothing
+    #   below INTENT_CONFIDENCE_MIN → suggestion, written only when accepted
+    threshold = _intent_confidence_min()
+    for t in parsed.get("todos_add") or []:
+        text = (t.get("text") or "").strip()
+        if not text:
+            continue
+        intent = (t.get("intent") or "commitment").strip().lower()
+        if intent not in ("commitment", "idea", "discussion"):
+            intent = "commitment"
+        conf = t.get("confidence")
+        conf = 1.0 if conf is None else max(0.0, min(1.0, float(conf)))
+        if intent == "discussion":
+            result["discussion_skipped"].append(text)
+            continue
+        if conf < threshold:
+            kind = "todo_add" if intent == "commitment" else "inbox_add"
+            payload = {"text": text, "priority": t.get("priority", 5),
+                       "category": t.get("category", "personal"), "due": t.get("due"),
+                       "roadmap_id": t.get("roadmap_id") or t.get("roadmapId")}
+            result["suggestions"].append(actions.add_suggestion(
+                db, kind, payload, confidence=conf,
+                reason=f"Only {int(conf * 100)}% sure this is a {intent}",
+                source_text=source_text,
             ))
-            result["todos_added"].append(t["text"])
-        if result["todos_added"]:
-            db.commit()
+            continue
+        if intent == "idea":
+            notes_mod.inbox_add(db, text, on=today)
+            result["ideas_inboxed"].append(text)
+            continue
+        todo = models.Todo(
+            text=text,
+            priority=t.get("priority", 5),
+            category=t.get("category", "personal"),
+            due=t.get("due") or str(today),
+            source="ai",
+            roadmap_id=t.get("roadmap_id") or t.get("roadmapId"),
+        )
+        db.add(todo)
+        change_log.record_create(db, todo, f"Added task: {text[:80]}")
+        result["todos_added"].append(text)
+
+    # ── Ideas (explicit list, e.g. from an accepted suggestion) ──
+    for idea in parsed.get("ideas") or []:
+        text = (idea.get("text") if isinstance(idea, dict) else str(idea)) or ""
+        text = text.strip()
+        if text:
+            notes_mod.inbox_add(db, text, on=today)
+            result["ideas_inboxed"].append(text)
+
+    # ── Todo completions by id (fuzzy text matching lives in Stage 3) ──
+    for todo_id in parsed.get("todos_complete_ids") or []:
+        todo = db.query(models.Todo).filter(models.Todo.id == int(todo_id)).first()
+        if todo and not todo.done:
+            before = change_log.snapshot(todo)
+            todo.done = True
+            todo.completed_at = today
+            change_log.record_update(db, todo, before, f"Completed task: {todo.text[:80]}")
+            result["todos_completed"].append({"id": todo.id, "text": todo.text})
 
     # ── Revenue updates ───────────────────────────────────────
-    if parsed.get("revenue_updates"):
-        for ru in parsed["revenue_updates"]:
-            amount = ru.get("amount")
-            if not amount or float(amount) <= 0:
-                continue
-            source = ru.get("source") or ""
-            client_name = ru.get("client") or ""
-            client_id = None
-            if client_name:
-                matched = db.query(Client).filter(
-                    func.lower(Client.name).contains(client_name.lower())
-                ).first()
-                if matched:
-                    client_id = matched.id
-            db.add(Revenue(
-                amount=float(amount),
-                source=source,
-                client_id=client_id,
-                date=today,
-                notes="auto-logged via brain dump",
-            ))
-            result["revenue_logged"].append({"amount": float(amount), "source": source})
-        if result["revenue_logged"]:
-            db.commit()
+    for ru in parsed.get("revenue_updates") or []:
+        amount = ru.get("amount")
+        if not amount or float(amount) <= 0:
+            continue
+        source = ru.get("source") or ""
+        client_name = ru.get("client") or ""
+        client_id = None
+        if client_name:
+            matched = db.query(Client).filter(
+                func.lower(Client.name).contains(client_name.lower())
+            ).first()
+            if matched:
+                client_id = matched.id
+        rev = Revenue(
+            amount=float(amount),
+            source=source,
+            client_id=client_id,
+            date=today,
+            notes="auto-logged via brain dump",
+        )
+        db.add(rev)
+        change_log.record_create(db, rev, f"Revenue {float(amount):g} from {source or 'unknown'}")
+        result["revenue_logged"].append({"amount": float(amount), "source": source})
 
     # ── DailyLog entry ────────────────────────────────────────
     if parsed.get("log_entry"):
-        db.add(models.DailyLog(
+        log = models.DailyLog(
             date=today,
             entry=parsed["log_entry"],
             weekly_target_id=None,
             impact_score=0,
-        ))
-        db.commit()
+        )
+        db.add(log)
+        change_log.record_create(db, log, f"Log: {str(parsed['log_entry'])[:80]}")
         result["log_entry_created"] = True
 
     # ── Health updates (daily log fields) ────────────────────
     if parsed.get("health_updates"):
         hu = parsed["health_updates"]
-        health_row = _get_or_create_daily_health(db, today)
+        health_row = db.query(DailyHealth).filter(DailyHealth.date == today).first()
+        created = False
+        if health_row is None:
+            health_row = DailyHealth(date=today)
+            db.add(health_row)
+            db.flush()
+            created = True
+        before = change_log.snapshot(health_row)
         daily_fields = ["sleep_hours", "mobility_done", "session_done"]
         changed = False
         for field in daily_fields:
             if hu.get(field) is not None:
                 setattr(health_row, field, hu[field])
                 changed = True
-        if changed:
-            db.commit()
+        if created:
+            change_log.record_create(db, health_row, f"Health log for {today}")
+        elif changed:
+            change_log.record_update(db, health_row, before, f"Health log for {today} updated")
         result["health_updated"] = changed
 
     # ── Lift logs from brain dump ─────────────────────────────
@@ -1367,15 +1467,18 @@ def apply_parse_updates(db: Session, parsed: dict, today: date) -> dict:
             reps = entry.get("reps")
             if not name or weight is None or reps is None:
                 continue
-            lift = _get_or_create_lift(db, name)
+            lift = db.query(Lift).filter(Lift.name.ilike(name)).first()
+            if not lift:
+                lift = Lift(name=name, sort_order=0, is_active=True)
+                db.add(lift)
+                change_log.record_create(db, lift, f"New lift '{name}'")
             log = LiftLog(
                 lift_id=lift.id, lift_name=lift.name,
                 date=today, weight_kg=float(weight), reps=int(reps),
             )
             db.add(log)
+            change_log.record_create(db, log, f"{lift.name} {float(weight):g}kg x {int(reps)}")
             logs_created.append({"lift": lift.name, "weight_kg": float(weight), "reps": int(reps)})
-        if logs_created:
-            db.commit()
         result["lift_logs_created"] = logs_created
 
     # ── Trade logs from brain dump ────────────────────────────
@@ -1408,13 +1511,15 @@ def apply_parse_updates(db: Session, parsed: dict, today: date) -> dict:
                 })
 
             if trade_type == "backtest":
-                db.add(BacktestTrade(
+                bt = BacktestTrade(
                     date=today, pair=pair, direction=direction,
                     entry_reason=entry_reason,
                     r_multiple=float(r_multiple),
                     rule_adherence=bool(adherence),
                     outcome=outcome,
-                ))
+                )
+                db.add(bt)
+                change_log.record_create(db, bt, f"Backtest {pair} {direction} {float(r_multiple):+g}R")
                 trades_created.append({"type": "backtest", "pair": pair, "r_multiple": r_multiple})
 
             elif trade_type == "live":
@@ -1439,7 +1544,7 @@ def apply_parse_updates(db: Session, parsed: dict, today: date) -> dict:
                     if acct:
                         account_id = acct.id
 
-                db.add(LiveTrade(
+                lt = LiveTrade(
                     date=today, pair=pair, direction=direction,
                     entry_reason=entry_reason,
                     r_multiple=float(r_multiple),
@@ -1450,15 +1555,15 @@ def apply_parse_updates(db: Session, parsed: dict, today: date) -> dict:
                     net_pl_usd=entry.get("net_pl_usd"),
                     rule_broken=rule_broken,
                     rule_broken_description=rule_broken_desc if rule_broken else None,
-                ))
+                )
+                db.add(lt)
+                change_log.record_create(db, lt, f"Live trade {pair} {direction} {float(r_multiple):+g}R")
                 trades_created.append({
                     "type": "live", "pair": pair, "r_multiple": r_multiple,
                     "account_id": account_id,
                     "account_matched": account_id is not None,
                 })
 
-        if trades_created:
-            db.commit()
         result["trades_created"] = trades_created
         if trades_with_defaulted_r:
             result["trades_with_defaulted_r"] = trades_with_defaulted_r

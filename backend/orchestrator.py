@@ -84,7 +84,7 @@ def orchestrator_stream(request, db):
                 session_id=session_id, tool_call_id=msg.get("tool_call_id"),
             )
 
-    change_log.begin_batch()
+    change_log.begin_batch(db, "assistant")
     final_text = ""
     changes: list = []
     try:
@@ -97,7 +97,7 @@ def orchestrator_stream(request, db):
                 changes = event.get("changes") or []
             yield _sse(event)
     finally:
-        change_log.end_batch()
+        change_log.end_batch(db)
         conversation.save_message(
             db, "assistant", final_text, thread_id=thread_id, session_id=session_id,
             changes=changes or None,
