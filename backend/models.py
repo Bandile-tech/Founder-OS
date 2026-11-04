@@ -722,3 +722,36 @@ class ExamDate(Base):
     paper        = Column(String, nullable=True)
     exam_date    = Column(Date, nullable=False)
     updated_at   = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+# ── REBUILD: SYLLABUS + BRIEFING ─────────────────────────────
+
+class SyllabusPoint(Base):
+    """One syllabus topic per subject paper, mirroring the tracker sheet.
+    status: not_started (red) → learned (yellow) → revised (blue) → bulletproof (green)."""
+    __tablename__ = "syllabus_points"
+
+    id               = Column(Integer, primary_key=True, index=True)
+    subject_code     = Column(String, nullable=False, index=True)
+    subject_name     = Column(String, nullable=False)
+    level            = Column(String, nullable=True)        # AS | A2
+    paper            = Column(String, nullable=True)        # P1, S1, P3 …
+    topic_code       = Column(String, nullable=False)
+    title            = Column(String, nullable=False)
+    status           = Column(String, nullable=False, default="not_started")
+    past_paper_score = Column(Float, nullable=True)
+    last_revised     = Column(Date, nullable=True)
+    weakness_notes   = Column(Text, nullable=True)
+    updated_at       = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class BriefingSummary(Base):
+    """The optional LLM summary for one day's briefing — at most one call per day."""
+    __tablename__ = "briefing_summaries"
+
+    id            = Column(Integer, primary_key=True, index=True)
+    day           = Column(Date, nullable=False, unique=True)
+    summary       = Column(Text, nullable=False, default="")
+    greeting_line = Column(String, nullable=True)
+    model         = Column(String, nullable=True)
+    created_at    = Column(DateTime, default=datetime.utcnow)

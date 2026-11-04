@@ -53,10 +53,14 @@ import usage as _usage
 import change_log as _change_log
 import actions as _actions
 import notes as _notes
+import syllabus as _syllabus
+import briefing as _briefing
 app.include_router(_usage.router)
 app.include_router(_change_log.router)
 app.include_router(_actions.router)
 app.include_router(_notes.router)
+app.include_router(_syllabus.router)
+app.include_router(_briefing.router)
 
 # Serve frontend from ../frontend if it exists
 FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend")
@@ -134,6 +138,8 @@ async def startup():
         run_m011(db)        # m011 — change_log, pending_actions, suggestions, notes
         from migrations.m012_notes_currency_retrieval import run as run_m012
         run_m012(db)        # m012 — revenue.currency, todos.due_date, embeddings, exam_dates
+        from migrations.m013_syllabus_briefing import run as run_m013
+        run_m013(db)        # m013 — syllabus_points, briefing_summaries
         _validate_schema(engine)   # raises if any ORM column is absent from the live DB
         _seed_non_negotiables_if_empty(db)
         _verify_seed_integrity(db)

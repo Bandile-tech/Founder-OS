@@ -73,8 +73,8 @@ def get_dashboard_state(db):
 
     ai_revenue = main._revenue_usd_total(db, since=TEN_K_START_DATE)
 
-    weakest, _ = surface_weakest_subtopic(db, limit=1)
-    weak_list = weakest.get("subtopics", [])
+    weakest, _ = surface_weakest_topics(db, limit=1)
+    weak_list = weakest.get("topics", [])
     weakest_subject = weak_list[0]["subject_name"] if weak_list else None
 
     exams = [e for e in syllabus.upcoming_exams(db, today) if e["days_away"] >= 0][:4]
@@ -121,19 +121,30 @@ def _check_no_revenue_since(db, params) -> bool:
     return count == 0
 
 
-def _check_habit_completion_below(db, params) -> bool:
+def _check_non_negotiable_completion_below(db, params) -> bool:
+    """Completion of the ACTIVE non-negotiables over the window. Days with no habit row
+    for an active key count as not done, so skipping the app does not hide drift."""
     threshold = float(params.get("threshold_pct", 60))
     window = int(params.get("window_days", 7))
     today = date.today()
     floor = today - timedelta(days=window - 1)
+    keys = [n.key for n in db.query(models.NonNegotiable).filter(models.NonNegotiable.is_active == True).all()]
+    if not keys:
+        return False
     rows = db.query(models.Habit).filter(
-        models.Habit.date >= floor, models.Habit.date <= today
+        models.Habit.date >= floor, models.Habit.date <= today, models.Habit.key.in_(keys)
     ).all()
     if not rows:
-        return False
+        return False   # nothing logged in the window at all — no signal rather than a false alarm
+    days_with_data = {h.date for h in rows}
+    total = len(keys) * len(days_with_data)
     done = sum(1 for h in rows if h.done)
-    pct = (done / len(rows)) * 100
+    pct = (done / total) * 100 if total else 100
     return pct < threshold
+
+
+# Legacy name kept so older rule files still evaluate.
+_check_habit_completion_below = _check_non_negotiable_completion_below
 
 
 def _check_annual_target_status(db, params) -> bool:
@@ -150,23 +161,29 @@ def _check_annual_target_status(db, params) -> bool:
     return False
 
 
-def _check_zero_mastery_high_weight(db, params) -> bool:
-    min_weight = int(params.get("min_weight", 7))
-    row = (
-        db.query(models.Subtopic)
-        .join(models.Topic, models.Subtopic.topic_id == models.Topic.id)
-        .filter(models.Subtopic.mastery_level == 0)
-        .filter(models.Topic.syllabus_weight >= min_weight)
-        .first()
-    )
-    return row is not None
+def _check_syllabus_weak_before_exam(db, params) -> bool:
+    """Red/yellow syllabus topics whose exam is within ``days``."""
+    import syllabus
+    days = int(params.get("days", 60))
+    min_topics = int(params.get("min_topics", 1))
+    today = date.today()
+    weak = 0
+    for p in db.query(models.SyllabusPoint).filter(
+            models.SyllabusPoint.status.in_(["not_started", "learned"])).all():
+        exam = syllabus.get_exam_date(db, p.subject_code, p.paper)
+        if exam and 0 <= (exam - today).days <= days:
+            weak += 1
+            if weak >= min_topics:
+                return True
+    return False
 
 
 _RULE_CHECKS = {
     "no_revenue_since": _check_no_revenue_since,
-    "habit_completion_below": _check_habit_completion_below,
+    "non_negotiable_completion_below": _check_non_negotiable_completion_below,
+    "habit_completion_below": _check_habit_completion_below,   # legacy alias
     "annual_target_status": _check_annual_target_status,
-    "zero_mastery_high_weight": _check_zero_mastery_high_weight,
+    "syllabus_weak_before_exam": _check_syllabus_weak_before_exam,
 }
 
 
@@ -240,10 +257,10 @@ def synthesize_weekly_review(db, week_start: str | None = None):
     next_items = [t.text for t in db.query(models.Todo).filter(
         models.Todo.done == False
     ).order_by(models.Todo.priority.asc()).limit(5).all()]
-    weakest, _ = surface_weakest_subtopic(db, limit=1)
-    if weakest.get("subtopics"):
-        w = weakest["subtopics"][0]
-        next_items.append(f"Weakest: {w['name']} ({w['subject_name']})")
+    weakest, _ = surface_weakest_topics(db, limit=1)
+    if weakest.get("topics"):
+        w = weakest["topics"][0]
+        next_items.append(f"Weakest: {w['topic_code']} {w['title']} ({w['subject_name']})")
 
     result = {
         "week_start": str(start),
@@ -271,19 +288,28 @@ def datetime_max(d: date):
 
 
 # ════════════════════════════════════════════════════════════════
-# Tool 5 — surface_weakest_subtopic  (wraps /subjects/weakest)
+# Tool 5 — surface_weakest_topics  (syllabus_points: status, staleness, notes, exam proximity)
 # ════════════════════════════════════════════════════════════════
 
-def surface_weakest_subtopic(db, limit: int = 1):
-    import main
-    rows = main.weakest_subtopics(limit=limit, db=db)
-    result = {"subtopics": rows}
+def surface_weakest_topics(db, limit: int = 5, subject: str | None = None):
+    import syllabus
+    rows = syllabus.weakest_topics(db, limit=limit * 3 if subject else limit)
+    if subject:
+        code = syllabus.resolve_subject_code(db, subject)
+        rows = [r for r in rows if r["subject_code"] == code][:limit]
+    result = {"topics": rows}
     if rows:
         top = rows[0]
-        summary = f"weakest: {top['name']} ({top['subject_name']}, mastery {top['mastery_level']})"
+        summary = (f"weakest: {top['subject_name']} {top['paper'] or ''} {top['topic_code']} {top['title']} "
+                   f"({top['status']}; {top['reason']})").replace("  ", " ")
     else:
-        summary = "no subtopics found"
+        summary = "no syllabus topics imported yet"
     return result, summary
+
+
+def surface_weakest_subtopic(db, limit: int = 1):
+    """Legacy wrapper — the assistant no longer reads the old subtopic tables."""
+    return surface_weakest_topics(db, limit=limit)
 
 
 # ════════════════════════════════════════════════════════════════
@@ -577,6 +603,22 @@ def get_deadlines(db, days: int = 14):
     return result, summary
 
 
+def update_syllabus(db, topic: str, status: str | None = None, weakness_note: str | None = None,
+                    subject: str | None = None, paper: str | None = None, past_paper_score: float | None = None):
+    """'Revised S1 probability today, still shaky on conditional probability' →
+    status revised, last_revised today, weakness note appended."""
+    import syllabus
+    result = syllabus.update_syllabus(db, topic, status=status, weakness_note=weakness_note,
+                                      subject=subject, paper=paper, past_paper_score=past_paper_score)
+    if result.get("matched"):
+        db.commit()
+        label = f"{result['subject_name']} {result['paper'] or ''} {result['topic_code']} {result['title']}".replace("  ", " ")
+        return result, f"{label} → {result['status']}" + (" (note added)" if weakness_note else "")
+    if result.get("ambiguous"):
+        return result, f"{len(result['candidates'])} topics could match '{topic}' — ask which"
+    return result, f"no syllabus topic matches '{topic}'"
+
+
 def set_exam_date(db, subject: str, date_text: str, paper: str | None = None):
     import syllabus
     d = syllabus.parse_date_text(date_text)
@@ -598,7 +640,8 @@ _TOOL_DISPATCH = {
     "get_dashboard_state": lambda db, a: get_dashboard_state(db),
     "detect_off_track": lambda db, a: detect_off_track(db),
     "synthesize_weekly_review": lambda db, a: synthesize_weekly_review(db, a.get("week_start")),
-    "surface_weakest_subtopic": lambda db, a: surface_weakest_subtopic(db, int(a.get("limit", 1))),
+    "surface_weakest_topics": lambda db, a: surface_weakest_topics(db, int(a.get("limit", 5)), a.get("subject")),
+    "surface_weakest_subtopic": lambda db, a: surface_weakest_topics(db, int(a.get("limit", 1))),   # legacy name
     "query_war_room": lambda db, a: query_war_room(db, a.get("q", "")),
     "add_todos": lambda db, a: add_todos(
         db,
@@ -642,6 +685,10 @@ _TOOL_DISPATCH = {
         db, title=a.get("title", ""), kind=a.get("kind", "general"), body=a.get("body", ""), tags=a.get("tags"),
     ),
     "get_deadlines": lambda db, a: get_deadlines(db, int(a.get("days", 14))),
+    "update_syllabus": lambda db, a: update_syllabus(
+        db, topic=a.get("topic", ""), status=a.get("status"), weakness_note=a.get("weakness_note"),
+        subject=a.get("subject"), paper=a.get("paper"), past_paper_score=a.get("past_paper_score"),
+    ),
     "set_exam_date": lambda db, a: set_exam_date(
         db, subject=a.get("subject", ""), date_text=a.get("date", ""), paper=a.get("paper"),
     ),
@@ -727,12 +774,17 @@ TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
-            "name": "surface_weakest_subtopic",
-            "description": "Return the weakest academic subtopic(s), weighted by syllabus weight.",
+            "name": "surface_weakest_topics",
+            "description": (
+                "Return the weakest syllabus topics, ranked by status (red/yellow first), how long "
+                "since they were revised, weakness notes and how close the exam is. Use for 'what "
+                "should I study' questions."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "limit": {"type": "integer", "description": "How many to return. Default 1."}
+                    "limit": {"type": "integer", "description": "How many to return. Default 5."},
+                    "subject": {"type": "string", "description": "Optional subject name or code to filter by."},
                 },
             },
         },
@@ -1073,6 +1125,31 @@ TOOL_SCHEMAS = [
                     "paper": {"type": "string", "description": "Paper such as P1, S1, P3. Optional."},
                 },
                 "required": ["subject", "date"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_syllabus",
+            "description": (
+                "Update one syllabus topic from conversation. 'Revised S1 probability today, still "
+                "shaky on conditional probability' → topic 'probability', paper 'S1', status 'revised', "
+                "weakness_note 'still shaky on conditional probability'. last_revised is set "
+                "automatically. Statuses: not_started, learned (learned but weak), revised (not yet "
+                "100%), bulletproof. Topics match by code ('1.3') or title, fuzzily."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "topic": {"type": "string", "description": "Topic code or distinguishing title words."},
+                    "status": {"type": "string", "enum": ["not_started", "learned", "revised", "bulletproof"]},
+                    "weakness_note": {"type": "string", "description": "What is still weak, in Bandile's words."},
+                    "subject": {"type": "string", "description": "Subject name or code, if said."},
+                    "paper": {"type": "string", "description": "Paper such as P1, S1, if said."},
+                    "past_paper_score": {"type": "number", "description": "Past-paper score %, if said."},
+                },
+                "required": ["topic"],
             },
         },
     },

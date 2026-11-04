@@ -117,25 +117,20 @@ class TestWeeklyReview:
             assert section in result
 
 
-class TestWeakestSubtopic:
+class TestWeakestTopics:
 
-    def test_higher_topic_weight_surfaces_first(self):
+    def test_red_topic_surfaces_before_blue(self):
         db = _db()
-        subj = models.Subject(name="Maths 9709", code="9709-test")
-        db.add(subj)
-        db.flush()
-        low = models.Topic(subject_id=subj.id, name="Low weight", syllabus_weight=5)
-        high = models.Topic(subject_id=subj.id, name="High weight", syllabus_weight=9)
-        db.add_all([low, high])
-        db.flush()
-        db.add(models.Subtopic(topic_id=low.id, name="Low ST", mastery_level=0))
-        db.add(models.Subtopic(topic_id=high.id, name="High ST", mastery_level=0))
+        db.add(models.SyllabusPoint(subject_code="9709", subject_name="Maths 9709", paper="P1",
+                                    topic_code="1.1", title="Quadratics", status="revised"))
+        db.add(models.SyllabusPoint(subject_code="9709", subject_name="Maths 9709", paper="P1",
+                                    topic_code="1.3", title="Coordinate geometry", status="not_started"))
         db.commit()
 
-        result, summary = ot.surface_weakest_subtopic(db, limit=2)
+        result, summary = ot.surface_weakest_topics(db, limit=2)
         db.close()
-        assert result["subtopics"][0]["topic_weight"] == 9
-        assert result["subtopics"][0]["name"] == "High ST"
+        assert result["topics"][0]["topic_code"] == "1.3"
+        assert "not started" in result["topics"][0]["reason"]
 
 
 # ════════════════════════════════════════════════════════════════
@@ -221,12 +216,12 @@ class TestIntegrationRouting:
     def test_study_question_dashboard_then_weakest(self):
         rounds = [
             _tool_round("get_dashboard_state", {}, call_id="c1"),
-            _tool_round("surface_weakest_subtopic", {"limit": 1}, call_id="c2"),
-            _final_round("Study your weakest subtopic."),
+            _tool_round("surface_weakest_topics", {"limit": 1}, call_id="c2"),
+            _final_round("Study your weakest topic."),
         ]
         events = _collect(rounds, "what should I study tonight")
         called = [e["tool"] for e in events if e["type"] == "tool_call"]
-        assert called == ["get_dashboard_state", "surface_weakest_subtopic"]
+        assert called == ["get_dashboard_state", "surface_weakest_topics"]
 
 
 class TestSSEOrdering:
