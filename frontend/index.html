@@ -3000,7 +3000,7 @@ async function submitSyllabusImport(){
 /* ═══════════════════════════════════════════════════
    COMMAND CENTRE — home screen on GET /briefing/today
 ═══════════════════════════════════════════════════ */
-let _briefing=null,_ccShowAll=false,_ccLoading=false;
+let _briefing=null,_ccShowAll=false,_ccLoading=false,_ccNnOpen=false;
 const CC_ICON_CHECK='<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5l3.2 3L13 4.5"/></svg>';
 
 function _ccDueClass(it){
@@ -3023,11 +3023,36 @@ function renderHome(){
   const month=document.getElementById("cc-month");
   if(month)month.textContent=new Date(b.date||Date.now()).toLocaleDateString("en-GB",{month:"short"}).toUpperCase();
 
-  const items=(b.items||[]);
-  const shown=_ccShowAll?items:items.slice(0,6);
+  // Today's Brief: at most 5 ranked items. Non-negotiables collapse into one row that
+  // expands on tap; it takes the rank of the first non-negotiable item.
+  const allItems=(b.items||[]);
+  const nnRows=b.non_negotiables||[];
+  const others=allItems.filter(i=>i.category!=="non_negotiable");
+  const firstNnIdx=allItems.findIndex(i=>i.category==="non_negotiable");
+  const list=others.slice();
+  const CC_MAX=5;
+  if(nnRows.length){
+    let pos=firstNnIdx<0?list.length:Math.min(list.length,allItems.slice(0,firstNnIdx).filter(i=>i.category!=="non_negotiable").length);
+    // open non-negotiables always make the top 5 (pinned to the last slot at the latest)
+    if(nnRows.some(r=>!r.done))pos=Math.min(pos,CC_MAX-1,list.length);
+    list.splice(pos,0,{_nn:true});
+  }
+  const shown=_ccShowAll?list:list.slice(0,CC_MAX);
   const box=document.getElementById("cc-items");
   if(box){
+    const nnDone=nnRows.filter(r=>r.done).length;
+    const renderNn=()=>`<div class="cc-item cc-nn" role="button" tabindex="0" aria-expanded="${_ccNnOpen}" onclick="toggleNnList()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleNnList();}">
+        <div class="cc-check static ${nnDone===nnRows.length&&nnRows.length?"checked":""}" aria-hidden="true">${nnDone===nnRows.length&&nnRows.length?CC_ICON_CHECK:""}</div>
+        <span class="cc-cat non_negotiable"></span>
+        <div class="cc-item-main"><div class="cc-item-title">Non-negotiables</div></div>
+        <span class="cc-due today cc-nn-count">${nnDone}/${nnRows.length}</span>
+      </div>
+      <div class="cc-nn-list ${_ccNnOpen?"open":""}" id="cc-nn-list">${nnRows.map(r=>`
+        <div class="cc-nn-row ${r.done?"done":""}" role="checkbox" aria-checked="${r.done}" tabindex="0" onclick="ccToggleHabit('${escHtml(r.key)}',this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}">
+          <div class="cc-check ${r.done?"checked":""}">${CC_ICON_CHECK}</div><span>${escHtml(r.label)}</span>
+        </div>`).join("")}</div>`;
     box.innerHTML=shown.length?shown.map(it=>{
+      if(it._nn)return renderNn();
       const completable=it.completable&&it.target_type==="todo";
       const cb=completable
         ?`<div class="cc-check" role="checkbox" aria-checked="false" tabindex="0" title="Complete this task" onclick="ccComplete(${Number(it.target_id)},this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}">${CC_ICON_CHECK}</div>`
@@ -3040,7 +3065,7 @@ function renderHome(){
         </div>
         <span class="cc-due ${_ccDueClass(it)}">${escHtml(it.due_label||"")}</span>
       </div>`;
-    }).join("")+(items.length>6?`<div class="cc-more" onclick="_ccShowAll=!_ccShowAll;renderHome()">${_ccShowAll?"Show less":`Show all ${items.length}`}</div>`:"")
+    }).join("")+(list.length>CC_MAX?`<div class="cc-more" onclick="_ccShowAll=!_ccShowAll;renderHome()">${_ccShowAll?"Show top 5":`Show all ${list.length}`}</div>`:"")
     :`<div class="cc-empty">Nothing on the brief. Talk to Founder OS to add something.</div>`;
   }
 
@@ -3139,6 +3164,35 @@ function showChangesToast(changes){
   if(result)result.style.display="block";
   if(typeof renderChangesStrip==="function")renderChangesStrip(changes);
   else showToast(changes.map(c=>c.summary).join(" · "),"info");
+}
+
+function toggleNnList(){
+  _ccNnOpen=!_ccNnOpen;
+  const l=document.getElementById("cc-nn-list");
+  if(l)l.classList.toggle("open",_ccNnOpen);
+  const row=document.querySelector(".cc-nn");
+  if(row)row.setAttribute("aria-expanded",String(_ccNnOpen));
+}
+
+async function ccToggleHabit(key,el){
+  const nn=(_briefing&&_briefing.non_negotiables||[]).find(r=>r.key===key);
+  if(!nn)return;
+  const done=!nn.done;
+  nn.done=done;
+  if(el){el.classList.toggle("done",done);el.setAttribute("aria-checked",String(done));const c=el.querySelector(".cc-check");if(c)c.classList.toggle("checked",done);}
+  const count=document.querySelector(".cc-nn-count");
+  if(count){const rows=_briefing.non_negotiables;count.textContent=`${rows.filter(r=>r.done).length}/${rows.length}`;}
+  if(S.habits[key]){S.habits[key].done=done;saveState();try{renderNonNeg();}catch(_){}}
+  try{
+    const r=await fetch(`${API_BASE}/habits/toggle`,{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({key,label:nn.label,done,date:todayStr()})});
+    if(!r.ok)throw new Error("HTTP "+r.status);
+    setTimeout(()=>loadBriefing(),400);
+  }catch(e){
+    nn.done=!done;
+    if(el){el.classList.toggle("done",!done);const c=el.querySelector(".cc-check");if(c)c.classList.toggle("checked",!done);}
+    showToast("Could not update — backend unreachable","error");
+  }
 }
 
 function openAcademicsTile(){
