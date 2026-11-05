@@ -524,6 +524,10 @@ Schema entry: `{"type": "function", "function": {"name": "update_deal", "descrip
     with `_tool_round(tool, args)` / `_final_round(text)` helpers, then read SSE frames
     from `client.post("/orchestrator", …).text` (`test_stage2_changes.py`);
   - plain completions: `patch("llm.chat_text", return_value="...")` or `patch("llm.chat_completion")`;
+    to assert that **usage logging** happens, patch one level lower instead —
+    `monkeypatch.setenv("OPENAI_API_KEY", "test")` plus `patch("llm.get_client")` returning
+    a fake client whose `chat.completions.create` returns an object with `choices` and
+    `usage` — so `chat_completion`'s own logging runs;
   - embeddings: `patch("llm.embed_texts", side_effect=fake)` with a deterministic fake and
     `monkeypatch.setenv("OPENAI_API_KEY", "test")` so `retrieval.available()` is true;
   - market intel: `patch("market_intel.agent._llm_json", side_effect=router_fn)` and

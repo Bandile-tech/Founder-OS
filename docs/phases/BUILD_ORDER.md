@@ -5,6 +5,14 @@ most, one commit, suite green). Run them in order; the **"Must exist first"** li
 session is the hard dependency. Specs: `docs/phases/PHASE_5_SPEC.md`,
 `docs/phases/PHASE_6_SPEC.md`. Patterns: `docs/CONVENTIONS.md`. Decisions: `docs/adr/`.
 
+## Migration numbers
+
+Numbers are reserved per module: m014 (5A), m015 (5B), m016 (5C), m017 (5D), m018 (5E),
+m019 (6A), m020 (6B), m021 (6C), m022 (6D). The sessions below build them out of numeric
+order (m020 before m019); that is fine because they are independent — register each in
+`main.startup()` as it is built, after the previous one in the file, always before
+`_validate_schema`.
+
 ## How to run a session
 
 1. Start a fresh session on the integration branch (currently
@@ -203,10 +211,11 @@ Task — §5B through "CSV import" plus the shared helpers:
   leads only when Bandile names someone he intends to approach); the other bullets come
   in S4/S5.
 - actions.DELETABLE + propose_delete enum gain leads and outreach_messages.
-- tests/fixtures/leads_sample.csv: 8 synthetic rows as described (two email duplicates,
-  one phone duplicate, one blank row, a WhatsApp column, an unmapped Source column,
-  mixed-case headers, one +260 number and one 0977 number). Tests 1 and 2 of §5B in
-  tests/test_phase5b_leads.py. Append S3 to PROGRESS.md.
+- tests/fixtures/leads_sample.csv: 8 synthetic rows exactly as §5B describes (five
+  distinct leads, one row repeating an earlier email, one repeating an earlier phone, one
+  blank row; a WhatsApp column, an unmapped Source column, mixed-case headers, one +260
+  number and one 0977 number). Tests 1 and 2 of §5B in tests/test_phase5b_leads.py.
+  Append S3 to PROGRESS.md.
 ```
 
 ---
@@ -367,9 +376,10 @@ You are building Founder OS (FastAPI backend in backend/). Rules:
 Task — §5C "Tables", the first half of "Primitives", and the clients/contacts/deals/
 communications endpoints and tools:
 - models.py and migrations/m016_crm.py exactly as §5C "Tables" (all six tables and all
-  projects columns now, because 5E depends on them; the COALESCE unique index on
-  payments; backfills: clients.currency 'USD' for existing rows, one paid payment per
-  existing revenue row with client_id, idempotent by revenue_id).
+  projects columns now, because 5E depends on them; the partial unique index on payments
+  executed as raw SQL with `WHERE recurring_id IS NOT NULL`; backfills: clients.currency
+  'USD' for existing rows, one paid payment per existing revenue row with client_id,
+  idempotent by revenue_id).
 - backend/crm.py: find_client, find_deal, find_project (business_common.fuzzy_pick),
   client_health, add_contact, log_communication (bumps last_activity_at on the client's
   active projects; retrieval.index_one source_type "crm" in try/except), create_deal,
@@ -976,8 +986,8 @@ Task — §6D except the inbound webhook (S17):
   raises). Router: GET/PATCH /notifications/settings (paired, pair_code, bot_link,
   channel_configured), GET /notifications, POST /notifications/test, POST
   /notifications/brief-now, POST /notifications/{id}/cancel.
-- agents: briefing_courier (at settings.morning_time; dedupe briefing:{date}; evening
-  message when evening_time set), alert_courier (every 15 min + events per the spec;
+- agents: briefing_courier (interval 15 min; sends when now_local >= morning_time, dedupe
+  briefing:{date}; evening message when evening_time set, dedupe evening:{date}), alert_courier (every 15 min + events per the spec;
   dedupe keys as listed; severity threshold), reminder_courier (dispatch only). Wire
   AgentContext.notify to notify.queue (refused unless may_notify).
 - Tools set_reminder and notification_settings; a parse_when(text, now_local) helper
