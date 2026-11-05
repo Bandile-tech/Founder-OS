@@ -36,7 +36,7 @@ Environment (`backend/.env` locally, Render env vars in production):
 | `ASSISTANT_MODEL` | `gpt-5.4-mini` | Assistant, parser, summaries, briefing |
 | `EMBEDDING_MODEL` | `text-embedding-3-small` | Vault / notes / memory retrieval |
 | `ZMW_PER_USD` | `27` | Kwacha → dollar for the revenue scoreboard |
-| `REALTIME_MODEL` | `gpt-realtime-mini` | Live voice (verify the id on OpenAI's model page) |
+| `REALTIME_MODEL` | `gpt-realtime-2.1-mini` | Live voice (current mini realtime model, checked 2026-11-05) |
 | `ASSISTANT_HISTORY_TURNS` / `ASSISTANT_SUMMARY_BATCH` | `20` / `10` | History budget |
 | `INTENT_CONFIDENCE_MIN` | `0.7` | Below this an extracted item becomes a suggestion |
 
@@ -48,6 +48,11 @@ python -m pytest -q
 `TestClient(app)` without a context manager never fires startup, so migrations are exercised
 by `test_startup_handler_runs_with_no_key`, which calls `main.startup()` directly. After any
 migration change, also run `python -c "import asyncio, main; asyncio.run(main.startup())"`.
+
+The same suite runs on Postgres with `TEST_DATABASE_URL=postgresql://…` (throwaway database;
+every test drops and recreates the schema). Browser smoke tests (login, brief item complete +
+undo, syllabus tap-to-advance): `node tests/e2e/smoke.js` from the repo root. Deployment steps
+and rollback: `docs/DEPLOY.md`.
 
 ## Architecture
 
