@@ -459,6 +459,5 @@ field can be dropped.
 `docs/DEPLOY.md`: env vars in order, merge steps, post-deploy checks, Render rollback.
 
 ### Postgres suite — final run
-After the fixture fix the full suite was re-run on PostgreSQL 16 (`TEST_DATABASE_URL`).
-At the time of this commit it was two-thirds through with no failures; the completed result
-is recorded in the commit that follows this one.
+After the fixture fix the full suite was re-run on PostgreSQL 16 (`TEST_DATABASE_URL`):
+**421 passed, 0 failed, 0 errors** (2 min 34 s). The same 421 pass on SQLite.
