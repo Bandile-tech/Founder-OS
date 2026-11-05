@@ -425,3 +425,43 @@ class TestIntent:
         monkeypatch.setenv("INTENT_CONFIDENCE_MIN", "0.95")
         data = _parse(_parsed(todos_add=[{"text": "Call", "intent": "commitment", "confidence": 0.9}]))
         assert data["updates"]["suggestions"] and data["updates"]["todos_added"] == []
+
+
+class TestUndoAtomicity:
+
+    def test_batch_undo_is_all_or_nothing(self):
+        """If one change in a batch cannot be undone (its record is gone), nothing is undone."""
+        db = _db()
+        db.add(models.Habit(key="ironing", label="Clothes ironed", date=TODAY, done=False))
+        db.commit()
+        db.close()
+        data = _parse(_parsed(todos_add=[{"text": "Keep"}], habits_done=["ironing"]))
+        batch = data["updates"]["batch_id"]
+        habit_change = next(c for c in data["updates"]["changes"] if c["table"] == "habits")
+        # remove the habit row behind the scenes → undoing its update must fail with 409
+        db = _db()
+        db.query(models.Habit).filter(models.Habit.id == habit_change["record_id"]).delete()
+        db.commit()
+        db.close()
+        r = client.post(f"/changes/batch/{batch}/undo")
+        assert r.status_code == 409
+        db = _db()
+        assert db.query(models.Todo).filter(models.Todo.text == "Keep").count() == 1   # not undone
+        assert all(c.undone_at is None for c in db.query(models.ChangeLog).all())
+        db.close()
+
+    def test_single_undo_of_missing_record_is_409_and_leaves_log_untouched(self):
+        db = _db()
+        db.add(models.Habit(key="ironing", label="Clothes ironed", date=TODAY, done=False))
+        db.commit()
+        db.close()
+        data = _parse(_parsed(habits_done=["ironing"]))
+        change = data["updates"]["changes"][0]
+        db = _db()
+        db.query(models.Habit).delete()
+        db.commit()
+        db.close()
+        assert client.post(f"/changes/{change['id']}/undo").status_code == 409
+        db = _db()
+        assert db.query(models.ChangeLog).first().undone_at is None
+        db.close()
