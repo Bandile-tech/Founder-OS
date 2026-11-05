@@ -6,8 +6,35 @@ all test files.  Sets the FastAPI dependency override once so that both
 test_changes.py and test_academic.py use the same DB when run together.
 """
 
+import atexit
+import os
+import shutil
 import sys
+import tempfile
 from pathlib import Path
+
+# ── App database: always a throwaway ─────────────────────────────────────────
+# Must run before anything imports `database`/`main`: main runs create_all() at import
+# and main.startup() (which a test calls) migrates and seeds through SessionLocal.
+# Without this the app engine fell back to sqlite:///./founder_os.db (the developer's
+# local data) or to whatever DATABASE_URL the shell or backend/.env held (production).
+# DATABASE_URL is always overridden; a Postgres run reuses its throwaway TEST_DATABASE_URL.
+if os.getenv("TEST_DATABASE_URL"):
+    APP_TEST_DATABASE_URL = os.environ["TEST_DATABASE_URL"]
+else:
+    _app_db_dir = tempfile.mkdtemp(prefix="founder-os-tests-")
+
+    def _remove_app_db():
+        db_mod = sys.modules.get("database")
+        if db_mod is not None:
+            db_mod.engine.dispose()   # Windows will not delete a SQLite file that is still open
+        shutil.rmtree(_app_db_dir, ignore_errors=True)
+
+    atexit.register(_remove_app_db)
+    APP_TEST_DATABASE_URL = "sqlite:///" + Path(_app_db_dir, "app.db").as_posix()
+os.environ["DATABASE_URL"] = APP_TEST_DATABASE_URL
+if "database" in sys.modules or "main" in sys.modules:
+    raise RuntimeError("tests/conftest.py must run before the app is imported")
 
 import pytest
 from sqlalchemy import create_engine
@@ -25,7 +52,6 @@ from main import app
 # Default: one shared in-memory SQLite database. Set TEST_DATABASE_URL to a Postgres
 # URL to run the same suite against Postgres (every test still drops and recreates
 # the schema, so point it at a throwaway database).
-import os
 _TEST_URL = os.getenv("TEST_DATABASE_URL")
 if _TEST_URL:
     # Short lock/statement timeouts so a test that leaves a transaction open fails fast
