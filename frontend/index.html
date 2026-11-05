@@ -697,6 +697,15 @@ input:hover:not(:focus), textarea:hover:not(:focus), select:hover:not(:focus){bo
 .ap-row.warn{border-color:rgba(245,200,66,0.3)}.ap-row.warn .sev{color:var(--warn)}
 .ap-row.info .sev{color:var(--glow)}
 @media(max-width:900px){.cc-grid{grid-template-columns:minmax(0,1fr)}}
+@media(max-width:600px){
+  #cmd-dock{left:0;right:0;padding:0 10px;bottom:10px}
+  .cmd-dock-bar{width:100%;max-width:100%;box-sizing:border-box;padding-left:12px;padding-right:12px}
+  .cmd-row{gap:6px}
+  .cmd-row #ucmd-mode-badge{display:none}
+  .cmd-input{min-width:0;flex:1 1 auto;font-size:13px}
+  .mic-btn,.cmd-send{width:36px;height:36px;flex:0 0 auto}
+  .live-btn{height:36px;padding:0 9px;flex:0 0 auto;font-size:9px}
+}
 @media(max-width:768px){.h-ai span.lbl{display:none}}
 
 /* LOGIN — full-screen gate shown when the backend requires a password */
@@ -1762,10 +1771,6 @@ tr:hover .td-del{opacity:1}
         <span class="ni"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.2 7.6 8 2.6l5.8 5"/><path d="M3.6 6.6v6.8h3.2V9.8h2.4v3.6h3.2V6.6"/></svg></span>
         <span class="nav-label">Command Centre</span>
       </div>
-      <div class="nav-item" onclick="nav('dashboard',this)" id="ni-dashboard">
-        <span class="ni"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="1.6" y="1.6" width="5.2" height="5.2" rx="1.3"/><rect x="9.2" y="1.6" width="5.2" height="5.2" rx="1.3"/><rect x="1.6" y="9.2" width="5.2" height="5.2" rx="1.3"/><rect x="9.2" y="9.2" width="5.2" height="5.2" rx="1.3"/></svg></span>
-        <span class="nav-label">Dashboard</span>
-      </div>
     </div>
     <div class="nav-group">
       <div class="nav-group-label">Ecosystem</div>
@@ -1780,10 +1785,6 @@ tr:hover .td-del{opacity:1}
       <div class="nav-item" onclick="nav('syllabus',this)">
         <span class="ni"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2.2" y="2.2" width="11.6" height="11.6" rx="2"/><path d="M5 6h6M5 8.5h6M5 11h3.5"/></svg></span>
         <span class="nav-label">Syllabus</span>
-      </div>
-      <div class="nav-item" onclick="nav('academic',this)">
-        <span class="ni"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.8 14.6 6 8 9.2 1.4 6Z"/><path d="M4.2 7.4v3c0 1.1 1.7 2 3.8 2s3.8-.9 3.8-2v-3"/><path d="M14.6 6v3.2"/></svg></span>
-        <span class="nav-label">Academic Roadmap</span>
       </div>
     </div>
     <div class="nav-group">
@@ -2603,8 +2604,9 @@ function _coldStartWatch(start){
 function fetchWithTimeout(url, timeoutMs=BACKEND_WAIT_MS){
   const ctrl=new AbortController();
   const tid=setTimeout(()=>ctrl.abort(),timeoutMs);
+  // A 401/5xx body must never be treated as data (it would corrupt local state).
   return fetch(url,{signal:ctrl.signal})
-    .then(r=>r.json())
+    .then(r=>{if(!r.ok)throw new Error("HTTP "+r.status);return r.json();})
     .finally(()=>clearTimeout(tid));
 }
 
@@ -3018,7 +3020,15 @@ async function ccComplete(todoId,el){
   }
 }
 
-function showChangesToast(changes){ if(typeof renderChangesStrip==="function"){renderChangesStrip(changes);} else if(changes&&changes.length){showToast(changes.map(c=>c.summary).join(" · "),"info");} }
+function showChangesToast(changes){
+  if(!changes||!changes.length)return;
+  // One-tap actions outside a command turn still get an Undo strip in the dock.
+  const result=document.getElementById("ucmd-result");
+  if(result&&!document.getElementById("ucmd-changes")){result.innerHTML=`<div id="ucmd-changes"></div>`;}
+  if(result)result.style.display="block";
+  if(typeof renderChangesStrip==="function")renderChangesStrip(changes);
+  else showToast(changes.map(c=>c.summary).join(" · "),"info");
+}
 
 function openAcademicsTile(){
   const target=document.getElementById("p-syllabus")?"syllabus":"academic";
@@ -5491,7 +5501,9 @@ async function _liveRunTool(call){
 
 function _liveHandleEvent(ev){
   const t=ev.type||"";
-  if(t==="input_audio_buffer.speech_started"){
+  if(t==="session.started"||t==="session.created"){
+    _liveTouch();_liveSetState("listening","listening");
+  }else if(t==="input_audio_buffer.speech_started"){
     _liveTouch();
     // Barge-in: server VAD cancels the response; the remote audio stops on its own.
     if(LIVE.partialEl){LIVE.partialEl.remove();LIVE.partialEl=null;LIVE.partial="";}
@@ -5553,7 +5565,9 @@ async function startLiveVoice(){
     pc.onconnectionstatechange=()=>{if(["failed","disconnected","closed"].includes(pc.connectionState)&&LIVE.state!=="idle")stopLiveVoice();};
     const offer=await pc.createOffer();
     await pc.setLocalDescription(offer);
-    const url=`${LIVE.session.calls_url}?model=${encodeURIComponent(LIVE.session.model)}`;
+    // Documented handshake: POST the SDP offer with the ephemeral key; the session config
+    // (model, voice, tools) was fixed when the client secret was minted.
+    const url=LIVE.session.calls_url;
     const ar=await fetch(url,{method:"POST",body:offer.sdp,
       headers:{"Authorization":"Bearer "+LIVE.session.client_secret.value,"Content-Type":"application/sdp"}});
     if(!ar.ok)throw new Error("OpenAI WebRTC handshake failed: HTTP "+ar.status);
@@ -5561,7 +5575,7 @@ async function startLiveVoice(){
     await pc.setRemoteDescription(answer);
     const box=document.getElementById("live-transcript");
     if(box){box.innerHTML="";}
-    _liveLine("act","live session started — "+LIVE.session.model);
+    _liveLine("act","live session started — "+escHtml(LIVE.session.model));
   }catch(e){
     showToast("Live voice failed: "+e.message,"error");
     stopLiveVoice();

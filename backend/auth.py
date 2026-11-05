@@ -18,6 +18,7 @@ import hmac
 import json
 import os
 import secrets
+import threading
 import time
 
 from fastapi import APIRouter, Request
@@ -27,7 +28,7 @@ from pydantic import BaseModel
 router = APIRouter()
 
 EXEMPT_EXACT = {"/health", "/ping", "/auth/login", "/auth/status", "/", "/index.html"}
-EXEMPT_PREFIXES = ("/app/", "/app")
+EXEMPT_PREFIXES = ("/app/",)   # the static frontend mount; "/app" itself redirects to "/app/"
 DEFAULT_ORIGINS = ["http://127.0.0.1:8000", "http://localhost:8000"]
 
 
@@ -109,7 +110,7 @@ def _token_from_scope(scope) -> str | None:
 def is_exempt(path: str, method: str) -> bool:
     if method == "OPTIONS":
         return True
-    if path in EXEMPT_EXACT:
+    if path in EXEMPT_EXACT or path == "/app":
         return True
     return any(path.startswith(p) for p in EXEMPT_PREFIXES)
 
@@ -133,6 +134,59 @@ class AuthMiddleware:
         await response(scope, receive, send)
 
 
+# ── Login rate limiting ──────────────────────────────────────
+# Simple in-memory limiter per client address: after LOGIN_MAX_FAILURES wrong passwords
+# inside LOGIN_WINDOW_SECONDS the address is locked for LOGIN_LOCK_SECONDS. Enough to stop
+# online guessing on a single-user app; it resets on process restart.
+LOGIN_MAX_FAILURES = int(os.getenv("LOGIN_MAX_FAILURES", "5"))
+LOGIN_WINDOW_SECONDS = int(os.getenv("LOGIN_WINDOW_SECONDS", "300"))
+LOGIN_LOCK_SECONDS = int(os.getenv("LOGIN_LOCK_SECONDS", "900"))
+_attempts: dict[str, dict] = {}
+_attempts_lock = threading.Lock()
+
+
+def _client_ip(request: Request) -> str:
+    fwd = request.headers.get("x-forwarded-for")   # Render sits behind a proxy
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def login_locked(ip: str, now: float | None = None) -> int:
+    """Seconds remaining on the lock for this address, 0 when not locked."""
+    now = now or time.time()
+    with _attempts_lock:
+        rec = _attempts.get(ip)
+        if not rec:
+            return 0
+        if rec.get("locked_until", 0) > now:
+            return int(rec["locked_until"] - now) + 1
+        return 0
+
+
+def record_login_failure(ip: str, now: float | None = None) -> int:
+    """Register a failed attempt; returns seconds locked (0 if still allowed)."""
+    now = now or time.time()
+    with _attempts_lock:
+        rec = _attempts.setdefault(ip, {"failures": [], "locked_until": 0})
+        rec["failures"] = [t for t in rec["failures"] if now - t < LOGIN_WINDOW_SECONDS] + [now]
+        if len(rec["failures"]) >= LOGIN_MAX_FAILURES:
+            rec["locked_until"] = now + LOGIN_LOCK_SECONDS
+            rec["failures"] = []
+            return LOGIN_LOCK_SECONDS
+        return 0
+
+
+def clear_login_failures(ip: str) -> None:
+    with _attempts_lock:
+        _attempts.pop(ip, None)
+
+
+def reset_rate_limits() -> None:
+    with _attempts_lock:
+        _attempts.clear()
+
+
 # ── Endpoints ────────────────────────────────────────────────
 
 class LoginRequest(BaseModel):
@@ -147,10 +201,20 @@ def auth_status(request: Request):
 
 
 @router.post("/auth/login")
-def login(payload: LoginRequest):
+def login(payload: LoginRequest, request: Request):
     if not auth_required():
         return {"auth_required": False, "token": None, "expires_at": None}
+    ip = _client_ip(request)
+    wait = login_locked(ip)
+    if wait:
+        return JSONResponse({"detail": f"Too many attempts. Try again in {wait} seconds."},
+                            status_code=429, headers={"Retry-After": str(wait)})
     if not hmac.compare_digest(payload.password.encode("utf-8"), (password() or "").encode("utf-8")):
+        locked = record_login_failure(ip)
+        if locked:
+            return JSONResponse({"detail": f"Too many attempts. Try again in {locked} seconds."},
+                                status_code=429, headers={"Retry-After": str(locked)})
         return JSONResponse({"detail": "Wrong password"}, status_code=401)
+    clear_login_failures(ip)
     token, exp = issue_token()
     return {"auth_required": True, "token": token, "expires_at": exp}
