@@ -61,13 +61,19 @@ One self-contained file, `frontend/index.html` (inline CSS and vanilla JS, no bu
 Luna palette: near-black base, cyan `#A7EBF2` for signal only, Bricolage Grotesque for display
 numerals, Geist for body. Pages: Command Centre (home, built on `GET /briefing/today`),
 Dashboard, Timetable, Health, Syllabus, Academic Roadmap (legacy), Agents, War Room, Annual
-Targets, Design Guide, Settings. The global command dock at the bottom is the talk bar: typed
-input, record-and-transcribe mic, and Live (WebRTC real-time voice). Every backend call goes
-through a `fetch` wrapper that attaches the session token; a 401 opens the login gate.
-The orb on the home screen is the assistant's presence (states idle / listening / thinking /
-speaking / acting). `show_view` directives (`{"type":"ui"}` SSE events, or `ui_directive` from
-the voice tool bridge) open a full-screen stage with a whitelisted view (syllabus, brief,
-deadlines, note, changes, progress); live voice runs full-screen on the same stage.
+Targets, Design Guide, Settings. The home page is a 1582×866 pixel canvas laid out at the
+coordinates of `docs/design/command-centre.png` (scaled down on narrower viewports, stacked
+below 1024 px) using the cropped mock-up assets in `frontend/assets/` (`orb.png`, `scene.png`).
+The global command dock is the talk bar (a glowing pill, docked into the home canvas): mic on
+the left starts live voice (WebRTC), typed input in the middle, send on the right, and a
+suggestions chip above it. Every backend call goes through a `fetch` wrapper that attaches
+the session token; a 401 opens the login gate.
+The orb is the assistant's presence (states idle / listening / thinking / speaking / acting
+as CSS overlays on the orb image). `show_view` directives (`{"type":"ui"}` SSE events, or
+`ui_directive` from the voice tool bridge) open a full-screen stage with a whitelisted view
+(syllabus, brief, deadlines, note, changes, progress) laid out as KPI cards, list, next best
+actions; the panel always ends above the dock. Live voice with no view open is the centred
+full-screen orb with the transcript beneath it; a view opened during voice sits beside it.
 All user text is escaped with `escHtml` before it reaches `innerHTML`; `mdHtml` escapes raw HTML
 before markdown runs.
 

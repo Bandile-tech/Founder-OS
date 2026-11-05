@@ -510,3 +510,55 @@ clears the view first, then ends the session; stopping the session closes the st
   view supports ticking tasks; notes are read-only there.
 - The mock-up's extra tiles (Business, Projects, Content, Applications, Agents) remain out by
   design (phases 5–6).
+
+## 10. Stage 9 addendum — fidelity pass (pixel likeness to the mock-up)
+
+### Assets (`frontend/assets/`)
+- `orb.png` (430×367): sphere + platform cropped from `docs/design/command-centre.png`,
+  luminance alpha with the sphere disc forced opaque; the mock-up's baked bubble and waveform
+  were inpainted out before cropping.
+- `scene.png` (712×866): the right-hand background scene, faded to the base colour over its
+  left 260 px and dimmed under the tile band and the talk bar.
+- Orb states (`idle | listening | thinking | speaking | acting`) are CSS overlays on the image
+  (`.orb-eyes`, `.orb-wave`, `.orb-bubble`, drop-shadow filters), not separate images.
+
+### 9A Home (`#p-home`)
+The home page is a 1582×866 pixel canvas (`.cc-canvas`) positioned at the mock-up's
+coordinates (content origin = 90 px rail, 75 px header) and scaled down by `layoutHome()`
+when the viewport is narrower; below 1024 px it becomes a normal stacked flow. Checked item by
+item against the mock-up side by side at 1672×941 and at 390 px:
+1. background scene behind the right half, dimmed on the left;
+2. orb image on the right with bubble (last assistant line) and waveform, nothing crossing it;
+3. Today's Brief (3 items, "Show all" expands) and Progress side by side, equal height;
+4. centred glowing pill talk bar: mic on the left (tap = live voice, lit while a session is
+   on), waveform / send on the right, no LIVE button or READY chip. The dock is reparented
+   into the canvas on home (`placeDock()`) and back to its fixed position elsewhere;
+5. suggestions as a small chip above the pill that expands on tap (`toggleSuggestions`);
+6. six tiles in one row (Business, Academics, Projects, Content, Applications, Agents); only
+   Academics is live, the others are dimmed "Coming soon";
+7. sidebar rail 90 px and header 75 px with the mock-up's type sizes.
+
+### 9B Stage view
+The stage panel follows the Business Metrics layout: back arrow, icon + title, tabs, body.
+Syllabus view: tabs (Overview + one per paper), four KPI cards (overall progress with bar,
+topics bulletproof, topics not started, days to the next exam), the topic list
+(tap-to-advance), then "Next best actions" (the weakest topics from
+`GET /syllabus/weakest`, filtered to the shown subject/paper, tap to advance) beside an
+"Insights" panel. Other views keep their Stage 8 renderers inside the new frame.
+Layout rules: the panel always ends 140 px above the bottom (110 px on small screens) so the
+dock never overlaps it; in view mode the orb has a 400 px column (bubble and waveform hidden,
+image edges masked over the blurred backdrop); below 1000 px the stage is one column and the
+Close button gives way to the back arrow. Voice-only mode is unchanged: the orb is centred
+and full-size with the transcript beneath it; the two-column layout appears only while a
+view is open and closing the view returns to the centred orb.
+
+### Verification
+`python -m pytest -q` → 431 passed (OpenAI mocked, no key). `node tests/e2e/smoke.js` → all
+checks pass (the orb-home check now looks for `#cc-canvas .orb-stage`). Screenshots were taken
+at 1672×941, 1280×800 and 390×844 in headless Chromium.
+
+### Known gaps after Stage 9
+- Pixel likeness was judged by eye from side-by-side renders, not by an automated image diff.
+- The five "Coming soon" tiles are placeholders (phases 5–6).
+- The syllabus KPIs and insights are computed client-side from `GET /syllabus` and
+  `GET /syllabus/weakest`; there is no dedicated endpoint.
