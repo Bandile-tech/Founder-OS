@@ -383,3 +383,82 @@ and ping wait up to 90 s with a "waking backend" header state after 2.5 s.
 - No automated browser tests; the UI was checked with headless Chromium screenshots and
   click-throughs (home, suggestions accept → undo, syllabus tap-to-advance) during the build.
 - Login has no rate limiting.
+
+---
+
+## 8. Stage 7 addendum — verification, review, gaps, smoke tests, runbook
+
+### 7.1 Postgres verification (PostgreSQL 16 in the build container)
+- **Fresh database**: the startup chain ran three times (create_all → m002…m013 → schema
+  check), idempotent; every new endpoint was exercised against it (import, re-import,
+  advance, parse with intent/currency/notes, complete, undo, batch undo, suggestion accept,
+  propose/confirm delete, deadlines, exam date, update_syllabus, briefing).
+- **Production mirror**: a database built with `main`'s pre-rebuild code and seeded with
+  legacy rows (two browser sessions of chat, todos with ISO / dd-mm-yyyy / junk / null due
+  text, revenue, a book, a Bible log entry, a legacy memory row). The branch's startup
+  migrated it correctly: chat rows merged into `default` with session ids preserved,
+  `due_date` backfilled for the two parseable rows and left NULL for the rest, revenue set
+  to USD, the book and the Bible log copied into notes, the ten new tables created with
+  sequences and `timestamp` columns. Second run: no-op.
+- **Full suite on Postgres** (`TEST_DATABASE_URL`): first run 417 passed, 1 error — a lock
+  timeout caused by a test leaking an open session (invisible on SQLite). Fixed the test and
+  made the fixture terminate stale connections; see the final run result at the end.
+- **Bugs found and fixed**:
+  1. **RLS was not enabled on any of the ten new tables on Postgres.** The migrations only
+     enabled it on tables they created, but `create_all` at import creates them first. Now
+     every migration enables RLS on all its tables on every run (verified: 10/10).
+  2. The migration DDL used SQLite types (`INTEGER PRIMARY KEY AUTOINCREMENT`, `DATETIME`);
+     on Postgres it is now rewritten to `SERIAL` / `TIMESTAMP`, so a table created by the
+     migration rather than `create_all` still gets a sequence.
+
+### 7.2 Branch review (fresh-reviewer pass over the diff vs main)
+Checked: token signing (HMAC-SHA256 over the payload, `compare_digest` on both the password
+and the signature, expiry enforced, secret derived from the password unless
+`FOUNDER_OS_SECRET` is set so a password change invalidates sessions), route protection
+(everything except `/health`, `/ping`, `/auth/*`, OPTIONS, `/`, `/index.html`, `/app/`),
+undo, and the migrations for data loss (all statements are additive; backfills only fill
+NULLs; the notes copy only inserts).
+Fixed:
+- Undo is now **all-or-nothing per batch** and returns 409 (instead of a 500 or a half-undone
+  batch) when a record is gone or, on Postgres, still referenced by a foreign key.
+- The static-frontend exemption matched any path starting with `/app` (e.g. `/apples`);
+  it now matches `/app` and `/app/…` only.
+Not reviewed in this pass: the market-intelligence agent, vault git handling, the health and
+timetable pages' JS, and the legacy `/input` keyword router.
+
+### 7.3 Known gaps
+- Login rate limiting: 5 failures per 5 minutes per address (X-Forwarded-For aware) locks the
+  address for 15 minutes; 429 with `Retry-After`. In-memory, resets on restart.
+  Env: `LOGIN_MAX_FAILURES`, `LOGIN_WINDOW_SECONDS`, `LOGIN_LOCK_SECONDS`.
+- Dock no longer clips at phone width (badge hidden, controls shrink, bar fits 390 px).
+- Dashboard and the legacy Academic Roadmap are out of the nav (pages still exist in the
+  file; nothing links to them).
+
+### 7.4 Smoke tests
+`node tests/e2e/smoke.js` boots the backend on a throwaway SQLite database with a password,
+seeds a task and the syllabus fixture through the API, then drives headless Chromium:
+login gate (401 → gate → wrong password → in), brief checkbox complete → change log → undo
+→ reopened, syllabus tap-to-advance → backend state. It found and fixed one bug: a 401
+body was being parsed as sync data (`fetchWithTimeout` now rejects non-OK responses).
+
+### 7.5 Realtime (docs reached with curl)
+OpenAI's models index lists `gpt-realtime-2.1-mini` as the current mini realtime model
+(and `gpt-realtime-2.1`); `gpt-realtime-mini` still has a page. **Default changed to
+`gpt-realtime-2.1-mini`.** The WebRTC guide confirms the Stage 5 shapes: client secret via
+`POST /v1/realtime/client_secrets` with `{"session": {"type": "realtime", "model", "audio":
+{"output": {"voice"}}}}`, response `value`; browser posts the SDP offer to
+`/v1/realtime/calls` with `Authorization: Bearer <ephemeral>` and
+`Content-Type: application/sdp` (no query string — removed ours); data channel
+`oai-events`; `function_call_output` + `response.create`; `input_audio_buffer.speech_*`;
+`response.output_audio_transcript.*`; `turn_detection.interrupt_response`. The frontend also
+treats `session.started` as ready. Not confirmed (API reference page returned 403):
+`expires_after` on the client-secret request — if OpenAI rejects it, the 502 says so and the
+field can be dropped.
+
+### 7.6 Deploy runbook
+`docs/DEPLOY.md`: env vars in order, merge steps, post-deploy checks, Render rollback.
+
+### Postgres suite — final run
+After the fixture fix the full suite was re-run on PostgreSQL 16 (`TEST_DATABASE_URL`).
+At the time of this commit it was two-thirds through with no failures; the completed result
+is recorded in the commit that follows this one.
