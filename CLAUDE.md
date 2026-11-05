@@ -64,6 +64,10 @@ Dashboard, Timetable, Health, Syllabus, Academic Roadmap (legacy), Agents, War R
 Targets, Design Guide, Settings. The global command dock at the bottom is the talk bar: typed
 input, record-and-transcribe mic, and Live (WebRTC real-time voice). Every backend call goes
 through a `fetch` wrapper that attaches the session token; a 401 opens the login gate.
+The orb on the home screen is the assistant's presence (states idle / listening / thinking /
+speaking / acting). `show_view` directives (`{"type":"ui"}` SSE events, or `ui_directive` from
+the voice tool bridge) open a full-screen stage with a whitelisted view (syllabus, brief,
+deadlines, note, changes, progress); live voice runs full-screen on the same stage.
 All user text is escaped with `escHtml` before it reaches `innerHTML`; `mdHtml` escapes raw HTML
 before markdown runs.
 
@@ -75,7 +79,7 @@ before markdown runs.
 | `llm.py` | The only OpenAI gateway: lazy client, model config, usage logging, cost estimates |
 | `openai_client.py` | Prompts: parser schema, orchestrator loop (`get_orchestrator_response`) |
 | `orchestrator.py` | `POST /orchestrator` SSE bridge: history budget, memory, persistence of tool calls |
-| `orchestrator_tools.py` | The tool registry (22 tools) and `run_tool` (never raises) |
+| `orchestrator_tools.py` | The tool registry (23 tools, incl. `show_view` UI directives) and `run_tool` (never raises) |
 | `conversation.py` | One default thread, verbatim window + rolling summary, replay of tool results |
 | `memory_service.py` | Long-term memory (`remember` tool, recall) |
 | `change_log.py` | Every write recorded with before/after snapshots; undo; batches live on `db.info` |

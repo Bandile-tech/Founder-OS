@@ -461,3 +461,52 @@ field can be dropped.
 ### Postgres suite — final run
 After the fixture fix the full suite was re-run on PostgreSQL 16 (`TEST_DATABASE_URL`):
 **421 passed, 0 failed, 0 errors** (2 min 34 s). The same 421 pass on SQLite.
+
+---
+
+## 9. Stage 8 addendum — command centre visual pass, brief, stage and voice
+
+### 8.1 Visual pass (vs `docs/design/command-centre.png`)
+Two-column hero: greeting block and the brief/progress cards on the left, the assistant's orb
+on the right. Deeper glass cards with cyan edge glow, larger type scale, Academics /
+Business / Targets gradient bars, header with logo mark, short date and live time. The orb
+is pure CSS (sphere with dot grid, glowing eyes, halo platform, speech bubble, waveform) and
+reflects `idle | listening | thinking | speaking | acting` from both typed turns and voice.
+Checked side by side with the mock-up at 1440 px and 390 px (headless Chromium).
+
+### 8.2 Today's Brief
+At most five ranked items; "Show all" expands. All non-negotiables collapse into one
+`Non-negotiables x/y` row (ranked where the first one was, pinned into the top five while
+any are open) that expands on tap; each can be ticked (`POST /habits/toggle`).
+
+### 8.4 `show_view` — the orb opens views
+Tool `show_view(view, params)` with a fixed whitelist:
+
+| view | params | data |
+|---|---|---|
+| `syllabus` | `subject` (name/code → code), `paper` (normalised) | `GET /syllabus`, filtered client-side |
+| `brief` | — | current briefing items |
+| `deadlines` | `days` (1–90) | **new** `GET /deadlines?days=` |
+| `note` | `title` → resolved to `note_id` server-side | `GET /notes/{id}` |
+| `changes` | `limit` (1–100) | `GET /changes` with Undo |
+| `progress` | — | briefing progress + per-subject syllabus |
+| `close` (aliases home) | — | closes the stage |
+
+The orchestrator stream emits `{"type":"ui","directive":{"view","params"}}` after the tool
+result; the voice tool bridge returns `ui_directive` in its response. The model never sends
+HTML. Frontend: `#stage` full-screen overlay; the orb moves into the stage, the view renders
+on the right, the dock stays usable on top; Esc / Close / a `close` directive return home.
+Tested with OpenAI mocked (`tests/test_stage8_show_view.py`, 10 tests) and in the smoke run.
+
+### 8.5 Live voice full-screen
+Starting a live session opens the stage in voice mode (orb centred, transcript beneath, bubble
+shows the last spoken line). A view opened by voice appears beside the orb. Esc or Close
+clears the view first, then ends the session; stopping the session closes the stage.
+
+### Known gaps after Stage 8
+- The orb's listening/speaking states in a live session come from server VAD events; with no
+  WebRTC available in CI they were exercised by feeding the same events to the handler.
+- The stage views are read-mostly: the syllabus view supports tap-to-advance and the brief
+  view supports ticking tasks; notes are read-only there.
+- The mock-up's extra tiles (Business, Projects, Content, Applications, Agents) remain out by
+  design (phases 5–6).
