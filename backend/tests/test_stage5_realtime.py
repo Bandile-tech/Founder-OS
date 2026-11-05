@@ -183,7 +183,7 @@ class TestFallbackAndFrontend:
 
     def test_frontend_wires_live_voice(self):
         html = Path(__file__).resolve().parent.parent.parent.joinpath("frontend", "index.html").read_text(encoding="utf-8")
-        for needle in ('id="live-btn"', "toggleLiveVoice", "/voice/realtime/session", "/voice/realtime/tool",
+        for needle in ('id="mic-btn"', "toggleLiveVoice", "/voice/realtime/session", "/voice/realtime/tool",
                        "/voice/realtime/transcript", 'createDataChannel("oai-events")',
                        "response.function_call_arguments.done", "conversation.item.input_audio_transcription.completed",
                        "input_audio_buffer.speech_started", "function_call_output", "toggleVoice()", "/voice/transcribe"):

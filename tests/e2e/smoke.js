@@ -166,7 +166,7 @@ async function api(token, method, p, body, isForm) {
     check(stage.orbInStage, "the orb moved into the stage");
     await page.keyboard.press("Escape");
     await page.waitForTimeout(300);
-    const closed = await page.evaluate(() => ({ shown: document.getElementById("stage").classList.contains("show"), orbHome: !!document.querySelector(".orb-col .orb-stage") }));
+    const closed = await page.evaluate(() => ({ shown: document.getElementById("stage").classList.contains("show"), orbHome: !!document.querySelector("#cc-canvas .orb-stage") }));
     check(!closed.shown && closed.orbHome, "Esc closed the stage and the orb returned home");
     await page.evaluate(() => { handleUiDirective({ view: "brief" }); handleUiDirective({ view: "close" }); });
     check(!(await page.evaluate(() => document.getElementById("stage").classList.contains("show"))), "close directive closes the stage");
