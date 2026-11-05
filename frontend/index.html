@@ -759,7 +759,52 @@ input:hover:not(:focus), textarea:hover:not(:focus), select:hover:not(:focus){bo
 }
 /* (legacy block below kept for the stage and other pages) */
 .cc-hero-legacy{display:none}
-/* STAGE — full-screen view opened by the orb (show_view) or by live voice */
+/* STAGE — full-screen view opened by the orb (show_view) or by live voice; panel laid out like the Business Metrics design */
+.stage-inner{bottom:140px!important;padding-bottom:0!important}
+.stage-right{padding:0;border-radius:24px;border-color:rgba(110,220,236,0.35)}
+.stage-head{padding:18px 22px 0 18px;margin-bottom:0;align-items:center}
+.stage-head .hl{display:flex;align-items:center;gap:12px;min-width:0;flex:1}
+.stage-head .hl>div{min-width:0;flex:1}
+.stage-back{width:40px;height:40px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;cursor:pointer;color:#fff;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.14)}
+.stage-back svg{width:18px;height:18px}
+.stage-head .ico{width:24px;height:24px;color:#66E3F4;flex-shrink:0;filter:drop-shadow(0 0 6px rgba(102,227,244,0.6))}
+.stage-head .title{font-family:var(--font-body);font-size:22px;font-weight:600;letter-spacing:-0.01em;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stage-head .title .dim{color:rgba(234,238,242,0.6);font-weight:500}
+.stage-head .eyebrow{display:none}
+.stage-tabs{display:flex;gap:6px;padding:14px 18px 0;border-bottom:1px solid rgba(167,235,242,0.08)}
+.stage-tab{padding:10px 20px 12px;border-radius:12px 12px 0 0;font-size:15px;color:rgba(234,238,242,0.7);cursor:pointer;background:none;border:none;font-family:inherit}
+.stage-tab.active{color:#fff;background:rgba(255,255,255,0.05);box-shadow:inset 0 -2px 0 #66E3F4}
+.stage-body{padding:18px 22px 22px}
+.st-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin-bottom:18px}
+.st-kpi{border-radius:16px;padding:16px 18px 14px;background:linear-gradient(160deg,rgba(22,32,42,0.8),rgba(10,14,20,0.9));border:1px solid rgba(110,220,236,0.28);box-shadow:inset 0 1px 0 rgba(255,255,255,0.06),0 0 30px -16px rgba(47,211,240,0.45);min-width:0}
+.st-kpi .kl{display:flex;align-items:center;gap:10px;font-size:14px;color:rgba(234,238,242,0.85);margin-bottom:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.st-kpi .kl svg{width:22px;height:22px;color:#66E3F4;flex-shrink:0}
+.st-kpi .kv{font-family:var(--font-body);font-size:30px;font-weight:600;color:#fff;letter-spacing:-0.02em;line-height:1}
+.st-kpi .kv small{font-size:15px;color:rgba(234,238,242,0.6);font-weight:500;margin-left:4px}
+.st-kpi .ks{font-size:13px;color:rgba(234,238,242,0.65);margin-top:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.st-kpi .kbar{height:5px;border-radius:100px;background:rgba(167,235,242,0.12);margin-top:12px;overflow:hidden}
+.st-kpi .kbar span{display:block;height:100%;border-radius:100px;background:linear-gradient(90deg,#1AC9B0,#A7EBF2)}
+.st-kpi .kv.red{color:#FF8080}.st-kpi .kv.green{color:#5EE8C8}
+.st-two{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:16px;margin-top:18px}
+.st-panel{border-radius:16px;padding:16px 18px;background:linear-gradient(160deg,rgba(22,32,42,0.8),rgba(10,14,20,0.9));border:1px solid rgba(110,220,236,0.28);min-width:0}
+.st-panel .ph{display:flex;align-items:center;gap:10px;font-size:17px;font-weight:600;color:#fff;margin-bottom:10px}
+.st-panel .ph svg{width:20px;height:20px;color:#F5C842}
+.st-action{display:flex;align-items:center;gap:12px;padding:11px 10px;border-radius:12px;border:1px solid transparent;cursor:pointer}
+.st-action.top{background:rgba(62,220,180,0.06);border-color:rgba(62,220,180,0.3)}
+.st-action .txt{flex:1;min-width:0;font-size:15px;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.st-action .pri{font-size:14px;font-weight:600;flex-shrink:0}
+.st-action .pri.high{color:#5EE8C8}.st-action .pri.medium{color:#F5C842}
+.st-insight{display:flex;align-items:center;gap:12px;padding:12px;border-radius:12px;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.06);margin-bottom:8px;font-size:14px;color:#fff;line-height:1.4}
+.st-insight svg{width:22px;height:22px;flex-shrink:0;color:#66E3F4}
+.stage-body .sy-subject{padding:14px 18px;margin-bottom:12px;background:linear-gradient(160deg,rgba(22,32,42,0.8),rgba(10,14,20,0.9));border:1px solid rgba(110,220,236,0.22)}
+#stage .orb-stage{position:relative;left:auto;top:auto;flex-shrink:0}
+#stage[data-mode="view"] .stage-left .orb-stage{transform:scale(0.82);transform-origin:top center;margin-bottom:-66px}
+#stage[data-mode="view"] .orb-bubble,#stage[data-mode="view"] .orb-wave{display:none}
+#stage .orb-img{-webkit-mask-image:linear-gradient(90deg,transparent,#000 20%,#000 80%,transparent),linear-gradient(180deg,transparent,#000 8%,#000 90%,transparent);mask-image:linear-gradient(90deg,transparent,#000 20%,#000 80%,transparent),linear-gradient(180deg,transparent,#000 8%,#000 90%,transparent);-webkit-mask-composite:source-in;mask-composite:intersect}
+#stage .stage-voice-close{top:0;left:0;right:auto}
+#stage[data-mode="view"] .stage-inner{grid-template-columns:400px minmax(0,1fr)}
+@media(max-width:1000px){.st-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.st-two{grid-template-columns:minmax(0,1fr)}.stage-inner{bottom:110px!important}#stage[data-mode="view"] .stage-inner{grid-template-columns:minmax(0,1fr)}#stage[data-mode="view"] .stage-left .orb-stage{margin-bottom:0}.stage-body{padding:12px}.stage-head{padding:14px 14px 0}.stage-head .title{font-size:18px}.stage-head .stage-close{display:none}.stage-tabs{padding:10px 12px 0}}
+/* (old stage rules follow) */
 #stage{position:fixed;inset:0;z-index:150;display:none;background:rgba(6,8,11,0.86);backdrop-filter:blur(26px) saturate(150%);-webkit-backdrop-filter:blur(26px) saturate(150%)}
 #stage.show{display:block}
 .stage-inner{position:absolute;inset:var(--header-h) 0 0 0;display:grid;grid-template-columns:380px minmax(0,1fr);gap:0;padding:28px 36px 150px 36px;box-sizing:border-box}
@@ -2608,9 +2653,14 @@ tr:hover .td-del{opacity:1}
     </div>
     <div class="stage-right">
       <div class="stage-head">
-        <div><div class="eyebrow" id="stage-eyebrow">View</div><div class="title" id="stage-title">—</div></div>
+        <div class="hl">
+          <button class="stage-back" onclick="closeStage()" aria-label="Back (Esc)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m14 6-6 6 6 6"/></svg></button>
+          <svg class="ico" id="stage-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18 10 12l4 4 6-7"/><path d="M15 9h5v5"/></svg>
+          <div><div class="eyebrow" id="stage-eyebrow">View</div><h2 class="title" id="stage-title">—</h2></div>
+        </div>
         <button class="stage-close" onclick="closeStage()" aria-label="Close (Esc)">Close · Esc</button>
       </div>
+      <div class="stage-tabs" id="stage-tabs" style="display:none"></div>
       <div class="stage-body" id="stage-body"></div>
     </div>
   </div>
@@ -5829,20 +5879,53 @@ async function renderStageView(){
   const body=document.getElementById("stage-body");
   if(!body||!STAGE.view)return;
   const v=STAGE.view,p=STAGE.params||{};
+  const tabsEl=document.getElementById("stage-tabs");if(tabsEl&&v!=="syllabus"){tabsEl.style.display="none";tabsEl.innerHTML="";}
   body.innerHTML=`<div class="skel cc-skel"></div><div class="skel cc-skel" style="opacity:0.6"></div>`;
   try{
     if(v==="syllabus"){
-      const r=await fetch(`${API_BASE}/syllabus`);const d=await r.json();
+      const [d,weak]=await Promise.all([fetch(`${API_BASE}/syllabus`).then(r=>r.json()),fetch(`${API_BASE}/syllabus/weakest?limit=12`).then(r=>r.json()).catch(()=>[])]);
+      const paperOf=pp=>(pp.paper||"").toUpperCase();
+      const wantPaper=p.paper?String(p.paper).toUpperCase():null;
       const subs=(d.subjects||[]).filter(sb=>!p.subject||sb.subject_code===p.subject);
-      const parts=[];
-      subs.forEach(sb=>{
-        const papers=sb.papers.filter(pp=>!p.paper||(pp.paper||"").toUpperCase()===String(p.paper).toUpperCase());
-        if(!papers.length)return;
-        parts.push(`<div class="card sy-subject"><div class="sy-subject-head"><span class="n">${escHtml(sb.subject_name)}</span><span class="x">${escHtml(sb.level||"")} · ${sb.progress.pct}%</span></div>
-          ${papers.map(pp=>`<div class="sy-paper"><div class="sy-paper-head"><span class="p">${escHtml(pp.paper||"General")}</span><div class="bar">${_syBar(pp.progress.counts,pp.progress.total)}</div><span class="pct">${pp.progress.pct}%</span></div>${pp.points.map(_syRow).join("")}</div>`).join("")}</div>`);
-      });
-      body.innerHTML=parts.length?parts.join(""):`<div class="st-empty">No syllabus topics match${p.paper?` paper ${escHtml(String(p.paper))}`:""}${p.subject_name?` for ${escHtml(p.subject_name)}`:""}.</div>`;
-      document.getElementById("stage-title").textContent=`Syllabus${p.subject_name?" · "+p.subject_name:""}${p.paper?" · "+p.paper:""}`;
+      const points=[];
+      subs.forEach(sb=>sb.papers.forEach(pp=>{if(!wantPaper||paperOf(pp)===wantPaper)pp.points.forEach(x=>points.push(x));}));
+      const total=points.length, bullet=points.filter(x=>x.status==="bulletproof").length, red=points.filter(x=>x.status==="not_started").length;
+      const score={not_started:0,learned:1/3,revised:2/3,bulletproof:1};
+      const pct=total?Math.round(100*points.reduce((a,x)=>a+(score[x.status]||0),0)/total):0;
+      // next exam among the shown subjects / paper
+      let exam=null;
+      subs.forEach(sb=>{const cands=[...sb.papers.filter(pp=>!wantPaper||paperOf(pp)===wantPaper).map(pp=>pp.exam_date),sb.exam_date].filter(Boolean);cands.forEach(x=>{if(!exam||x<exam)exam=x;});});
+      const examDays=exam?Math.ceil((new Date(exam)-new Date().setHours(0,0,0,0))/864e5):null;
+      const K=(icon,label,value,sub,extra="")=>`<div class="st-kpi"><div class="kl">${icon}<span>${label}</span></div><div class="kv">${value}</div>${sub?`<div class="ks">${sub}</div>`:""}${extra}</div>`;
+      const I=(d)=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+      const kpis=K(I('<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/>'),"Overall progress",`${pct}<small>%</small>`,`${total} topic${total===1?"":"s"}`,`<div class="kbar"><span style="width:${pct}%"></span></div>`)
+        +K(I('<path d="m5 12 4 4L19 6"/>'),"Bulletproof",`<span class="green">${bullet}</span><small>/ ${total}</small>`,total?`${Math.round(100*bullet/total)}% exam-ready`:"—")
+        +K(I('<circle cx="12" cy="12" r="9"/><path d="M12 7v6M12 16v1"/>'),"Not started",`<span class="${red?"red":""}">${red}</span>`,red?"red topics to open first":"everything has been touched")
+        +K(I('<rect x="3" y="5" width="18" height="16" rx="2.5"/><path d="M3 10h18M8 3v4M16 3v4"/>'),"Next exam",exam?`${examDays}<small>days</small>`:"—",exam?new Date(exam).toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"}):"no exam date set");
+      const list=subs.map(sb=>{
+        const papers=sb.papers.filter(pp=>!wantPaper||paperOf(pp)===wantPaper);
+        if(!papers.length)return "";
+        return `<div class="card sy-subject"><div class="sy-subject-head"><span class="n">${escHtml(sb.subject_name)}</span><span class="x">${escHtml(sb.level||"")} · ${sb.progress.pct}%</span></div>
+          ${papers.map(pp=>`<div class="sy-paper"><div class="sy-paper-head"><span class="p">${escHtml(pp.paper||"General")}</span><div class="bar">${_syBar(pp.progress.counts,pp.progress.total)}</div><span class="pct">${pp.progress.pct}%</span></div>${pp.points.map(_syRow).join("")}</div>`).join("")}</div>`;
+      }).join("");
+      const shownIds=new Set(points.map(x=>x.id));
+      const actions=(Array.isArray(weak)?weak:[]).filter(w=>shownIds.has(w.id)).slice(0,4);
+      const act=actions.length?actions.map((w,i)=>`<div class="st-action ${i===0?"top":""}" onclick="syllabusAdvance(${Number(w.id)})" title="${escHtml(w.reason||"")}"><div class="cc-check ${i===0?"checked":""}">${CC_ICON_CHECK}</div><span class="txt">Revise ${escHtml(w.topic_code)} ${escHtml(w.title)}${w.paper?` (${escHtml(w.paper)})`:""}</span><span class="pri ${i<2?"high":"medium"}">${i<2?"High":"Medium"}</span></div>`).join("")
+        :`<div class="st-empty">Nothing weak here — every topic is bulletproof.</div>`;
+      const byPaper=[];subs.forEach(sb=>sb.papers.filter(pp=>!wantPaper||paperOf(pp)===wantPaper).forEach(pp=>byPaper.push({label:`${sb.subject_name} ${pp.paper||""}`.trim(),pct:pp.progress.pct,red:pp.progress.counts.not_started||0})));
+      const ins=[
+        total?`${bullet} of ${total} topics are bulletproof (${pct}% overall).`:"Import the tracker CSV to see progress here.",
+        red?`${red} topic${red===1?" has":"s have"} not been started — open those before polishing greens.`:"Every topic has been started.",
+        exam?`${examDays} days to the next exam${byPaper.length?`; weakest paper is ${escHtml(byPaper.slice().sort((a,b)=>a.pct-b.pct)[0].label)} at ${byPaper.slice().sort((a,b)=>a.pct-b.pct)[0].pct}%`:""}.`:"Set the exam date by saying it to Founder OS.",
+      ].map(t=>`<div class="st-insight">${I('<path d="M4 18 10 12l4 4 6-7"/>')}<span>${t}</span></div>`).join("");
+      body.innerHTML=`<div class="st-kpis">${kpis}</div>${list||`<div class="st-empty">No syllabus topics match${wantPaper?` paper ${escHtml(wantPaper)}`:""}${p.subject_name?` for ${escHtml(p.subject_name)}`:""}.</div>`}
+        <div class="st-two"><div class="st-panel"><div class="ph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 3 4 14h7l-1 7 9-11h-7l1-7Z"/></svg>Next best actions</div>${act}</div>
+        <div class="st-panel"><div class="ph"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 20V10M10 20V4M15 20v-8M20 20v-5"/></svg>Insights</div>${ins}</div></div>`;
+      document.getElementById("stage-title").innerHTML=`Syllabus${p.subject_name?` <span class="dim">·</span> ${escHtml(p.subject_name)}`:""}${wantPaper?` <span class="dim">·</span> ${escHtml(wantPaper)}`:""}`;
+      const tabs=document.getElementById("stage-tabs");
+      const allPapers=[];(d.subjects||[]).forEach(sb=>sb.papers.forEach(pp=>{if(pp.paper&&!allPapers.includes(pp.paper))allPapers.push(pp.paper);}));
+      tabs.style.display="flex";
+      tabs.innerHTML=`<button class="stage-tab ${!wantPaper?"active":""}" onclick="openStage('syllabus',{subject:'${escHtml(p.subject||"")}',subject_name:'${escHtml(p.subject_name||"")}'})">Overview</button>`+allPapers.map(pp=>`<button class="stage-tab ${wantPaper===pp?"active":""}" onclick="openStage('syllabus',{subject:'${escHtml(p.subject||"")}',subject_name:'${escHtml(p.subject_name||"")}',paper:'${escHtml(pp)}'})">${escHtml(pp)}</button>`).join("");
     }else if(v==="brief"){
       if(!_briefing)await loadBriefing();
       const items=(_briefing&&_briefing.items)||[];
