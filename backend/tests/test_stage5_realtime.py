@@ -63,7 +63,7 @@ class TestSession:
         body = r.json()
         assert body["client_secret"]["value"] == "ek_abc123"
         assert body["client_secret"]["expires_at"] == 1800000000
-        assert body["model"] == "gpt-realtime-mini"
+        assert body["model"] == "gpt-realtime-2.1-mini"
         assert body["calls_url"].endswith("/realtime/calls")
         assert body["voice_session_id"] and body["silence_timeout_seconds"] == 120
         assert "sk-SERVER-SECRET" not in r.text
@@ -71,7 +71,7 @@ class TestSession:
         assert captured["url"].endswith("/realtime/client_secrets")
         assert captured["headers"]["Authorization"] == "Bearer sk-SERVER-SECRET"
         sess = captured["json"]["session"]
-        assert sess["type"] == "realtime" and sess["model"] == "gpt-realtime-mini"
+        assert sess["type"] == "realtime" and sess["model"] == "gpt-realtime-2.1-mini"
         assert sess["audio"]["input"]["turn_detection"]["type"] == "server_vad"
         assert sess["audio"]["input"]["turn_detection"]["interrupt_response"] is True
         assert sess["audio"]["input"]["transcription"]["model"]
@@ -84,10 +84,10 @@ class TestSession:
 
     def test_model_env_override(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-        monkeypatch.setenv("REALTIME_MODEL", "gpt-realtime-2.1-mini")
+        monkeypatch.setenv("REALTIME_MODEL", "gpt-realtime-mini")
         with patch("voice_realtime.httpx.post", return_value=_Resp(200, {"value": "ek_x", "expires_at": 1})):
             r = client.post("/voice/realtime/session")
-        assert r.json()["model"] == "gpt-realtime-2.1-mini"
+        assert r.json()["model"] == "gpt-realtime-mini"
 
     def test_upstream_rejection_is_502_with_message(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
@@ -103,7 +103,7 @@ class TestSession:
         db = _db()
         row = db.query(models.LLMUsage).first()
         db.close()
-        assert row.purpose == "realtime_session" and row.model == "gpt-realtime-mini"
+        assert row.purpose == "realtime_session" and row.model == "gpt-realtime-2.1-mini"
 
 
 class TestToolBridge:

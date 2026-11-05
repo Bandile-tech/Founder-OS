@@ -10,14 +10,16 @@ Real-time voice (Rebuild Stage 5).
   POST /voice/realtime/transcript  save a user or assistant transcript line into the
                                    default conversation thread.
 
-Model: ``REALTIME_MODEL`` (default ``gpt-realtime-mini``). ``REALTIME_VOICE`` picks the
+Model: ``REALTIME_MODEL`` (default ``gpt-realtime-2.1-mini`` — the current mini realtime
+model on OpenAI's models page as of 2026-11-05; ``gpt-realtime-mini`` still exists). ``REALTIME_VOICE`` picks the
 output voice (default ``marin``). ``REALTIME_TRANSCRIBE_MODEL`` is the input transcription
 model (default ``gpt-4o-mini-transcribe``).
 
-The upstream request shapes follow OpenAI's GA Realtime API (``/v1/realtime/client_secrets``
-with a nested ``session`` object, WebRTC SDP exchange at ``/v1/realtime/calls``). They could
-not be re-verified against OpenAI's docs from this build environment (host not reachable);
-if the API rejects the session request, the 502 body carries OpenAI's own error message.
+The upstream request shapes follow OpenAI's Realtime WebRTC guide (checked 2026-11-05):
+``POST /v1/realtime/client_secrets`` with ``{"session": {"type": "realtime", "model", "audio":
+{"output": {"voice"}}, ...}}``, then the browser posts its SDP offer to
+``/v1/realtime/calls`` with the ephemeral key; data channel ``oai-events``. If OpenAI rejects
+the session request, the 502 body carries its own error message.
 """
 
 import json
@@ -39,7 +41,7 @@ from database import get_db
 
 router = APIRouter()
 
-DEFAULT_REALTIME_MODEL = "gpt-realtime-mini"
+DEFAULT_REALTIME_MODEL = "gpt-realtime-2.1-mini"
 DEFAULT_REALTIME_VOICE = "marin"
 DEFAULT_TRANSCRIBE_MODEL = "gpt-4o-mini-transcribe"
 OPENAI_REALTIME_BASE = os.getenv("OPENAI_REALTIME_BASE", "https://api.openai.com/v1/realtime")
