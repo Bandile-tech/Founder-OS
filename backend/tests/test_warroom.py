@@ -91,14 +91,19 @@ class TestAnnualTargetsNewSchema:
             "target_value": 1000,
         })
         tid = r.json()["id"]
-        # 900/1000 = 90% — well ahead of any year_pct, should be "ahead"
-        assert r.json()["status"] == "ahead"
-        # Drop current to near zero — should become "critical"
+        # Status is relative to the elapsed share of the year, so derive the expectation
+        # from the response's own expected_pct rather than assuming a fixed calendar date.
+        created = r.json()
+        gap = created["progress_pct"] - created["expected_pct"]
+        expected_status = "ahead" if gap > 10 else "on_track" if gap > -10 else "behind" if gap > -25 else "critical"
+        assert created["status"] == expected_status
+        # Drop current to near zero — must be recomputed, not the stale pre-patch status
         r2 = client.patch(f"/annual-targets/{tid}", json={"current_value": 10})
         assert r2.status_code == 200
         d = r2.json()
         assert d["progress_pct"] == 1
-        assert d["status"] in ("behind", "critical")
+        assert d["status"] != created["status"] or created["status"] in ("behind", "critical")
+        assert d["status"] in ("on_track", "behind", "critical")
 
     def test_no_lower_is_better_or_year_or_category_in_response(self):
         r = client.post("/annual-targets", json={"name": "Test target", "target_value": 100})

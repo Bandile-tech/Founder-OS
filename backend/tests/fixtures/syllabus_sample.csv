@@ -1,0 +1,24 @@
+Maths 9709 — Tracker (synthetic fixture),,,,,,
+,,,,,,
+Topic,Learned,Revised,Bulletproof,Past Paper Score %,Last Revised,Weakness Notes
+1.1 Quadratics,TRUE,TRUE,TRUE,92,2026-10-20,
+1.2 Functions,TRUE,TRUE,FALSE,71%,2026-10-25,Inverse of composite functions
+1.3 Coordinate geometry,TRUE,FALSE,FALSE,,2026-09-30,Perpendicular bisectors
+,,,,,,
+1.4 Circular measure,FALSE,FALSE,FALSE,,,
+1.5 Trigonometry,TRUE,FALSE,FALSE,55,12/10/2026,Proving identities
+,,,,,,
+Topic,Learned,Revised,Bulletproof,Past Paper Score %,Last Revised,Weakness Notes
+5.1 Representation of data,TRUE,TRUE,FALSE,80,2026-10-28,
+5.2 Permutations and combinations,TRUE,FALSE,FALSE,,,Arrangements with restrictions
+5.3 Probability,TRUE,FALSE,FALSE,60,2026-10-01,Conditional probability
+5.4 Discrete random variables,FALSE,FALSE,FALSE,,,
+5.5 The normal distribution,FALSE,FALSE,FALSE,,,
+,,,,,,
+Legend,,,,,,
+Red = not started,,,,,,
+Yellow = learned but weak,,,,,,
+Blue = revised but not 100%,,,,,,
+Green = bulletproof,,,,,,
+Topic,Learned,Revised,Bulletproof,Past Paper Score %,Last Revised,Weakness Notes
+9.9 Should never be imported,TRUE,TRUE,TRUE,,,

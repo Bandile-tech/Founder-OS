@@ -60,6 +60,9 @@ class WeeklyTargetSnapshot(Base):
 
 
 class AIMemory(Base):
+    """Long-term memory. Legacy rows hold prompt/response pairs; rows written by the
+    assistant's ``remember`` tool use context_type='memory' with the fact in
+    ``context_data`` and ``kind`` = fact | decision | preference."""
     __tablename__ = "ai_memory"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -68,6 +71,8 @@ class AIMemory(Base):
     context_type = Column(String)
     context_data = Column(Text)
     response = Column(Text)
+    kind = Column(String, nullable=True)
+    tags = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -133,21 +138,56 @@ class Todo(Base):
     priority = Column(Integer, default=5)
     done = Column(Boolean, default=False)
     category = Column(String)
-    due = Column(String)
+    due = Column(String)                      # legacy free-text due; kept for compatibility
+    due_date = Column(Date, nullable=True)    # real date — overdue is computed server-side from this
     source = Column(String)
     roadmap_id = Column(String, nullable=True)
     completed_at = Column(Date, nullable=True)
 
 
 class ChatMessage(Base):
-    """Replaces chat_memory.db — stores per-session chat history in founder_os.db."""
+    """Server-side conversation history. ``thread_id`` is the conversation (one default
+    thread shared across devices); ``session_id`` is the browser id kept for compatibility.
+    Tool-calling turns persist ``tool_calls_json`` on the assistant row and
+    ``tool_call_id`` on the following role='tool' rows."""
     __tablename__ = "chat_messages"
 
     id = Column(Integer, primary_key=True, index=True)
     session_id = Column(String, nullable=False, index=True)
-    role = Column(String, nullable=False)       # "user" | "assistant"
+    thread_id = Column(String, nullable=True, index=True)
+    role = Column(String, nullable=False)       # "user" | "assistant" | "tool"
     content = Column(Text, nullable=False)
+    tool_calls_json = Column(Text, nullable=True)
+    tool_call_id = Column(String, nullable=True)
+    changes_json = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class ConversationSummary(Base):
+    """Rolling summary of the turns that have fallen out of the verbatim history window."""
+    __tablename__ = "conversation_summaries"
+
+    id = Column(Integer, primary_key=True, index=True)
+    thread_id = Column(String, nullable=False, unique=True)
+    summary = Column(Text, nullable=False, default="")
+    covers_through_message_id = Column(Integer, nullable=True)
+    message_count = Column(Integer, default=0)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class LLMUsage(Base):
+    """One row per OpenAI call — feeds GET /usage/summary."""
+    __tablename__ = "llm_usage"
+
+    id = Column(Integer, primary_key=True, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    model = Column(String, nullable=False)
+    purpose = Column(String, nullable=True)
+    input_tokens = Column(Integer, default=0)
+    cached_input_tokens = Column(Integer, default=0)
+    output_tokens = Column(Integer, default=0)
+    estimated_cost_usd = Column(Float, default=0.0)
+    duration_ms = Column(Integer, nullable=True)
 
 
 class BibleEntry(Base):
@@ -220,6 +260,7 @@ class Revenue(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     amount = Column(Float, nullable=False)
+    currency = Column(String, default="USD")   # USD | ZMW
     source = Column(String, default="")
     client_id = Column(Integer, ForeignKey("clients.id"), nullable=True)
     date = Column(Date, nullable=False)
@@ -583,3 +624,134 @@ class ResearchMemoryNote(Base):
     times_reinforced = Column(Integer, default=1)
     created_at       = Column(DateTime, default=datetime.utcnow)
     updated_at       = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+# ── REBUILD: CHANGE LOG, CONFIRMATIONS, SUGGESTIONS, NOTES ───
+
+class ChangeLog(Base):
+    """Every write made by the assistant, the parser or a tool. One assistant turn is
+    one batch. ``before_json``/``after_json`` are column snapshots used by undo."""
+    __tablename__ = "change_log"
+
+    id          = Column(Integer, primary_key=True, index=True)
+    created_at  = Column(DateTime, default=datetime.utcnow, index=True)
+    batch_id    = Column(String, nullable=False, index=True)
+    source      = Column(String, nullable=False, default="assistant")  # assistant|parser|ui
+    table_name  = Column(String, nullable=False)
+    record_id   = Column(Integer, nullable=True)
+    action      = Column(String, nullable=False)                        # create|update|delete
+    before_json = Column(Text, nullable=True)
+    after_json  = Column(Text, nullable=True)
+    summary     = Column(String, nullable=True)
+    undone_at   = Column(DateTime, nullable=True)
+
+
+class PendingAction(Base):
+    """A destructive action the assistant proposed and must not execute until the
+    user explicitly confirms it (deletes)."""
+    __tablename__ = "pending_actions"
+
+    id           = Column(Integer, primary_key=True, index=True)
+    created_at   = Column(DateTime, default=datetime.utcnow)
+    thread_id    = Column(String, nullable=True)
+    kind         = Column(String, nullable=False, default="delete")
+    table_name   = Column(String, nullable=False)
+    record_id    = Column(Integer, nullable=False)
+    summary      = Column(String, nullable=True)
+    payload_json = Column(Text, nullable=True)
+    status       = Column(String, nullable=False, default="pending")  # pending|confirmed|cancelled|expired
+    expires_at   = Column(DateTime, nullable=True)
+    resolved_at  = Column(DateTime, nullable=True)
+    batch_id     = Column(String, nullable=True)
+
+
+class Suggestion(Base):
+    """A low-confidence or ambiguous extraction. Nothing is written until accepted."""
+    __tablename__ = "suggestions"
+
+    id           = Column(Integer, primary_key=True, index=True)
+    created_at   = Column(DateTime, default=datetime.utcnow)
+    kind         = Column(String, nullable=False)       # todo_add|todo_complete|inbox_add|...
+    payload_json = Column(Text, nullable=False)
+    confidence   = Column(Float, nullable=True)
+    reason       = Column(String, nullable=True)
+    source_text  = Column(Text, nullable=True)
+    status       = Column(String, nullable=False, default="pending")  # pending|accepted|dismissed
+    source       = Column(String, nullable=True)        # parser|assistant
+    batch_id     = Column(String, nullable=True)
+    resolved_at  = Column(DateTime, nullable=True)
+
+
+class Note(Base):
+    """Free-form markdown notes: books, bible, journal, inbox, general."""
+    __tablename__ = "notes"
+
+    id         = Column(Integer, primary_key=True, index=True)
+    title      = Column(String, nullable=False)
+    kind       = Column(String, nullable=False, default="general")  # book|bible|journal|inbox|general
+    body       = Column(Text, nullable=False, default="")
+    tags       = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class Embedding(Base):
+    """Shared vector store for meaning-based retrieval across the vault, notes and
+    long-term memory. Vectors are JSON in a TEXT column; similarity is computed in
+    Python (the corpus is small; no pgvector). Keyed by content hash so re-indexing
+    unchanged text never re-embeds it."""
+    __tablename__ = "embeddings"
+
+    id           = Column(Integer, primary_key=True, index=True)
+    source_type  = Column(String, nullable=False, index=True)   # vault | note | memory
+    source_id    = Column(Integer, nullable=False)
+    chunk_index  = Column(Integer, default=0)
+    content_hash = Column(String, nullable=False, index=True)
+    model        = Column(String, nullable=False)
+    vector_json  = Column(Text, nullable=False)
+    updated_at   = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ExamDate(Base):
+    """Exam dates per subject paper. ``paper`` NULL means the whole subject; a
+    paper-level row wins over the subject-level row, which wins over Subject.exam_date."""
+    __tablename__ = "exam_dates"
+
+    id           = Column(Integer, primary_key=True, index=True)
+    subject_code = Column(String, nullable=False)
+    paper        = Column(String, nullable=True)
+    exam_date    = Column(Date, nullable=False)
+    updated_at   = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+# ── REBUILD: SYLLABUS + BRIEFING ─────────────────────────────
+
+class SyllabusPoint(Base):
+    """One syllabus topic per subject paper, mirroring the tracker sheet.
+    status: not_started (red) → learned (yellow) → revised (blue) → bulletproof (green)."""
+    __tablename__ = "syllabus_points"
+
+    id               = Column(Integer, primary_key=True, index=True)
+    subject_code     = Column(String, nullable=False, index=True)
+    subject_name     = Column(String, nullable=False)
+    level            = Column(String, nullable=True)        # AS | A2
+    paper            = Column(String, nullable=True)        # P1, S1, P3 …
+    topic_code       = Column(String, nullable=False)
+    title            = Column(String, nullable=False)
+    status           = Column(String, nullable=False, default="not_started")
+    past_paper_score = Column(Float, nullable=True)
+    last_revised     = Column(Date, nullable=True)
+    weakness_notes   = Column(Text, nullable=True)
+    updated_at       = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class BriefingSummary(Base):
+    """The optional LLM summary for one day's briefing — at most one call per day."""
+    __tablename__ = "briefing_summaries"
+
+    id            = Column(Integer, primary_key=True, index=True)
+    day           = Column(Date, nullable=False, unique=True)
+    summary       = Column(Text, nullable=False, default="")
+    greeting_line = Column(String, nullable=True)
+    model         = Column(String, nullable=True)
+    created_at    = Column(DateTime, default=datetime.utcnow)

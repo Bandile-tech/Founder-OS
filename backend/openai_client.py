@@ -1,14 +1,21 @@
 import os
 import re
 import json
-from openai import OpenAI
 from sqlalchemy.orm import Session
 from models import AIMemory
 from dotenv import load_dotenv
 
+import llm
+
 load_dotenv()
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+def __getattr__(name):
+    """Lazy ``client`` attribute for legacy ``from openai_client import client`` callers.
+    The client is only built on first use, so the module imports with no API key."""
+    if name == "client":
+        return llm.get_client()
+    raise AttributeError(name)
 
 SYSTEM_PROMPT = """
 You are Bandile's CEO-level personal AI operating system.
@@ -61,7 +68,7 @@ TTS_VOICE = "onyx"
 
 def transcribe_audio(file_bytes: bytes, filename: str = "audio.webm") -> str:
     """Transcribe recorded audio via OpenAI Whisper. Returns plain text."""
-    result = client.audio.transcriptions.create(
+    result = llm.get_client().audio.transcriptions.create(
         model=STT_MODEL,
         file=(filename, file_bytes),
     )
@@ -70,7 +77,7 @@ def transcribe_audio(file_bytes: bytes, filename: str = "audio.webm") -> str:
 
 def synthesize_speech(text: str) -> bytes:
     """Convert reply text to spoken audio (MP3 bytes) via OpenAI TTS."""
-    response = client.audio.speech.create(
+    response = llm.get_client().audio.speech.create(
         model=TTS_MODEL,
         voice=TTS_VOICE,
         input=text[:4000],
@@ -90,12 +97,7 @@ def clean_ai_output(text: str) -> str:
 
 def get_chat_response(messages: list) -> str:
     full_messages = [{"role": "system", "content": SYSTEM_PROMPT}] + messages
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=full_messages,
-        max_tokens=800
-    )
-    return response.choices[0].message.content
+    return llm.chat_text(full_messages, purpose="chat", max_tokens=800)
 
 
 def get_chat_response_with_memory(
@@ -115,19 +117,18 @@ def get_chat_response_with_memory(
     for m in reversed(recent_memories):
         memory_text += f"\n[Memory @ {m.created_at}]: {m.context_data}\nResponse: {m.response}\n"
 
-    system_prompt = ""
+    # Stable system prompt first (prompt caching), dynamic context second.
+    dynamic = ""
     if instruction_block:
-        system_prompt += f"[Temporary Instruction]\n{instruction_block}\n\n"
-    system_prompt += f"{memory_text}\n{SYSTEM_PROMPT}"
+        dynamic += f"[Temporary Instruction]\n{instruction_block}\n\n"
+    if memory_text:
+        dynamic += f"[Recent memory]{memory_text}"
+    full_messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    if dynamic.strip():
+        full_messages.append({"role": "system", "content": dynamic.strip()})
+    full_messages += messages
 
-    full_messages = [{"role": "system", "content": system_prompt}] + messages
-
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=full_messages,
-        max_tokens=800
-    )
-    raw = response.choices[0].message.content
+    raw = llm.chat_text(full_messages, db=db, purpose="chat", max_tokens=800)
     clean = clean_ai_output(raw)
 
     # Store in memory
@@ -153,52 +154,58 @@ def get_parse_response(text: str, context: dict) -> dict:
 
     system_prompt = f"""You are the Founder OS parsing engine for Bandile Masocha.
 
-Context: Year 12, Trident College, Zambia. A-levels: Maths 9709, Further Maths 9231, Business 9609, Economics 9708. CIE exams Oct-Nov 2026. Building Aether AI services. Compound lifting: Bench Press, Pull-ups, Squat, Incline DB Press, Barbell Row.
+Context: Year 12, Trident College, Zambia. A-levels: Maths 9709, Further Maths 9231, Business 9609, Economics 9708. CIE exams Oct-Nov 2026. Building Aether AI services. Compound lifting: Bench Press, Pull-ups, Squat, Incline DB Press, Barbell Row. Local currency is Zambian Kwacha (K / ZMW); business is also done in US dollars ($ / USD).
 
 Known roadmap task IDs: {', '.join(roadmap_ids)}
 
 Parse the brain dump and return ONLY valid JSON, no markdown, no explanation.
 
-CRITICAL EXTRACTION RULE: Process each category as a separate, independent extraction pass. A single sentence can contain multiple actionable categories — extract ALL of them. The presence of one category (e.g. a trade) does NOT exclude others (e.g. habits, revenue, KPIs) from the same input. Never skip a category because another was already found.
-
-If the user provides only a P&L figure without an R-multiple, infer r_multiple from context or default to 1.0. Never output null for r_multiple — a null r_multiple causes the trade to be silently dropped by the system.
+CRITICAL EXTRACTION RULE: Process each category as a separate, independent extraction pass. A single sentence can contain multiple actionable categories — extract ALL of them. The presence of one category (e.g. revenue) does NOT exclude others (e.g. habits, KPIs) from the same input. Never skip a category because another was already found.
 
 Example of correct mixed extraction:
-Input: "Did scripture today and logged a live trade EURUSD long +$50, all rules followed"
+Input: "Did scripture today and got K500 from Wamu's for the website"
 Correct output includes BOTH:
   "habits_done": ["scripture_prayer"]
-  "trade_logs": [{{"type": "live", "pair": "EURUSD", "direction": "long", "net_pl_usd": 50, "adherence": true, "outcome": "win", "r_multiple": 1.0}}]
+  "revenue_updates": [{{"amount": 500, "currency": "ZMW", "source": "Wamu's Bakes & Cakes", "client": null}}]
+
+CURRENCY RULE: revenue amounts keep their stated currency. "K500", "500 kwacha", "ZMW 500" → amount 500, currency "ZMW". "$200", "200 dollars", "USD 200" → amount 200, currency "USD". Never convert. If no currency is stated, use "ZMW" for amounts written with K and "USD" otherwise.
+
+INTENT RULE — NOT EVERY SENTENCE IS A TASK. Label every todos_add item:
+- "commitment": Bandile has decided to do it ("I'll finish the essay tomorrow", "need to email the CEO by Friday", "add: book dentist"). Only commitments become tasks.
+- "idea": a possibility, a maybe, a someday ("maybe I should start a newsletter", "it might be worth trying X", "idea: ..."). Ideas go to the Inbox note, never to tasks.
+- "discussion": reflection, opinion, questions, or things that already happened ("I've been thinking about pricing", "wonder if that was right"). Discussion writes nothing.
+confidence is your 0.0-1.0 certainty in that label. Hedged language ("maybe", "might", "someday", "could") lowers confidence for commitment and raises it for idea. When genuinely unsure, give a low confidence rather than guessing a commitment.
+
+Input: "Maybe I should start a newsletter someday"
+Correct output: "todos_add": [{{"text": "Start a newsletter", "priority": 5, "category": "business", "due": null, "roadmap_id": null, "intent": "idea", "confidence": 0.9}}]
+Wrong output: a task with intent "commitment".
+
+COMPLETION RULE: when Bandile says he finished, completed or did a task that already exists ("finished the Business essay", "done with the CEO email"), put the task's distinguishing words in todos_complete (e.g. "Business essay"). Do not also add it as a new task.
 
 READING RULE: Distinguish between Bible reading and general book reading.
-- Bible chapters (e.g. "read Proverbs 12", "read Matthew 5") → populate bible_log, NOT reading_updates and NOT todos_add.
-- Fiction/non-fiction books from reading queue (e.g. "read 12 week year") → populate reading_updates, NOT todos_add.
+- Bible chapters (e.g. "read Proverbs 12", "read Romans 8") → populate bible_log, NOT reading_updates and NOT todos_add. Put any reflection in notes.
+- Books (e.g. "read 12 week year", "finished chapter 6 of Deep Work") → populate reading_updates with the book title in title_fragment and the progress or reflection in progress (e.g. "finished chapter 6"). NOT todos_add.
 
 Input: "read Proverbs chapter 12 this morning"
 Correct output: "bible_log": [{{"book": "Proverbs", "chapter": 12, "notes": null}}]
 Wrong output: "reading_updates": [{{"title_fragment": "Proverbs"}}] or "todos_add": [{{"text": "read Proverbs 12"}}]
 
-Input: "read 12 week year"
-Correct output: "reading_updates": [{{"title_fragment": "12 week year"}}]
-Wrong output: "todos_add": [{{"text": "read 12 week year"}}]
-
-Example:
-Input: "Earned K500 from Wamu's and logged a backtest GBPUSD short +1.5R"
-Correct output includes BOTH:
-  "revenue_updates": [{{"amount": 500, "source": "Wamu's Bakes & Cakes", "client": null}}]
-  "trade_logs": [{{"type": "backtest", "pair": "GBPUSD", "direction": "short", "r_multiple": 1.5, "outcome": "win", "adherence": true}}]
+Input: "Finished chapter 6 of Deep Work, the bit on shallow work hit home"
+Correct output: "reading_updates": [{{"title_fragment": "Deep Work", "progress": "finished chapter 6 — the section on shallow work hit home"}}]
+Wrong output: "todos_add": [{{"text": "read Deep Work"}}]
 
 Schema:
 {{
   "summary": "one-line summary",
   "kpi_updates": [{{"key": "maths_syllabus|further_maths|business|economics", "value": number}}],
-  "todos_add": [{{"text": "string", "priority": 1, "category": "health|academics|business|personal", "due": "YYYY-MM-DD|null", "roadmap_id": "id-or-null"}}],
-  "todos_complete": ["text fragment"],
+  "todos_add": [{{"text": "string", "priority": 1, "category": "health|academics|business|personal", "due": "YYYY-MM-DD|null", "roadmap_id": "id-or-null", "intent": "commitment|idea|discussion", "confidence": 0.0-1.0}}],
+  "todos_complete": ["distinguishing words of an existing task"],
   "roadmap_complete": ["roadmap-task-id"],
   "habits_done": ["scripture_prayer|ironing|python_session|sprint_training|academics"],
   "annual_updates": [{{"name_fragment": "string", "current": number}}],
-  "reading_updates": [{{"title_fragment": "string"}}],
+  "reading_updates": [{{"title_fragment": "string", "progress": "string_or_null"}}],
   "bible_log": [{{"book": "string (e.g. Proverbs)", "chapter": integer, "notes": "string_or_null"}}],
-  "revenue_updates": [{{"amount": number, "source": "string", "client": "name-or-null"}}],
+  "revenue_updates": [{{"amount": number, "currency": "ZMW|USD", "source": "string", "client": "name-or-null"}}],
   "log_entry": "short log message",
   "advisory": "1-2 sentence strategic insight or null",
   "health_updates": {{
@@ -208,57 +215,36 @@ Schema:
   }},
   "lift_logs": [
     {{"lift_name": "string", "weight_kg": number, "reps": integer}}
-  ],
-  "trade_logs": [
-    {{
-      "type": "backtest or live",
-      "pair": "EURUSD or GBPUSD or other pair string",
-      "direction": "long or short",
-      "r_multiple": number (required — default 1.0 if not stated explicitly),
-      "outcome": "win or loss or breakeven or null",
-      "adherence": true_or_false_or_null,
-      "entry_reason": "string_or_null",
-      "account_name": "string_or_null — only for live trades",
-      "risk_pct": number_or_null,
-      "net_pl_usd": number_or_null,
-      "rule_broken": true_or_false_or_null,
-      "rule_broken_description": "string_or_null"
-    }}
   ]
 }}
 
 Health extraction rules: extract sleep_hours from phrases like "slept 7 hours". Set mobility_done=true if mobility/stretching mentioned. Set session_done=true if a training session is mentioned. For lifts, populate lift_logs array — one entry per lift mentioned. lift_name is the exact lift name (e.g. "Bench Press", "Deadlift", "Squat"). If a new lift name is mentioned that isn't in the known list, include it anyway — the system will auto-create it. Omit health_updates key entirely if no health content found. Omit lift_logs key entirely if no lifts mentioned.
 
-Trading extraction rules: populate trade_logs when a trade or backtest is mentioned. type must be "backtest" if replay/backtest/TradingView replay is mentioned, else "live". pair should be inferred from the text (default EURUSD if unclear). direction is "long" or "short". r_multiple is the R gained/lost (positive for wins, negative for stop-hits) — if only a P&L amount is given (e.g. "+$50"), default r_multiple to 1.0 rather than null. outcome: "win" if positive R, "loss" if negative R or stop hit, "breakeven" if 0R. adherence is true unless rule violations are mentioned. Set rule_broken=true and fill rule_broken_description if a rule break is described. Omit trade_logs key entirely if no trading content found. Remember: trade_logs is always extracted in addition to other categories, never instead of them.
+Trading is not tracked here. Ignore trades, backtests and P&L entirely; never invent keys for them.
 
 Today is {today}. Return valid JSON only."""
 
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
+    raw = llm.chat_text(
+        [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": text}
         ],
-        max_tokens=1000
+        purpose="parse",
+        max_tokens=1000,
     )
-    raw = response.choices[0].message.content
     try:
-        return json.loads(raw.replace("```json", "").replace("```", "").strip())
-    except Exception:
-        return {
-            "summary": "Parse error",
-            "kpi_updates": [],
-            "todos_add": [],
-            "todos_complete": [],
-            "roadmap_complete": [],
-            "habits_done": [],
-            "annual_updates": [],
-            "reading_updates": [],
-            "bible_log": [],
-            "revenue_updates": [],
-            "log_entry": "Brain dump parse failed",
-            "advisory": None
-        }
+        parsed = json.loads(raw.replace("```json", "").replace("```", "").strip())
+    except Exception as exc:
+        # A failed parse must write nothing: surface the failure instead of returning
+        # an empty payload that looks like a successful no-op.
+        raise ParseFailed(f"Parser returned invalid JSON: {exc}") from exc
+    if not isinstance(parsed, dict):
+        raise ParseFailed("Parser returned a non-object payload.")
+    return parsed
+
+
+class ParseFailed(RuntimeError):
+    """The parser did not return usable JSON. Nothing has been written."""
 
 
 def get_proactive_brief(context: dict) -> str:
@@ -269,15 +255,15 @@ Plain text only. No markdown. No flattery. Surgical.
 
 State: {json.dumps(context)}"""
 
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
+    text = llm.chat_text(
+        [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": prompt}
         ],
-        max_tokens=300
+        purpose="proactive_brief",
+        max_tokens=300,
     )
-    return clean_ai_output(response.choices[0].message.content)
+    return clean_ai_output(text)
 
 
 def get_radar_scores(context: dict) -> dict:
@@ -375,7 +361,6 @@ def get_radar_scores(context: dict) -> dict:
 # Phase 6 — Orchestrator (streaming + tool-call loop)
 # ════════════════════════════════════════════════════════════════
 
-import os
 from pathlib import Path
 
 _ORCH_PROMPT_PATH = (
@@ -384,8 +369,8 @@ _ORCH_PROMPT_PATH = (
 
 
 def orchestrator_model() -> str:
-    """The model the orchestrator runs on. Never hardcoded — env-driven."""
-    return os.getenv("ORCHESTRATOR_MODEL", "gpt-5.4")
+    """The model the orchestrator runs on — ``ASSISTANT_MODEL`` (default gpt-5.4-mini)."""
+    return llm.assistant_model()
 
 
 def _load_orchestrator_prompt() -> str:
@@ -405,15 +390,23 @@ def _stream_completion(convo: list, tools: list):
       {"tool_calls": [{"index","id","name","arguments"}...]} — tool-call fragment(s)
       {"finish_reason": "<reason>"}                           — end of this completion
 
+    Usage is requested on the final chunk and logged to llm_usage.
     Tests patch this function to inject canned deltas.
     """
-    stream = client.chat.completions.create(
-        model=orchestrator_model(),
+    import time as _time
+    model = orchestrator_model()
+    started = _time.monotonic()
+    stream = llm.get_client().chat.completions.create(
+        model=model,
         messages=convo,
         tools=tools,
         stream=True,
+        stream_options={"include_usage": True},
     )
+    usage = None
     for chunk in stream:
+        if getattr(chunk, "usage", None):
+            usage = chunk.usage
         if not chunk.choices:
             continue
         choice = chunk.choices[0]
@@ -432,49 +425,88 @@ def _stream_completion(convo: list, tools: list):
             yield {"tool_calls": frags}
         if choice.finish_reason:
             yield {"finish_reason": choice.finish_reason}
+    inp, cached, out = llm.usage_from_response(usage)
+    llm.log_usage(None, model=model, purpose="assistant", input_tokens=inp,
+                  cached_input_tokens=cached, output_tokens=out,
+                  duration_ms=int((_time.monotonic() - started) * 1000))
 
 
-def get_orchestrator_response(messages: list, db, max_rounds: int = 6):
+AI_UNAVAILABLE_REPLY = (
+    "AI is not configured on this server (OPENAI_API_KEY is missing). "
+    "Everything else keeps working; the assistant is offline."
+)
+AI_FAILED_REPLY = "The assistant could not complete that request. Nothing was changed by this turn."
+
+
+def get_orchestrator_response(messages: list, db, max_rounds: int = 6,
+                              on_message=None, context: dict | None = None):
     """Drive the orchestrator: stream tokens, execute tool calls, loop until the model
     produces a final answer with no further tool calls.
+
+    ``messages``   — conversation history (already within the budget) + the new user turn
+    ``on_message`` — optional callback receiving every message appended to the
+                     conversation during this turn (assistant tool-call turns and tool
+                     results) so the caller can persist them
+    ``context``    — optional ``{"message": {...}}`` dynamic context (memory, summary)
+                     inserted after the stable system prompt
 
     Yields event dicts ready for SSE serialization:
       {"type": "reasoning", "content": "..."}
       {"type": "tool_call", "tool": "...", "args": {...}}
-      {"type": "tool_result", "tool": "...", "summary": "..."}
-      {"type": "final", "content": "..."}
+      {"type": "tool_result", "tool": "...", "summary": "...", "error": bool}
+      {"type": "error", "content": "..."}            (only when the model call fails)
+      {"type": "ui", "directive": {"view": "...", "params": {...}}}   (show_view)
+      {"type": "final", "content": "...", "changes": [...]}
     """
     import orchestrator_tools
+    import change_log
 
-    convo = [{"role": "system", "content": _load_orchestrator_prompt()}] + list(messages)
+    convo = [{"role": "system", "content": _load_orchestrator_prompt()}]
+    ctx_msg = (context or {}).get("message")
+    if ctx_msg:
+        convo.append(ctx_msg)
+    convo += list(messages)
     final_text = ""
+
+    def _final(text):
+        return {"type": "final", "content": text, "changes": change_log.current_batch_changes(db)}
 
     for _ in range(max_rounds):
         content_acc = ""
         # tool-call fragments accumulated by stream index
         calls: dict = {}
 
-        for delta in _stream_completion(convo, orchestrator_tools.TOOL_SCHEMAS):
-            if "content" in delta:
-                content_acc += delta["content"]
-                yield {"type": "reasoning", "content": delta["content"]}
-            if "tool_calls" in delta:
-                for frag in delta["tool_calls"]:
-                    slot = calls.setdefault(
-                        frag.get("index", 0), {"id": "", "name": "", "arguments": ""}
-                    )
-                    if frag.get("id"):
-                        slot["id"] = frag["id"]
-                    if frag.get("name"):
-                        slot["name"] = frag["name"]
-                    if frag.get("arguments"):
-                        slot["arguments"] += frag["arguments"]
-            # finish_reason is informational; loop control is driven by whether we
-            # accumulated any tool calls below.
+        try:
+            for delta in _stream_completion(convo, orchestrator_tools.TOOL_SCHEMAS):
+                if "content" in delta:
+                    content_acc += delta["content"]
+                    yield {"type": "reasoning", "content": delta["content"]}
+                if "tool_calls" in delta:
+                    for frag in delta["tool_calls"]:
+                        slot = calls.setdefault(
+                            frag.get("index", 0), {"id": "", "name": "", "arguments": ""}
+                        )
+                        if frag.get("id"):
+                            slot["id"] = frag["id"]
+                        if frag.get("name"):
+                            slot["name"] = frag["name"]
+                        if frag.get("arguments"):
+                            slot["arguments"] += frag["arguments"]
+                # finish_reason is informational; loop control is driven by whether we
+                # accumulated any tool calls below.
+        except llm.AIUnavailable as exc:
+            yield {"type": "error", "content": str(exc)}
+            yield _final(AI_UNAVAILABLE_REPLY)
+            return
+        except Exception as exc:  # noqa: BLE001 — network / API failure
+            print(f"[orchestrator] model call failed: {type(exc).__name__}: {exc}")
+            yield {"type": "error", "content": f"{type(exc).__name__}: {exc}"}
+            yield _final(content_acc or AI_FAILED_REPLY)
+            return
 
         if not calls:
             final_text = content_acc
-            yield {"type": "final", "content": final_text}
+            yield _final(final_text)
             return
 
         # Record the assistant turn (with its tool calls) before appending tool results.
@@ -486,11 +518,14 @@ def get_orchestrator_response(messages: list, db, max_rounds: int = 6):
                 "type": "function",
                 "function": {"name": slot["name"], "arguments": slot["arguments"] or "{}"},
             })
-        convo.append({
+        assistant_msg = {
             "role": "assistant",
             "content": content_acc or None,
             "tool_calls": assistant_tool_calls,
-        })
+        }
+        convo.append(assistant_msg)
+        if on_message:
+            on_message(assistant_msg)
 
         # Execute each tool, emit events, feed results back into the conversation.
         for idx in sorted(calls):
@@ -502,13 +537,19 @@ def get_orchestrator_response(messages: list, db, max_rounds: int = 6):
                 args = {}
             yield {"type": "tool_call", "tool": name, "args": args}
             result, summary = orchestrator_tools.run_tool(name, args, db)
-            yield {"type": "tool_result", "tool": name, "summary": summary}
-            convo.append({
+            is_error = isinstance(result, dict) and "error" in result
+            yield {"type": "tool_result", "tool": name, "summary": summary, "error": is_error}
+            if isinstance(result, dict) and result.get("ui_directive"):
+                # Only a view name + parameters ever reach the client — the frontend owns rendering.
+                yield {"type": "ui", "directive": result["ui_directive"]}
+            tool_msg = {
                 "role": "tool",
                 "tool_call_id": slot["id"] or f"call_{idx}",
                 "content": json.dumps(result, default=str),
-            })
+            }
+            convo.append(tool_msg)
+            if on_message:
+                on_message(tool_msg)
 
     # Safety valve — hit max rounds without a clean final.
-    yield {"type": "final", "content": final_text or "Unable to complete the request."}
-
+    yield _final(final_text or "Unable to complete the request.")
