@@ -57,11 +57,17 @@ def add_column_if_missing(conn, dialect_name: str, table: str, column: str,
 
 
 def create_table_if_missing(conn, dialect_name: str, table: str, sql: str, tag: str) -> bool:
-    """``sql`` may contain ``{autoincrement}`` which is filled per dialect."""
+    """``sql`` is written in SQLite flavour (``INTEGER PRIMARY KEY {autoincrement}``,
+    ``DATETIME``); on Postgres it is rewritten to ``SERIAL PRIMARY KEY`` / ``TIMESTAMP`` so a
+    table created here (rather than by create_all) still gets a sequence and valid types."""
     if table_exists(conn, dialect_name, table):
         return False
-    autoincrement = "AUTOINCREMENT" if dialect_name == "sqlite" else ""
-    conn.execute(text(sql.format(autoincrement=autoincrement)))
+    if dialect_name == "sqlite":
+        ddl = sql.format(autoincrement="AUTOINCREMENT")
+    else:
+        ddl = sql.replace("INTEGER PRIMARY KEY {autoincrement}", "SERIAL PRIMARY KEY")
+        ddl = ddl.format(autoincrement="").replace("DATETIME", "TIMESTAMP")
+    conn.execute(text(ddl))
     print(f"[{tag}] Created {table}")
     return True
 
@@ -72,9 +78,15 @@ def create_index(conn, name: str, table: str, columns: str, unique: bool = False
 
 
 def enable_rls(conn, dialect_name: str, tables: list[str], tag: str) -> None:
-    """Postgres only: RLS on + no policies = anon/PostgREST access denied (m008 convention)."""
+    """Postgres only: RLS on + no policies = anon/PostgREST access denied (m008 convention).
+
+    Called with EVERY table the migration owns on every run, not only the ones it created:
+    on Postgres ``create_all`` at import usually builds the tables first, so a
+    created-only list would leave them without RLS. Re-enabling is a no-op."""
     if dialect_name != "postgresql":
         return
     for table in tables:
+        if not table_exists(conn, dialect_name, table):
+            continue
         conn.execute(text(f"ALTER TABLE public.{table} ENABLE ROW LEVEL SECURITY"))
         print(f"[{tag}]   RLS enabled: {table}")

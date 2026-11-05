@@ -53,11 +53,8 @@ def run(db=None):
     try:
         d = dialect(conn, TAG)
         with conn.begin():
-            created = []
-            if create_table_if_missing(conn, d, "syllabus_points", _SYLLABUS_POINTS, TAG):
-                created.append("syllabus_points")
-            if create_table_if_missing(conn, d, "briefing_summaries", _BRIEFING_SUMMARIES, TAG):
-                created.append("briefing_summaries")
+            create_table_if_missing(conn, d, "syllabus_points", _SYLLABUS_POINTS, TAG)
+            create_table_if_missing(conn, d, "briefing_summaries", _BRIEFING_SUMMARIES, TAG)
             create_index(conn, "ix_syllabus_points_subject", "syllabus_points", "subject_code")
             # Postgres treats NULLs as distinct in unique indexes, so paper is coalesced.
             if d == "postgresql":
@@ -69,7 +66,7 @@ def run(db=None):
             else:
                 create_index(conn, "ux_syllabus_points_key", "syllabus_points",
                              "subject_code, COALESCE(paper, ''), topic_code", unique=True)
-            enable_rls(conn, d, created, TAG)
+            enable_rls(conn, d, ["syllabus_points", "briefing_summaries"], TAG)
         print(f"[{TAG}] Syllabus/briefing migration complete on {d}.")
     finally:
         conn.close()

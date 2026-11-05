@@ -148,15 +148,12 @@ def run(db=None):
                 if n:
                     print(f"[{TAG}] Backfilled due_date on {n} todos.")
 
-            created = []
-            if create_table_if_missing(conn, d, "embeddings", _EMBEDDINGS, TAG):
-                created.append("embeddings")
-            if create_table_if_missing(conn, d, "exam_dates", _EXAM_DATES, TAG):
-                created.append("exam_dates")
+            create_table_if_missing(conn, d, "embeddings", _EMBEDDINGS, TAG)
+            create_table_if_missing(conn, d, "exam_dates", _EXAM_DATES, TAG)
             create_index(conn, "ix_embeddings_source", "embeddings", "source_type, source_id")
             create_index(conn, "ix_embeddings_hash", "embeddings", "source_type, content_hash")
             create_index(conn, "ux_exam_dates_subject_paper", "exam_dates", "subject_code, paper", unique=True)
-            enable_rls(conn, d, created, TAG)
+            enable_rls(conn, d, ["embeddings", "exam_dates"], TAG)
         print(f"[{TAG}] Schema migration complete on {d}.")
     finally:
         conn.close()

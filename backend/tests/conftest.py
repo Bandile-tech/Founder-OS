@@ -21,12 +21,25 @@ from fastapi.testclient import TestClient
 from database import Base, get_db
 from main import app
 
-# ── Single shared in-memory engine ───────────────────────────────────────────
-engine = create_engine(
-    "sqlite:///:memory:",
-    connect_args={"check_same_thread": False},
-    poolclass=StaticPool,
-)
+# ── Test engine ──────────────────────────────────────────────────────────────
+# Default: one shared in-memory SQLite database. Set TEST_DATABASE_URL to a Postgres
+# URL to run the same suite against Postgres (every test still drops and recreates
+# the schema, so point it at a throwaway database).
+import os
+_TEST_URL = os.getenv("TEST_DATABASE_URL")
+if _TEST_URL:
+    # Short lock/statement timeouts so a test that leaves a transaction open fails fast
+    # (with a clear error) instead of hanging the whole run on drop_all().
+    engine = create_engine(
+        _TEST_URL, pool_pre_ping=True,
+        connect_args={"options": "-c lock_timeout=8000 -c statement_timeout=60000"},
+    )
+else:
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
 TestSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 # Create all tables once (both legacy and new academic tables)
@@ -54,9 +67,25 @@ except Exception:
     pass
 
 
+def _clear_stale_pg_connections():
+    """On Postgres a session a test forgot to close keeps a lock that makes drop_all() wait
+    forever. Terminate every other connection to the test database first."""
+    if not _TEST_URL:
+        return
+    from sqlalchemy import text
+    engine.dispose()
+    with engine.connect() as conn:
+        conn.execute(text(
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+            "WHERE datname = current_database() AND pid <> pg_backend_pid()"
+        ))
+        conn.commit()
+
+
 @pytest.fixture(autouse=True)
 def fresh_db():
     """Drop and recreate all tables before each test for complete isolation."""
+    _clear_stale_pg_connections()
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     # Reset the 60s radar cache so a prior test's response can't leak across the

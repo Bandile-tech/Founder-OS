@@ -86,11 +86,12 @@ def run(db=None):
     try:
         d = dialect(conn, TAG)
         with conn.begin():
-            created = [t for t, sql in _TABLES.items() if create_table_if_missing(conn, d, t, sql, TAG)]
+            for t, sql in _TABLES.items():
+                create_table_if_missing(conn, d, t, sql, TAG)
             create_index(conn, "ix_change_log_batch_id", "change_log", "batch_id")
             create_index(conn, "ix_change_log_created_at", "change_log", "created_at")
             create_index(conn, "ix_notes_kind", "notes", "kind")
-            enable_rls(conn, d, created, TAG)
+            enable_rls(conn, d, list(_TABLES), TAG)
         print(f"[{TAG}] Change-log migration complete on {d}.")
     finally:
         conn.close()
