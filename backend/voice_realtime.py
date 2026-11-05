@@ -196,6 +196,7 @@ def run_realtime_tool(payload: ToolCallRequest, db: Session = Depends(get_db)):
         "call_id": call_id, "name": payload.name, "result": result, "summary": summary,
         "error": isinstance(result, dict) and "error" in result, "changes": changes,
         "output": output,
+        "ui_directive": result.get("ui_directive") if isinstance(result, dict) else None,
     }
 
 

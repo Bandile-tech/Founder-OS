@@ -631,6 +631,81 @@ def set_exam_date(db, subject: str, date_text: str, paper: str | None = None):
 
 
 # ═══════════════════════════════════════════════════════════════
+# Tool 23 — show_view  (UI directive: the orb opens a view on the stage)
+# ═══════════════════════════════════════════════════════════════
+
+# Fixed whitelist. The model only ever sends a view name and parameters — never HTML.
+SHOW_VIEWS = {
+    "syllabus":  {"subject", "paper"},
+    "brief":     set(),
+    "deadlines": {"days"},
+    "note":      {"title"},
+    "changes":   {"limit"},
+    "progress":  set(),
+    "close":     set(),
+}
+_VIEW_ALIASES = {"home": "close", "todays_brief": "brief", "today": "brief", "tasks": "brief",
+                 "notes": "note", "recent_changes": "changes", "undo": "changes", "exams": "deadlines"}
+
+
+def show_view(db, view: str, params: dict | None = None):
+    """Validate a view request and return a UI directive for the frontend stage."""
+    import syllabus as syl
+    import notes as notes_mod
+
+    import re as _re
+    name = _re.sub(r"[^a-z0-9]+", "_", (view or "").strip().lower().replace("'", "")).strip("_")
+    name = _VIEW_ALIASES.get(name, name)
+    if name not in SHOW_VIEWS:
+        return ({"error": f"unknown view '{view}'. Allowed: {', '.join(sorted(SHOW_VIEWS))}"},
+                f"unknown view '{view}'")
+    raw = params or {}
+    allowed = SHOW_VIEWS[name]
+    clean: dict = {}
+    for k, v in raw.items():
+        if k in allowed and v not in (None, ""):
+            clean[k] = v if isinstance(v, (int, float, bool)) else str(v)[:120]
+
+    label = name
+    if name == "syllabus":
+        if clean.get("subject"):
+            code = syl.resolve_subject_code(db, clean["subject"])
+            if code is None:
+                return ({"error": f"unknown subject '{clean['subject']}'"}, f"unknown subject '{clean['subject']}'")
+            clean["subject"] = code
+            clean["subject_name"] = syl.subject_name(db, code)
+        if clean.get("paper"):
+            clean["paper"] = syl.normalise_paper(clean["paper"])
+        label = "syllabus" + (f" {clean['subject_name']}" if clean.get("subject_name") else "") + (f" {clean['paper']}" if clean.get("paper") else "")
+    elif name == "note":
+        title = clean.get("title", "")
+        note = notes_mod.find_note_fuzzy(db, title) if title else None
+        if note is None:
+            hits = notes_mod.search_notes(db, title, limit=1) if title else []
+            if hits:
+                note = db.query(models.Note).filter(models.Note.id == hits[0]["id"]).first()
+        if note is None:
+            return ({"error": f"no note matches '{title}'"}, f"no note matches '{title}'")
+        clean = {"note_id": note.id, "title": note.title}
+        label = f"note '{note.title}'"
+    elif name == "deadlines":
+        try:
+            clean["days"] = max(1, min(90, int(clean.get("days", 14))))
+        except (TypeError, ValueError):
+            clean["days"] = 14
+    elif name == "changes":
+        try:
+            clean["limit"] = max(1, min(100, int(clean.get("limit", 30))))
+        except (TypeError, ValueError):
+            clean["limit"] = 30
+
+    directive = {"view": name, "params": clean}
+    result = {"ui_directive": directive, "view": name, "params": clean,
+              "shown": name != "close", "message": ("Closed the stage" if name == "close" else f"Showing {label}")}
+    return result, ("closing the stage" if name == "close" else f"showing {label}")
+
+
+# ═══════════════════════════════════════════════════════════════
 
 # Dispatch + JSON tool schemas for the model
 # ════════════════════════════════════════════════════════════════
@@ -685,6 +760,7 @@ _TOOL_DISPATCH = {
         db, title=a.get("title", ""), kind=a.get("kind", "general"), body=a.get("body", ""), tags=a.get("tags"),
     ),
     "get_deadlines": lambda db, a: get_deadlines(db, int(a.get("days", 14))),
+    "show_view": lambda db, a: show_view(db, view=a.get("view", ""), params=a.get("params") or {k: v for k, v in a.items() if k != "view"}),
     "update_syllabus": lambda db, a: update_syllabus(
         db, topic=a.get("topic", ""), status=a.get("status"), weakness_note=a.get("weakness_note"),
         subject=a.get("subject"), paper=a.get("paper"), past_paper_score=a.get("past_paper_score"),
@@ -1150,6 +1226,38 @@ TOOL_SCHEMAS = [
                     "past_paper_score": {"type": "number", "description": "Past-paper score %, if said."},
                 },
                 "required": ["topic"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "show_view",
+            "description": (
+                "Open a view on the screen next to you (the orb steps aside and the view "
+                "renders full-screen while the conversation continues). Use it whenever Bandile "
+                "asks to see, show, open or look at something. Views: 'syllabus' (optional "
+                "subject and paper, e.g. 'Show me my S1 topics' → view syllabus, paper S1), "
+                "'brief' (today's brief), 'deadlines' (optional days), 'note' (by title), "
+                "'changes' (recent changes with undo), 'progress'. Use view 'close' when he says "
+                "close, go back or home. Send only the view name and parameters — never HTML."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "view": {"type": "string", "enum": ["syllabus", "brief", "deadlines", "note", "changes", "progress", "close"]},
+                    "params": {
+                        "type": "object",
+                        "properties": {
+                            "subject": {"type": "string", "description": "Subject name or code (syllabus)."},
+                            "paper": {"type": "string", "description": "Paper such as S1, P1 (syllabus)."},
+                            "days": {"type": "integer", "description": "Look-ahead days (deadlines)."},
+                            "title": {"type": "string", "description": "Note title (note)."},
+                            "limit": {"type": "integer", "description": "How many changes (changes)."},
+                        },
+                    },
+                },
+                "required": ["view"],
             },
         },
     },

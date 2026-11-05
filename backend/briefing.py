@@ -325,3 +325,11 @@ def build_briefing(db: Session, *, refresh: bool = False, now: datetime | None =
 @router.get("/briefing/today")
 def briefing_today(refresh: int = Query(0, ge=0, le=1), db: Session = Depends(get_db)):
     return build_briefing(db, refresh=bool(refresh))
+
+
+@router.get("/deadlines")
+def deadlines_endpoint(days: int = Query(14, ge=1, le=90), db: Session = Depends(get_db)):
+    """Overdue, due today, upcoming tasks and exams — the data behind the deadlines view."""
+    import orchestrator_tools
+    result, _summary = orchestrator_tools.get_deadlines(db, days)
+    return result

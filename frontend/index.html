@@ -761,6 +761,44 @@ input:hover:not(:focus), textarea:hover:not(:focus), select:hover:not(:focus){bo
   .cc-item{gap:10px;padding:11px 6px}
   .cc-item-title{font-size:15px}
 }
+/* STAGE — full-screen view opened by the orb (show_view) or by live voice */
+#stage{position:fixed;inset:0;z-index:150;display:none;background:rgba(6,8,11,0.86);backdrop-filter:blur(26px) saturate(150%);-webkit-backdrop-filter:blur(26px) saturate(150%)}
+#stage.show{display:block}
+.stage-inner{position:absolute;inset:var(--header-h) 0 0 0;display:grid;grid-template-columns:380px minmax(0,1fr);gap:0;padding:28px 36px 150px 36px;box-sizing:border-box}
+#stage[data-mode="voice"] .stage-inner{grid-template-columns:minmax(0,1fr);justify-items:center}
+#stage[data-mode="voice"] .stage-right{display:none}
+#stage[data-mode="view"] .stage-left .stage-transcript{display:none}
+.stage-left{position:relative;display:flex;flex-direction:column;align-items:center;gap:10px;min-width:0}
+#stage[data-mode="voice"] .stage-left{width:min(760px,100%)}
+#stage[data-mode="voice"] .orb-stage{transform:scale(1.1);margin-bottom:30px}
+.stage-transcript{width:100%;max-width:720px;max-height:38vh;overflow:auto;font-size:15px;line-height:1.5;padding:4px 8px}
+.stage-transcript .lt-line{padding:6px 0;border-bottom:1px solid rgba(167,235,242,0.06)}
+.stage-transcript .lt-you{color:var(--glow)}
+.stage-transcript .lt-os{color:var(--text)}
+.stage-transcript .lt-act{color:#f5a623;font-family:var(--font-tech);font-size:11px;letter-spacing:0.08em}
+.stage-transcript .lt-partial{opacity:0.6}
+.stage-right{min-width:0;display:flex;flex-direction:column;border-radius:22px;padding:22px 26px;overflow:hidden;
+  background:linear-gradient(160deg,rgba(22,32,42,0.8),rgba(10,14,20,0.92));border:1px solid rgba(167,235,242,0.26);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,0.08),0 30px 70px -30px rgba(0,0,0,0.9),0 0 50px -14px rgba(47,211,240,0.25)}
+.stage-head{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:14px}
+.stage-head .eyebrow{font-family:var(--font-tech);font-size:11px;letter-spacing:0.22em;text-transform:uppercase;color:var(--text-2)}
+.stage-head .title{font-family:var(--font-display);font-size:26px;font-weight:600;letter-spacing:-0.02em;color:#fff;margin-top:2px}
+.stage-close{background:rgba(255,255,255,0.04);border:1px solid var(--border-hi);color:var(--text);border-radius:100px;padding:8px 14px;font-family:var(--font-tech);font-size:10.5px;letter-spacing:0.14em;text-transform:uppercase;cursor:pointer}
+.stage-close:hover{border-color:var(--glow);color:var(--glow)}
+.stage-body{flex:1;min-height:0;overflow:auto;padding-right:6px}
+.stage-body .sy-subject{margin-bottom:14px}
+.stage-body .cc-item{padding:12px 8px}
+.st-section{font-family:var(--font-tech);font-size:10.5px;letter-spacing:0.2em;text-transform:uppercase;color:var(--text-2);margin:14px 0 6px}
+.st-row{display:flex;align-items:center;gap:12px;padding:10px 8px;border-bottom:1px solid rgba(167,235,242,0.06);font-size:15px}
+.st-row .due{margin-left:auto;font-family:var(--font-tech);font-size:11px;letter-spacing:0.1em;text-transform:uppercase;color:var(--text-2);white-space:nowrap}
+.st-row .due.overdue{color:var(--danger)}
+.st-row .due.today{color:var(--glow)}
+.st-note{font-size:15px;line-height:1.6;color:var(--text)}
+.st-note h1,.st-note h2,.st-note h3{color:#fff;margin:14px 0 6px}
+.st-note ul{padding-left:20px}
+.st-empty{color:var(--muted);font-size:14px;padding:20px 6px}
+.st-prog .cc-prog-head .l{font-size:17px}
+@media(max-width:1000px){.stage-inner{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr);padding:14px 14px 150px}.stage-left .orb-stage{display:none}#stage[data-mode="voice"] .stage-left .orb-stage{display:flex}.stage-right{padding:16px}}
 /* header: AI pill + alerts bell */
 .h-ai{font-family:var(--font-tech);font-size:10.5px;letter-spacing:0.08em;display:flex;align-items:center;gap:7px;padding:5px 11px;border-radius:100px;
   background:rgba(62,220,180,0.08);border:1px solid rgba(62,220,180,0.22);color:var(--text-2)}
@@ -2506,6 +2544,23 @@ tr:hover .td-del{opacity:1}
   </div><!-- /content -->
 </div><!-- /app -->
 
+<!-- ═══ STAGE — the orb steps aside and a view renders; conversation continues in the dock ═══ -->
+<div id="stage" data-mode="view" role="dialog" aria-modal="false" aria-label="Stage">
+  <div class="stage-inner">
+    <div class="stage-left">
+      <div id="stage-orb-slot"></div>
+      <div class="stage-transcript" id="stage-transcript"></div>
+    </div>
+    <div class="stage-right">
+      <div class="stage-head">
+        <div><div class="eyebrow" id="stage-eyebrow">View</div><div class="title" id="stage-title">—</div></div>
+        <button class="stage-close" onclick="closeStage()" aria-label="Close (Esc)">Close · Esc</button>
+      </div>
+      <div class="stage-body" id="stage-body"></div>
+    </div>
+  </div>
+</div>
+
 <!-- ═══ FLOATING COMMAND DOCK — global, every page ═══ -->
 <div id="cmd-dock">
   <div class="cmd-dock-bar" id="unified-cmd-card">
@@ -2961,6 +3016,7 @@ async function syllabusAdvance(id){
     // refresh progress bars without re-fetching everything
     if(_syllabus){_syllabus.subjects.forEach(sub=>sub.papers.forEach(pp=>pp.points.forEach(x=>{if(x.id===p.id)Object.assign(x,p);})));}
     renderSyllabus();
+    if(STAGE.open&&STAGE.view==="syllabus")renderStageView();
     try{loadBriefing();}catch(_){}
   }catch(e){
     if(row&&cur){row.setAttribute("data-status",cur);const st=row.querySelector(".sy-state");if(st)st.textContent=SY_LABEL[cur];}
@@ -3132,6 +3188,7 @@ async function loadBriefing(refresh=false){
     if(!r.ok)throw new Error("HTTP "+r.status);
     _briefing=await r.json();
     renderHome();
+    if(STAGE.open&&(STAGE.view==="brief"||STAGE.view==="progress"))renderStageView();
   }catch(e){
     const line=document.getElementById("cc-line");
     if(line&&!_briefing)line.textContent="Waking the backend — this can take up to a minute on a cold start.";
@@ -5092,6 +5149,8 @@ async function submitUnifiedInput(){
     } else if(ev.type==="final"){
       finalText=ev.content||"";
       finalChanges=Array.isArray(ev.changes)?ev.changes:[];
+    } else if(ev.type==="ui"){
+      handleUiDirective(ev.directive);
     } else if(ev.type==="error"){
       if(indicatorEl)indicatorEl.textContent="⚠ "+(ev.content||"assistant error");
     }
@@ -5594,6 +5653,132 @@ async function speakText(text){
 }
 
 /* ═══════════════════════════════════════════════════
+   STAGE — show_view directives from the orchestrator (view name + params only, never HTML)
+═══════════════════════════════════════════════════ */
+const STAGE={open:false,view:null,params:null,voice:false};
+const STAGE_TITLES={syllabus:"Syllabus",brief:"Today's Brief",deadlines:"Deadlines",note:"Note",changes:"Recent changes",progress:"Progress"};
+const STAGE_VIEWS=new Set(Object.keys(STAGE_TITLES));
+
+function _moveOrb(toStage){
+  const orb=document.getElementById("orb-stage");
+  if(!orb)return;
+  const target=toStage?document.getElementById("stage-orb-slot"):document.querySelector(".orb-col");
+  if(target&&orb.parentElement!==target)target.appendChild(orb);
+}
+
+function _stageMode(){
+  const st=document.getElementById("stage");
+  if(!st)return;
+  st.setAttribute("data-mode",STAGE.voice&&!STAGE.view?"voice":"view");
+}
+
+function openStage(view,params){
+  view=String(view||"").toLowerCase();
+  if(view==="close"||view==="home"){closeStage();return;}
+  if(!STAGE_VIEWS.has(view)){showToast(`Unknown view: ${view}`,"error");return;}
+  STAGE.open=true;STAGE.view=view;STAGE.params=params||{};
+  const st=document.getElementById("stage");
+  st.classList.add("show");
+  _moveOrb(true);
+  _stageMode();
+  document.getElementById("stage-eyebrow").textContent=STAGE.voice?"Live · view":"View";
+  document.getElementById("stage-title").textContent=STAGE_TITLES[view];
+  renderStageView();
+}
+
+function closeStage(){
+  if(STAGE.voice&&LIVE.state!=="idle"){
+    // in a live session "close" only clears the view; the orb stays full-screen
+    STAGE.view=null;STAGE.params=null;_stageMode();
+    document.getElementById("stage-body").innerHTML="";
+    return;
+  }
+  STAGE.open=false;STAGE.view=null;STAGE.params=null;STAGE.voice=false;
+  const st=document.getElementById("stage");
+  if(st)st.classList.remove("show");
+  _moveOrb(false);
+  document.getElementById("stage-body").innerHTML="";
+}
+
+function openVoiceStage(){
+  STAGE.voice=true;STAGE.open=true;
+  const st=document.getElementById("stage");
+  st.classList.add("show");
+  _moveOrb(true);
+  _stageMode();
+  const tr=document.getElementById("stage-transcript");
+  if(tr)tr.innerHTML="";
+}
+
+function closeVoiceStage(){
+  STAGE.voice=false;
+  if(STAGE.view){_stageMode();document.getElementById("stage-eyebrow").textContent="View";return;}
+  closeStage();
+}
+
+document.addEventListener("keydown",e=>{if(e.key==="Escape"&&STAGE.open&&!(STAGE.voice&&!STAGE.view))closeStage();});
+
+async function renderStageView(){
+  const body=document.getElementById("stage-body");
+  if(!body||!STAGE.view)return;
+  const v=STAGE.view,p=STAGE.params||{};
+  body.innerHTML=`<div class="skel cc-skel"></div><div class="skel cc-skel" style="opacity:0.6"></div>`;
+  try{
+    if(v==="syllabus"){
+      const r=await fetch(`${API_BASE}/syllabus`);const d=await r.json();
+      const subs=(d.subjects||[]).filter(sb=>!p.subject||sb.subject_code===p.subject);
+      const parts=[];
+      subs.forEach(sb=>{
+        const papers=sb.papers.filter(pp=>!p.paper||(pp.paper||"").toUpperCase()===String(p.paper).toUpperCase());
+        if(!papers.length)return;
+        parts.push(`<div class="card sy-subject"><div class="sy-subject-head"><span class="n">${escHtml(sb.subject_name)}</span><span class="x">${escHtml(sb.level||"")} · ${sb.progress.pct}%</span></div>
+          ${papers.map(pp=>`<div class="sy-paper"><div class="sy-paper-head"><span class="p">${escHtml(pp.paper||"General")}</span><div class="bar">${_syBar(pp.progress.counts,pp.progress.total)}</div><span class="pct">${pp.progress.pct}%</span></div>${pp.points.map(_syRow).join("")}</div>`).join("")}</div>`);
+      });
+      body.innerHTML=parts.length?parts.join(""):`<div class="st-empty">No syllabus topics match${p.paper?` paper ${escHtml(String(p.paper))}`:""}${p.subject_name?` for ${escHtml(p.subject_name)}`:""}.</div>`;
+      document.getElementById("stage-title").textContent=`Syllabus${p.subject_name?" · "+p.subject_name:""}${p.paper?" · "+p.paper:""}`;
+    }else if(v==="brief"){
+      if(!_briefing)await loadBriefing();
+      const items=(_briefing&&_briefing.items)||[];
+      body.innerHTML=items.length?items.map(it=>{
+        const completable=it.completable&&it.target_type==="todo";
+        return `<div class="cc-item">${completable?`<div class="cc-check" role="checkbox" tabindex="0" onclick="ccComplete(${Number(it.target_id)},this)">${CC_ICON_CHECK}</div>`:`<div class="cc-check static"></div>`}<span class="cc-cat ${escHtml(it.category)}"></span><div class="cc-item-main"><div class="cc-item-title">${escHtml(it.title)}</div><div class="cc-item-reason" style="display:block">${escHtml(it.reason||"")}</div></div><span class="cc-due ${_ccDueClass(it)}">${escHtml(it.due_label||"")}</span></div>`;
+      }).join(""):`<div class="st-empty">Nothing on the brief.</div>`;
+    }else if(v==="deadlines"){
+      const r=await fetch(`${API_BASE}/deadlines?days=${Number(p.days||14)}`);const d=await r.json();
+      const row=(t,cls)=>`<div class="st-row"><span class="cc-cat task"></span><span>${escHtml(t.text)}</span><span class="due ${cls}">${t.due?escHtml(t.due):""}${t.days!=null?` · ${t.days<0?`${-t.days}d overdue`:t.days===0?"today":`in ${t.days}d`}`:""}</span></div>`;
+      const sec=(title,rows)=>rows.length?`<div class="st-section">${title}</div>${rows}`:"";
+      body.innerHTML=sec("Overdue",d.overdue.map(t=>row(t,"overdue")).join(""))+sec("Due today",d.due_today.map(t=>row(t,"today")).join(""))+sec(`Next ${d.window_days} days`,d.upcoming.map(t=>row(t,"")).join(""))
+        +sec("Exams",(d.exams||[]).map(e=>`<div class="st-row"><span class="cc-cat exam"></span><span>${escHtml(e.subject)}${e.paper?" "+escHtml(e.paper):""}</span><span class="due">${escHtml(e.exam_date)} · ${e.days_away}d</span></div>`).join(""))
+        ||`<div class="st-empty">Nothing due in the next ${d.window_days} days.</div>`;
+    }else if(v==="note"){
+      const r=await fetch(`${API_BASE}/notes/${Number(p.note_id)}`);
+      if(!r.ok)throw new Error("note not found");
+      const n=await r.json();
+      document.getElementById("stage-title").textContent=n.title;
+      body.innerHTML=`<div class="st-section">${escHtml(n.kind)} · updated ${escHtml(new Date(n.updated_at).toLocaleDateString("en-GB",{day:"numeric",month:"short"}))}</div><div class="st-note md-body">${mdHtml(n.body||"")}</div>`;
+    }else if(v==="changes"){
+      const r=await fetch(`${API_BASE}/changes?limit=${Number(p.limit||30)}`);const rows=await r.json();
+      body.innerHTML=rows.length?`<div id="stage-changes"></div>`:`<div class="st-empty">No changes recorded yet.</div>`;
+      if(rows.length)renderChangesStrip(rows,document.getElementById("stage-changes"));
+    }else if(v==="progress"){
+      if(!_briefing)await loadBriefing();
+      const pr=(_briefing&&_briefing.progress)||{};
+      const r=await fetch(`${API_BASE}/syllabus`);const d=await r.json();
+      const row=(label,key,val)=>`<div class="cc-prog st-prog"><div class="cc-prog-head"><span class="l">${escHtml(label)}</span><span class="v">${val==null?"—":val+"%"}</span></div><div class="cc-bar"><div class="cc-fill ${key}" style="width:${Math.max(0,Math.min(100,val||0))}%"></div></div></div>`;
+      body.innerHTML=row("Academics","academics",pr.academics)+row("Business","business",pr.business)+row("Targets","targets",pr.targets)+row("Non-negotiables today","habits",pr.habits)
+        +(d.subjects&&d.subjects.length?`<div class="st-section">By subject</div>`+d.subjects.map(sb=>row(sb.subject_name,"academics",sb.progress.pct)).join(""):"");
+    }
+  }catch(e){body.innerHTML=`<div class="st-empty">Could not load this view (${escHtml(e.message)}).</div>`;}
+}
+
+function handleUiDirective(d){
+  if(!d||typeof d!=="object")return;
+  const view=String(d.view||"");
+  if(view==="close")closeStage();
+  else openStage(view,d.params||{});
+}
+
+/* ═══════════════════════════════════════════════════
    LIVE VOICE — WebRTC realtime session
    Server mints a short-lived client secret (the API key never reaches the browser);
    the browser connects directly to OpenAI over WebRTC. Server VAD handles turn-taking
@@ -5665,6 +5850,7 @@ async function _liveRunTool(call){
     if(r.ok)payload=await r.json();
   }catch(_){}
   _liveLine("act",`${call.name}: ${payload.summary||payload.result?.error||"done"}`);
+  if(payload.ui_directive)handleUiDirective(payload.ui_directive);
   if(payload.changes&&payload.changes.length)LIVE.pendingChanges.push(...payload.changes);
   // Hand the result back to the model and let it continue speaking.
   _liveSend({type:"conversation.item.create",item:{type:"function_call_output",call_id:call.call_id,output:payload.output||JSON.stringify(payload.result)}});

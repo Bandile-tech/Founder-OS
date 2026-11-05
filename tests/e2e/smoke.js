@@ -8,6 +8,8 @@
  *      the right one gets in
  *   2. completing a brief item from the home screen and undoing it
  *   3. advancing a syllabus row by tapping it
+ *   4. a show_view directive (as the orchestrator emits it) opens the stage filtered to S1,
+ *      Esc closes it, the close directive closes it
  *
  * Run from the repo root:
  *     node tests/e2e/smoke.js
@@ -148,6 +150,26 @@ async function api(token, method, p, body, isForm) {
     check(afterStatus === order[(order.indexOf(before) + 1) % 4], `tap advanced ${before} → ${afterStatus}`);
     const points = (await api(token, "GET", "/syllabus")).json.subjects[0].papers.flatMap((p) => p.points);
     check(points.some((p) => p.status === afterStatus), "backend reflects the new state");
+
+    // ── 4. show_view directive opens the stage (as the orchestrator would emit it) ──
+    console.log("4. stage via show_view directive");
+    await page.evaluate(() => handleUiDirective({ view: "syllabus", params: { paper: "S1" } }));
+    await page.waitForTimeout(1200);
+    const stage = await page.evaluate(() => ({
+      shown: document.getElementById("stage").classList.contains("show"),
+      title: document.getElementById("stage-title").textContent,
+      codes: [...document.querySelectorAll("#stage-body .sy-code")].map((e) => e.textContent),
+      orbInStage: !!document.querySelector("#stage-orb-slot .orb-stage"),
+    }));
+    check(stage.shown && stage.title.includes("S1"), "stage opened with the syllabus view filtered to S1");
+    check(stage.codes.length === 5 && stage.codes.every((c) => c.startsWith("5.")), `only S1 rows shown (${stage.codes.join(", ")})`);
+    check(stage.orbInStage, "the orb moved into the stage");
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(300);
+    const closed = await page.evaluate(() => ({ shown: document.getElementById("stage").classList.contains("show"), orbHome: !!document.querySelector(".orb-col .orb-stage") }));
+    check(!closed.shown && closed.orbHome, "Esc closed the stage and the orb returned home");
+    await page.evaluate(() => { handleUiDirective({ view: "brief" }); handleUiDirective({ view: "close" }); });
+    check(!(await page.evaluate(() => document.getElementById("stage").classList.contains("show"))), "close directive closes the stage");
 
     check(pageErrors.length === 0, `no page errors (${pageErrors.join("; ") || "none"})`);
   } catch (e) {
