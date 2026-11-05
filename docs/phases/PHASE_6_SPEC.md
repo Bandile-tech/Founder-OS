@@ -224,7 +224,7 @@ ids; agents re-read the database.
 | `calendar_sync` (6C) | every 30 min | — | calendar_events, integrations | 0 | no |
 | `email_sync` (6C) | every 30 min | — | email_messages, communications, leads, todos, integrations | 0 | no |
 | `application_watch` (6A) | at 05:45 daily | — | application_gaps, applications | 2 | no |
-| `briefing_courier` (6D) | at `settings.morning_time` daily | — | notifications, briefing_summaries | 1 | yes |
+| `briefing_courier` (6D) | every 15 min; sends once a day once `now_local >= settings.morning_time` (dedupe key) | — | notifications, briefing_summaries | 1 | yes |
 | `alert_courier` (6D) | every 15 min | `payment.overdue`, `lead.replied`, `application.deadline_near`, `brand.sync_failed` | notifications | 0 | yes |
 | `reminder_courier` (6D) | every 15 min | — | notifications | 0 | yes |
 
@@ -483,8 +483,10 @@ Reply here to log anything. /brief resend · /undo last change
 Sections appear only when non-empty; at most 6 attention items and 5 today items.
 
 ### Couriers (agents, registered in 6B)
-- `briefing_courier` — at `morning_time`: `queue(kind="briefing", dedupe_key=f"briefing:{today}")`
-  then `dispatch`. With `evening_time` set, a second entry `evening_courier`-style run
+- `briefing_courier` — runs every 15 minutes (the time lives in `notification_settings`,
+  not in the spec's static schedule); when `now_local.time() >= morning_time` it calls
+  `queue(kind="briefing", dedupe_key=f"briefing:{today}")` then `dispatch` — the dedupe
+  key makes the second and later runs of the day no-ops. With `evening_time` set, a second entry `evening_courier`-style run
   inside the same module: carried-over tasks + "What did you get done? Reply here."
   (`dedupe_key=f"evening:{today}"`).
 - `alert_courier` — every tick and on events: new alerts from `detect_off_track` with
@@ -606,7 +608,7 @@ by 6D). One `integrations` table, one Settings card, one redaction helper.
 ### Decisions (ADR-0002, ADR-0004 and this section)
 | Provider | Method | Why not the alternative |
 |---|---|---|
-| Google Calendar | OAuth 2.0, scope `https://www.googleapis.com/auth/calendar.events`, consent screen **published (unverified)** | Testing mode expires refresh tokens after 7 days; the ICS secret URL is read-only. **VERIFY** that an unverified app in production with this *sensitive* (not restricted) scope lets the owner proceed through the warning screen. Fallback: `calendar.readonly` via the private ICS URL, no writes. |
+| Google Calendar | OAuth 2.0, scope `https://www.googleapis.com/auth/calendar.events`, consent screen **published (unverified)** | Testing mode expires refresh tokens after 7 days; the ICS secret URL is read-only. **VERIFY** that an unverified app in production with this *sensitive* (not restricted) scope lets the owner proceed through the warning screen. Fallback: read-only sync from the calendar's private ICS URL (`GOOGLE_CALENDAR_ICS_URL`), no writes. |
 | Email | Gmail **IMAP + SMTP with an App Password** (stdlib `imaplib`, `smtplib`, `email`) | Gmail API scopes are *restricted*: verification plus a security assessment. App passwords need only 2-Step Verification. **VERIFY** app passwords are still offered on the account and IMAP is enabled. |
 | Telegram | Bot API, webhook | see 6D |
 | YouTube | API key (5D) | public data only |

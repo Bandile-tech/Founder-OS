@@ -270,9 +270,13 @@ Prompt authority: both new tools are "explicit instruction only" (same wording s
 `ADD COLUMN IF NOT EXISTS` with the types in the table; backfill in Python.
 
 ### Acceptance tests — `tests/test_phase5a_market_intel.py`
-1. Every LLM call in a mocked run is logged: patch `llm.chat_completion` to return a fake
-   response with `usage` and assert six `llm_usage` rows with purposes starting
-   `market_intel_` and the project's `cost_usd > 0`, `llm_calls == 6`.
+1. Every LLM call in a mocked run is logged: set `OPENAI_API_KEY` with `monkeypatch`,
+   patch `llm.get_client` to return a fake client whose `chat.completions.create` returns
+   a response object with `choices[0].message.content` (JSON per role, keyed on the
+   system prompt like `_fake_llm`) and a `usage` object, and assert six `llm_usage` rows
+   with purposes starting `market_intel_`, the project's `cost_usd > 0` and
+   `llm_calls == 6`. (Patching `llm.chat_completion` itself would skip the logging under
+   test.)
 2. `scoring.overall` with default weights on `{8,8,7,6,7,9,8}` returns the weighted value
    (compute in the test) and `recommendation` bands are correct at 7.5 and 6.0.
 3. A second run whose researcher returns the same problem/segment does not create a second
@@ -408,9 +412,10 @@ RLS on `leads`, `lead_imports`, `outreach_messages`. ORM: `Lead`, `LeadImport`,
 - One `lead_imports` row; leads get `source=f"csv:{import_id}"`. All inside one
   `batch_scope(db, "ui")`; return `{import_id, created, updated, skipped, total_rows,
   segment, columns_mapped{}, batch_id}`.
-- Fixture: `tests/fixtures/leads_sample.csv` — 8 synthetic rows: two duplicates by email,
-  one by phone, one blank row, a `WhatsApp` column, an unmapped `Source` column, mixed-case
-  headers, a `+260` number and a `0977…` number.
+- Fixture: `tests/fixtures/leads_sample.csv` — 8 synthetic rows: five distinct leads, one
+  row that repeats an earlier lead's email, one row that repeats an earlier lead's phone
+  (so `created=5, updated=2`), one blank row (`skipped=1`), a `WhatsApp` column, an
+  unmapped `Source` column, mixed-case headers, a `+260` number and a `0977…` number.
 
 ### Qualification — `leads.qualify(db, lead_ids: list[int]) -> list[dict]`
 
@@ -674,7 +679,7 @@ stored for listing). `status` values stay `prospect|active|closed|lost` and gain
 | `status` VARCHAR NOT NULL DEFAULT 'due' | | `due` \| `paid` \| `overdue` (derived on read, stored by job) \| `cancelled` |
 | `due_date` DATE; `paid_at` DATE | | |
 | `revenue_id` INTEGER | | FK revenue.id, set when paid |
-| `recurring_id` INTEGER; `period_start` DATE | | set for generated instalments; unique (`recurring_id`, `period_start`) with `COALESCE` |
+| `recurring_id` INTEGER; `period_start` DATE | | set for generated instalments; partial unique index on (`recurring_id`, `period_start`) `WHERE recurring_id IS NOT NULL` |
 | `notes` TEXT; `created_at`, `updated_at` TIMESTAMP | | |
 
 `recurring_revenue`
@@ -705,9 +710,10 @@ stored for listing). `status` values stay `prospect|active|closed|lost` and gain
 Indexes: `ix_contacts_client`, `ix_deals_client`, `ix_deals_stage`, `ix_projects_status`,
 `ix_payments_client`, `ix_payments_status`, `ix_payments_due`, `ix_recurring_next_due`,
 `ix_communications_client`, `ix_communications_occurred`,
-`ux_payments_recurring_period ON payments (COALESCE(recurring_id, 0), COALESCE(period_start, '1970-01-01'))`
-unique (Postgres treats NULLs as distinct — same trick as m013; on SQLite the same
-expression works).
+`CREATE UNIQUE INDEX IF NOT EXISTS ux_payments_recurring_period ON payments (recurring_id, period_start) WHERE recurring_id IS NOT NULL`
+— a **partial** unique index (supported by SQLite and Postgres alike) so the many manual
+payments with `recurring_id NULL` never collide. `_helpers.create_index` has no `WHERE`
+parameter; execute this one statement with `conn.execute(text(...))` on both dialects.
 
 Backfill: `clients.currency` = `'USD'` for existing rows (their `value` was dollars);
 every existing `revenue` row with `client_id` gets a `paid` payment (`title="Imported"`,
@@ -802,7 +808,7 @@ own assessment.
   14 days overdue. Chase it today."}` with evaluator `_check_payment_overdue`.
 
 ### Migrations
-`m016_crm.py`: four `ADD COLUMN`s on `clients`, six tables, indexes incl. the COALESCE
+`m016_crm.py`: four `ADD COLUMN`s on `clients`, six tables, indexes incl. the partial
 unique index, Python backfills (`clients.currency`, payments from revenue), RLS.
 `DELETABLE` gains `contacts` (name), `deals` (title), `projects` (title), `payments`
 (title), `recurring_revenue` (title), `communications` (summary).
@@ -999,7 +1005,7 @@ Weekly insight (optional, cached): `brand.insight(db, platform, week_start, refr
 | `GET /brand/accounts` | | `[account + latest account_metrics]` |
 | `POST /brand/accounts` | `{platform, handle?, external_id?}` | 201 (YouTube resolves handle → id at creation; error → 400 with the adapter message) |
 | `POST /brand/accounts/{id}/sync` | | `{posts_new, posts_updated, metrics_rows, status, last_error}` |
-| `DELETE /brand/accounts/{id}` | | via pending action? **No** — UI delete goes through `propose_delete`-style confirmation in the UI (a confirm dialog), and the endpoint sets `status=disconnected` instead of deleting; data stays |
+| `DELETE /brand/accounts/{id}` | | sets `status=disconnected`; nothing is deleted and the data stays (the UI shows a confirm dialog before calling it) |
 | `POST /brand/import` | multipart `file`, `platform` | counts |
 | `GET /brand/performance` | `platform?`, `days=90` | `performance()` + `insight` (cached text or null) |
 | `GET /brand/posts` | `platform?`, `limit=50` | posts with latest metrics |
