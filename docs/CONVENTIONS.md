@@ -413,8 +413,9 @@ def list_leads(status: str | None = None, db: Session = Depends(get_db)): ...
 - The realtime voice path converts `TOOL_SCHEMAS` automatically
   (`voice_realtime.realtime_tools`) and runs tools through `/voice/realtime/tool` with
   the same `run_tool`. Nothing extra to do for voice.
-- Tool count today: 22 (+1 legacy alias). Keep the registry under ~40; prefer one tool with
-  an `action` enum over five near-duplicates when a module needs many small verbs.
+- Tool count today: 22 (+1 legacy alias). Phases 5–6 take it to roughly 50. Keep it under
+  ~60: fold near-identical verbs into one tool (e.g. `draft_outreach` also revises when
+  given a `message_id`), and never add a tool whose job an existing tool already does.
 
 ### 7.2 Example
 
