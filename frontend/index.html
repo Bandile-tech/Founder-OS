@@ -769,6 +769,8 @@ input:hover:not(:focus), textarea:hover:not(:focus), select:hover:not(:focus){bo
 #stage[data-mode="voice"] .stage-right{display:none}
 #stage[data-mode="view"] .stage-left .stage-transcript{display:none}
 .stage-left{position:relative;display:flex;flex-direction:column;align-items:center;gap:10px;min-width:0}
+.stage-voice-close{display:none;position:absolute;top:0;right:0;z-index:3}
+#stage[data-mode="voice"] .stage-voice-close{display:inline-block}
 #stage[data-mode="voice"] .stage-left{width:min(760px,100%)}
 #stage[data-mode="voice"] .orb-stage{transform:scale(1.1);margin-bottom:30px}
 .stage-transcript{width:100%;max-width:720px;max-height:38vh;overflow:auto;font-size:15px;line-height:1.5;padding:4px 8px}
@@ -2548,6 +2550,7 @@ tr:hover .td-del{opacity:1}
 <div id="stage" data-mode="view" role="dialog" aria-modal="false" aria-label="Stage">
   <div class="stage-inner">
     <div class="stage-left">
+      <button class="stage-close stage-voice-close" onclick="closeStage()" aria-label="End live session">End live · Esc</button>
       <div id="stage-orb-slot"></div>
       <div class="stage-transcript" id="stage-transcript"></div>
     </div>
@@ -5688,9 +5691,14 @@ function openStage(view,params){
 
 function closeStage(){
   if(STAGE.voice&&LIVE.state!=="idle"){
-    // in a live session "close" only clears the view; the orb stays full-screen
-    STAGE.view=null;STAGE.params=null;_stageMode();
-    document.getElementById("stage-body").innerHTML="";
+    if(STAGE.view){
+      // in a live session "close" first clears the view; the orb stays full-screen
+      STAGE.view=null;STAGE.params=null;_stageMode();
+      document.getElementById("stage-body").innerHTML="";
+      document.getElementById("stage-eyebrow").textContent="Live";
+      return;
+    }
+    stopLiveVoice();   // closing the voice stage ends the session (stopLiveVoice → closeVoiceStage)
     return;
   }
   STAGE.open=false;STAGE.view=null;STAGE.params=null;STAGE.voice=false;
@@ -5716,7 +5724,7 @@ function closeVoiceStage(){
   closeStage();
 }
 
-document.addEventListener("keydown",e=>{if(e.key==="Escape"&&STAGE.open&&!(STAGE.voice&&!STAGE.view))closeStage();});
+document.addEventListener("keydown",e=>{if(e.key==="Escape"&&STAGE.open)closeStage();});
 
 async function renderStageView(){
   const body=document.getElementById("stage-body");
@@ -5809,9 +5817,10 @@ function _liveSetState(state,label){
 }
 
 function _liveLine(kind,text,partial=false){
-  const box=document.getElementById("live-transcript");
+  const box=(STAGE.voice&&document.getElementById("stage-transcript"))||document.getElementById("live-transcript");
   if(!box)return null;
   box.classList.add("show");
+  if(kind==="os"&&!partial&&text)setOrbState(LIVE.state==="idle"?"idle":LIVE.state,text.slice(0,140));
   const el=document.createElement("div");
   el.className="lt-line "+(kind==="you"?"lt-you":kind==="act"?"lt-act":"lt-os")+(partial?" lt-partial":"");
   el.textContent=(kind==="you"?"You: ":kind==="act"?"› ":"OS: ")+text;
@@ -5882,6 +5891,7 @@ function _liveHandleEvent(ev){
     const text=(ev.transcript||LIVE.partial||"").trim();
     if(LIVE.partialEl){LIVE.partialEl.classList.remove("lt-partial");LIVE.partialEl.textContent="OS: "+text;LIVE.partialEl=null;}
     LIVE.partial="";
+    if(text)setOrbState("speaking",text.slice(0,140));   // the bubble shows what was said
     if(text){const ch=LIVE.pendingChanges.splice(0);_liveSaveTranscript("assistant",text,ch);}
   }else if(t==="response.function_call_arguments.done"){
     _liveRunTool({call_id:ev.call_id,name:ev.name,arguments:ev.arguments});
@@ -5902,6 +5912,7 @@ async function startLiveVoice(){
   if(!window.RTCPeerConnection||!navigator.mediaDevices?.getUserMedia){showToast("Live voice needs a WebRTC-capable browser","error");return;}
   if(_voiceAudio&&!_voiceAudio.paused){_voiceAudio.pause();_voiceAudio=null;_voiceUI("idle");}
   _liveSetState("connecting","connecting");
+  openVoiceStage();
   try{
     const sr=await fetch(`${API_BASE}/voice/realtime/session`,{method:"POST"});
     if(!sr.ok){
@@ -5952,6 +5963,7 @@ function stopLiveVoice(){
   _liveSetState("idle");
   _voiceUI("idle");
   if(wasLive){_liveLine("act","live session ended");try{syncFromBackend();renderConversationHistory();}catch(_){}}
+  closeVoiceStage();
 }
 
 function toggleLiveVoice(){
