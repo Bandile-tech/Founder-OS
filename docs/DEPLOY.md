@@ -1,7 +1,8 @@
 # Deploying the rebuild (Render + Supabase + Netlify)
 
 The backend runs on Render (FastAPI, Python 3.12) against Supabase Postgres. The frontend is
-one file; it can be served by the backend at `/` (same origin, simplest) or by Netlify.
+one file plus `frontend/assets/`; it can be served by the backend at `/app/` (same origin,
+simplest; `/` redirects there) or by Netlify.
 
 ## 1. Before merging
 
@@ -42,8 +43,8 @@ Python version: 3.12 (`PYTHON_VERSION=3.12.x`); the pinned requirements do not b
    `[m013] …`, `[startup] Schema OK: all ORM columns present in live database.`
    The RLS lines (`RLS enabled: …`) should appear for the ten new tables.
 3. If the log shows `Schema drift detected`, the boot refused to serve: see Rollback.
-4. If the frontend is on Netlify, deploy `frontend/index.html` (it points at the Render URL
-   unless served from localhost).
+4. If the frontend is on Netlify, deploy `frontend/` — `index.html` and `assets/` (it points at
+   the Render URL unless served from localhost).
 
 ## 4. Checks after deploying
 
@@ -52,13 +53,16 @@ Run these against the live URL (`$API`), with `$TOKEN` from the login call:
 ```bash
 curl -s $API/health                     # {"ok":true,"ai_configured":true,...}
 curl -s -o /dev/null -w "%{http_code}\n" $API/todos          # 401 — the API is locked
+curl -s -o /dev/null -w "%{http_code} %{redirect_url}\n" $API/   # 307 …/app/
+curl -s -o /dev/null -w "%{http_code}\n" $API/app/assets/orb.png # 200 — no token needed
 curl -s -X POST $API/auth/login -H 'Content-Type: application/json' -d '{"password":"…"}'
 curl -s -H "Authorization: Bearer $TOKEN" $API/briefing/today | head -c 400
 curl -s -H "Authorization: Bearer $TOKEN" $API/syllabus | head -c 200
 curl -s -H "Authorization: Bearer $TOKEN" $API/usage/summary
 ```
 
-Then in the browser: log in, confirm the Command Centre renders the brief, send one typed
+Then in the browser, at `$API/app/` (or the Netlify URL): log in, confirm the Command Centre
+renders the brief with its scene and orb images, send one typed
 message to the assistant ("what's due today?"), tick a brief item and press Undo, open the
 Syllabus page and import the tracker CSV, and start a Live session and say one sentence.
 Check `GET /usage/summary` afterwards: every call should be logged.

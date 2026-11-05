@@ -111,6 +111,10 @@ async function api(token, method, p, body, isForm) {
     await page.waitForFunction(() => !document.getElementById("login-screen").classList.contains("show"), null, { timeout: 15000 });
     check(true, "correct password hides the gate");
     await page.waitForFunction(() => document.querySelectorAll("#cc-items .cc-item").length > 0, null, { timeout: 20000 });
+    check(new URL(page.url()).pathname === "/app/", "/ redirected to /app/");
+    const imgs = await page.evaluate(() => [...document.querySelectorAll("img.cc-scene, img#orb")]
+      .map((i) => i.complete && i.naturalWidth > 0));
+    check(imgs.length === 2 && imgs.every(Boolean), "scene and orb images load");
 
     // ── 2. complete a brief item, then undo ──
     console.log("2. brief item complete + undo");

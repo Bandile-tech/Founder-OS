@@ -22,9 +22,11 @@ cd backend
 pip install -r requirements.txt      # Python 3.12 (the pins do not build on 3.13)
 uvicorn main:app --reload
 ```
-Visit `http://127.0.0.1:8000` — the backend serves `frontend/index.html` at `/` and the API on
-the same origin. Frontend-only use (`open frontend/index.html`) still works for viewing local
-state but every feature that matters needs the backend.
+Visit `http://127.0.0.1:8000/app/` — the backend serves `frontend/` at `/app/` and the API on
+the same origin; `/` redirects (307) to `/app/`. The frontend must load from `/app/`: its
+relative `assets/…` URLs would otherwise hit `/assets/…`, which the auth middleware blocks.
+Frontend-only use (`open frontend/index.html`) still works for viewing local state but every
+feature that matters needs the backend.
 
 Environment (`backend/.env` locally, Render env vars in production):
 
