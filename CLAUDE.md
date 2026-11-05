@@ -64,8 +64,11 @@ Luna palette: near-black base, cyan `#A7EBF2` for signal only, Bricolage Grotesq
 numerals, Geist for body. Pages: Command Centre (home, built on `GET /briefing/today`),
 Dashboard, Timetable, Health, Syllabus, Academic Roadmap (legacy), Agents, War Room, Annual
 Targets, Design Guide, Settings. The home page is a 1582×866 pixel canvas laid out at the
-coordinates of `docs/design/command-centre.png` (scaled down on narrower viewports, stacked
-below 1024 px) using the cropped mock-up assets in `frontend/assets/` (`orb.png`, `scene.png`).
+coordinates of `docs/design/command-centre.png`, using the cropped mock-up assets in
+`frontend/assets/` (`orb.png`, `scene.png`). On desktop (≥1024 px, stage closed) the whole mock
+frame — header, rail and canvas inside `#frame`, 1672×941 — is scaled as one unit by
+`layoutHome()`: min(viewport width / 1672, viewport height / 941), up or down, centred; leftover
+space shows the scene blurred at cover size (`#cc-bleed`). Below 1024 px the home page stacks.
 The global command dock is the talk bar (a glowing pill, docked into the home canvas): mic on
 the left starts live voice (WebRTC), typed input in the middle, send on the right, and a
 suggestions chip above it. Every backend call goes through a `fetch` wrapper that attaches

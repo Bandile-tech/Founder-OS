@@ -202,6 +202,7 @@ def detect_off_track(db):
         if check(db, rule.get("params", {})):
             alerts.append({
                 "rule_id": rule["id"],
+                "check": rule["check"],
                 "severity": rule.get("severity", "info"),
                 "message": rule.get("message", rule["id"]),
             })

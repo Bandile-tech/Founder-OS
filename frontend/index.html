@@ -616,13 +616,25 @@ input:hover:not(:focus), textarea:hover:not(:focus), select:hover:not(:focus){bo
 #ucmd-pending{display:none;padding:0 0 8px}
 #ucmd-pending.show{display:block}
 
-/* COMMAND CENTRE — pixel layout from docs/design/command-centre.png (1672×941): a 1582×866 canvas
-   positioned at the mock's coordinates (content origin = rail 90px, header 75px), scaled down on
-   narrower desktops; a stacked flow layout below 1024px. */
+/* COMMAND CENTRE — pixel layout from docs/design/command-centre.png (1672×941). On desktop
+   (≥1024px) the whole frame — header 75px, rail 90px and the 1582×866 content canvas — is laid
+   out at the mock's exact size and layoutHome() scales it as ONE unit by
+   min(viewport width / 1672, viewport height / 941), centred, so header, rail and cards always
+   share one scale. Below 1024px: the stacked phone layout, unscaled. */
+#frame{display:flex;flex-direction:column;flex:1;min-height:0;position:relative}
+body.cc-frame #frame{position:fixed;left:0;top:0;width:1672px;height:941px;flex:none;transform-origin:0 0;overflow:hidden;
+  background:radial-gradient(ellipse 90% 65% at 70% -10%,#10161D 0%,var(--bg) 55%),var(--bg);box-shadow:0 0 90px 20px rgba(0,0,0,0.55)}
+body.cc-frame #header{height:75px;min-height:75px}
 #p-home.cc-desktop{padding:0;overflow:hidden}
 .cc-canvas-wrap{position:relative;width:100%;overflow:hidden}
 .cc-canvas{position:relative;width:1582px;height:866px;transform-origin:0 0}
 .cc-scene{position:absolute;left:870px;top:0;width:712px;height:866px;pointer-events:none;user-select:none;z-index:0}
+/* Space the frame does not cover (any viewport not 1672:941) shows the scene at cover size,
+   blurred and darkened — never an empty band. Oversized so the blur has no soft edge, and
+   extended 60vw to the left so the image's transparent left third falls off-screen. */
+#cc-bleed{position:fixed;top:-60px;right:-60px;bottom:-60px;left:-60vw;z-index:-1;pointer-events:none;display:none;
+  background:#05070a url("assets/scene.png") center/cover no-repeat;filter:blur(30px) brightness(0.5) saturate(1.15)}
+#cc-bleed.show{display:block}
 .cc-scene-dim{position:absolute;inset:0;z-index:0;pointer-events:none;background:linear-gradient(90deg,rgba(10,11,13,0.55) 0%,rgba(10,11,13,0.35) 45%,rgba(10,11,13,0) 70%)}
 .cc-abs{position:absolute;z-index:2}
 .cc-eyebrow{left:90px;top:56px;font-family:var(--font-body);font-size:14px;letter-spacing:0.2em;text-transform:uppercase;color:rgba(234,238,242,0.78);font-weight:500}
@@ -651,6 +663,7 @@ input:hover:not(:focus), textarea:hover:not(:focus), select:hover:not(:focus){bo
   cursor:pointer;color:transparent;transition:all var(--t-fast) var(--ease-spring);background:rgba(255,255,255,0.02)}
 .cc-check.checked,.cc-check:active{background:rgba(62,220,180,0.18);border-color:#5EE8C8;color:#5EE8C8;box-shadow:0 0 12px -2px rgba(62,220,180,0.6)}
 .cc-check.static{cursor:default;opacity:0.55}
+.cc-check-slot{width:22px;height:22px;flex-shrink:0}
 .cc-check svg{width:13px;height:13px}
 .cc-item-main{flex:1;min-width:0}
 .cc-item-title{font-size:17px;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:-0.005em}
@@ -1913,6 +1926,7 @@ tr:hover .td-del{opacity:1}
 
 <!-- ═══ AMBIENT DEPTH FIELD ═══ -->
 <div id="ambient" aria-hidden="true"></div>
+<div id="cc-bleed" aria-hidden="true"></div>
 
 <!-- ═══ LOGIN GATE ═══ -->
 <div id="login-screen" aria-hidden="true">
@@ -1925,6 +1939,9 @@ tr:hover .td-del{opacity:1}
   </form>
 </div>
 
+<!-- ═══ FRAME — header, alerts, rail and pages. On the desktop home screen layoutHome()
+     scales it as one 1672×941 unit (the mock's frame); elsewhere it is a plain flex column. ═══ -->
+<div id="frame">
 <!-- ═══ HEADER ═══ -->
 <div id="header">
   <div style="display:flex;align-items:center">
@@ -2642,6 +2659,7 @@ tr:hover .td-del{opacity:1}
 
   </div><!-- /content -->
 </div><!-- /app -->
+</div><!-- /frame -->
 
 <!-- ═══ STAGE — the orb steps aside and a view renders; conversation continues in the dock ═══ -->
 <div id="stage" data-mode="view" role="dialog" aria-modal="false" aria-label="Stage">
@@ -3164,6 +3182,8 @@ async function submitSyllabusImport(){
 ═══════════════════════════════════════════════════ */
 let _briefing=null,_ccShowAll=false,_ccLoading=false,_ccNnOpen=false;
 const CC_ICON_CHECK='<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5l3.2 3L13 4.5"/></svg>';
+// Alerts are not tasks: no checkbox, just an empty slot so titles stay aligned.
+const CC_NO_CHECK='<span class="cc-check-slot" aria-hidden="true"></span>';
 
 function _ccDueClass(it){
   const l=(it.due_label||"").toLowerCase();
@@ -3189,16 +3209,25 @@ function renderHome(){
   // expands on tap; it takes the rank of the first non-negotiable item.
   const allItems=(b.items||[]);
   const nnRows=b.non_negotiables||[];
-  const others=allItems.filter(i=>i.category!=="non_negotiable");
   const firstNnIdx=allItems.findIndex(i=>i.category==="non_negotiable");
-  const list=others.slice();
   const CC_MAX=3;
-  if(nnRows.length){
-    let pos=firstNnIdx<0?list.length:Math.min(list.length,allItems.slice(0,firstNnIdx).filter(i=>i.category!=="non_negotiable").length);
-    // open non-negotiables always make the top 5 (pinned to the last slot at the latest)
-    if(nnRows.some(r=>!r.done))pos=Math.min(pos,CC_MAX-1,list.length);
-    list.splice(pos,0,{_nn:true});
-  }
+  // The "non-negotiable completion" alert repeats what the Non-negotiables row shows, so it
+  // is dropped whenever that row is on screen.
+  const isNnAlert=i=>i.category==="alert"&&i.alert_check==="non_negotiable_completion_below";
+  const buildList=dropNnAlert=>{
+    const keep=i=>i.category!=="non_negotiable"&&!(dropNnAlert&&isNnAlert(i));
+    const l=allItems.filter(keep);
+    if(nnRows.length){
+      let pos=firstNnIdx<0?l.length:Math.min(l.length,allItems.slice(0,firstNnIdx).filter(keep).length);
+      // open non-negotiables always make the top 3 (pinned to the last slot at the latest)
+      if(nnRows.some(r=>!r.done))pos=Math.min(pos,CC_MAX-1,l.length);
+      l.splice(pos,0,{_nn:true});
+    }
+    return l;
+  };
+  let list=buildList(true);
+  const nnShown=nnRows.length>0&&(_ccShowAll||list.slice(0,CC_MAX).some(i=>i._nn));
+  if(!nnShown)list=buildList(false);
   const shown=_ccShowAll?list:list.slice(0,CC_MAX);
   const box=document.getElementById("cc-items");
   if(box){
@@ -3218,6 +3247,7 @@ function renderHome(){
       const completable=it.completable&&it.target_type==="todo";
       const cb=completable
         ?`<div class="cc-check" role="checkbox" aria-checked="false" tabindex="0" title="Complete this task" onclick="ccComplete(${Number(it.target_id)},this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}">${CC_ICON_CHECK}</div>`
+        :it.category==="alert"?CC_NO_CHECK
         :`<div class="cc-check static" aria-hidden="true"></div>`;
       return `<div class="cc-item" data-id="${escHtml(it.id)}">
         ${cb}
@@ -3248,18 +3278,28 @@ function renderHome(){
 }
 
 /* ── Canvas scaling + dock placement for the pixel layout ── */
-const CC_W=1582, CC_H=866;
+// The desktop home screen is the mock's whole 1672×941 frame (header + rail + 1582×866 canvas),
+// scaled as one unit: k = min(viewport width / 1672, viewport height / 941), up or down,
+// centred both ways. Off while the stage is open (the stage and the header above it are
+// full-viewport) and below 1024px (stacked phone layout).
+const CC_FRAME_W=1672, CC_FRAME_H=941;
 function layoutHome(){
-  const wrap=document.getElementById("cc-canvas-wrap"), cv=document.getElementById("cc-canvas"), page=document.getElementById("p-home");
-  if(!wrap||!cv||!page)return;
-  const narrow=window.innerWidth<1024;
-  if(narrow){cv.style.transform="";wrap.style.height="";return;}
-  const avail=page.clientWidth||(window.innerWidth-90);
-  const k=Math.min(1,avail/CC_W);
-  cv.style.transform=`scale(${k})`;
-  wrap.style.height=Math.round(CC_H*k)+"px";
+  const frame=document.getElementById("frame"), page=document.getElementById("p-home"), bleed=document.getElementById("cc-bleed");
+  if(!frame||!page)return;
+  const vw=document.documentElement.clientWidth||window.innerWidth, vh=document.documentElement.clientHeight||window.innerHeight;
+  const on=page.classList.contains("active")&&vw>=1024&&!(typeof STAGE!=="undefined"&&STAGE.open);
+  document.body.classList.toggle("cc-frame",on);
+  if(bleed)bleed.classList.toggle("show",on);
+  if(!on){frame.style.transform="";return;}
+  const k=Math.min(vw/CC_FRAME_W,vh/CC_FRAME_H);
+  const ox=(vw-CC_FRAME_W*k)/2, oy=(vh-CC_FRAME_H*k)/2;
+  frame.style.transform=`translate(${ox}px,${oy}px) scale(${k})`;
 }
+// Browser zoom and Windows display scaling change the CSS viewport, which fires resize; the
+// observer is a backstop for viewport changes that arrive without one.
+if(window.ResizeObserver)new ResizeObserver(()=>layoutHome()).observe(document.documentElement);
 function placeDock(){
+  layoutHome();   // stage open/close switches the scaled home frame off/on
   const dock=document.getElementById("cmd-dock"), cv=document.getElementById("cc-canvas");
   if(!dock||!cv)return;
   const onHome=document.getElementById("p-home")&&document.getElementById("p-home").classList.contains("active");
@@ -3432,7 +3472,8 @@ window.addEventListener("resize",()=>{
 });
 
 function renderPage(page){
-  if(page==="home"){layoutHome();renderHome();loadBriefing();}
+  layoutHome();   // also hides the home scene on other pages
+  if(page==="home"){renderHome();loadBriefing();}
   else if(page==="syllabus"){renderSyllabus()}
   else if(page==="dashboard"){renderDash();fetchAndRenderRadar();renderConversationHistory();if(_recentActOpen)renderRecentActivity()}
   else if(page==="timetable"){renderTimetable()}
@@ -5931,7 +5972,7 @@ async function renderStageView(){
       const items=(_briefing&&_briefing.items)||[];
       body.innerHTML=items.length?items.map(it=>{
         const completable=it.completable&&it.target_type==="todo";
-        return `<div class="cc-item">${completable?`<div class="cc-check" role="checkbox" tabindex="0" onclick="ccComplete(${Number(it.target_id)},this)">${CC_ICON_CHECK}</div>`:`<div class="cc-check static"></div>`}<span class="cc-cat ${escHtml(it.category)}"></span><div class="cc-item-main"><div class="cc-item-title">${escHtml(it.title)}</div><div class="cc-item-reason" style="display:block">${escHtml(it.reason||"")}</div></div><span class="cc-due ${_ccDueClass(it)}">${escHtml(it.due_label||"")}</span></div>`;
+        return `<div class="cc-item">${completable?`<div class="cc-check" role="checkbox" tabindex="0" onclick="ccComplete(${Number(it.target_id)},this)">${CC_ICON_CHECK}</div>`:it.category==="alert"?CC_NO_CHECK:`<div class="cc-check static"></div>`}<span class="cc-cat ${escHtml(it.category)}"></span><div class="cc-item-main"><div class="cc-item-title">${escHtml(it.title)}</div><div class="cc-item-reason" style="display:block">${escHtml(it.reason||"")}</div></div><span class="cc-due ${_ccDueClass(it)}">${escHtml(it.due_label||"")}</span></div>`;
       }).join(""):`<div class="st-empty">Nothing on the brief.</div>`;
     }else if(v==="deadlines"){
       const r=await fetch(`${API_BASE}/deadlines?days=${Number(p.days||14)}`);const d=await r.json();

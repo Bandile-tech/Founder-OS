@@ -202,7 +202,8 @@ def _alert_items(db: Session, today: date) -> tuple[list, list]:
         sev = a.get("severity", "info")
         items.append(_item(title=a["message"].split(".")[0], category="alert", due=None, today=today, due_label=sev.upper(),
                            reason=a["message"], action="Review and act", target_type="alert", target_id=a["rule_id"],
-                           score={"critical": 65, "warn": 45, "info": 15}.get(sev, 15)))
+                           score={"critical": 65, "warn": 45, "info": 15}.get(sev, 15),
+                           extra={"alert_check": a.get("check")}))
     return alerts, items
 
 
