@@ -398,6 +398,118 @@ body.nav-open #nav-scrim{display:block}
 .gd-radius div{width:64px;height:48px;border:1px solid var(--edge);background:var(--well-hi)}
 .gd-swatch{width:22px;height:22px;flex:none;border-radius:6px;border:1px solid rgba(255,255,255,0.14)}
 
+/* ═══ HOME — Command Centre ═══
+   Composition from docs/design/command-centre.png, rebuilt as a grid. The scene is anchored
+   top-right and sized to the height under the header (--scene-h), so the orb image, which sits
+   at the scene's own coordinates, always lands on the scene's orb. Rows are spaced in the same
+   unit, which keeps the mock's proportions at 1280×720 and 1920×1080 without scaling anything. */
+.page--home{position:relative;max-width:none;min-height:100%;padding-top:0}
+.page--home > * + *{margin-top:0}
+.home-scene{position:absolute;inset:0;z-index:0;overflow:hidden;pointer-events:none}
+.home-bleed{position:absolute;inset:-40px;background:#05070a url("assets/scene.png") 75% 30%/cover no-repeat;filter:blur(30px) brightness(0.42) saturate(1.15)}
+.home-bleed::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,rgba(10,11,13,0.6) 0%,rgba(10,11,13,0.3) 50%,rgba(10,11,13,0) 75%)}
+.home-scene-img{display:none}
+.home{position:static;z-index:1;display:grid;gap:0 var(--sp-6);grid-template-columns:minmax(0,1fr);
+  grid-template-areas:"intro" "orb" "cards" "tiles"}
+.home > *{position:relative;z-index:1;min-width:0}
+.home-intro{grid-area:intro;padding-top:var(--sp-6)}
+.home-greeting{font-size:var(--fs-display);font-weight:600;letter-spacing:-0.025em;line-height:1.15;color:#fff;margin:var(--sp-1) 0 var(--sp-2)}
+.cc-name{color:var(--glow-2);text-shadow:0 0 18px rgba(102,227,244,0.35)}
+.home-line{font-size:var(--fs-md);color:var(--text-2);min-height:1.5em}
+.skel-line{display:block;height:1.1em;max-width:520px}
+.home-cards{grid-area:cards;display:grid;gap:var(--sp-5);grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);align-items:stretch}
+.home-cards .card{display:flex;flex-direction:column}
+.home-brief .row{min-height:clamp(42px,5.6vh,52px);padding-top:0;padding-bottom:0}
+.home-progress .meter{gap:clamp(4px,0.9vh,8px)}
+.home-progress .meter + .meter{margin-top:clamp(8px,1.8vh,18px)}
+.home-progress .meter-head{font-size:var(--fs-base)}
+.home-dock{grid-area:dock;display:none}
+.home-orb{grid-area:orb;display:flex;justify-content:center;padding:var(--sp-4) 0}
+/* tiles: six in a row on desktop */
+.home-tiles{grid-area:tiles;display:grid;gap:var(--sp-4);grid-template-columns:repeat(auto-fill,minmax(150px,1fr));margin-top:var(--sp-6)}
+.home-tile{position:relative;display:flex;flex-direction:column;align-items:flex-start;gap:var(--sp-1);min-width:0;min-height:clamp(90px,14vh,150px);
+  padding:clamp(10px,1.5vh,22px) clamp(12px,1.2vw,24px);border-radius:var(--r-lg);text-align:left;cursor:pointer;color:#fff;font-family:inherit;
+  background:linear-gradient(160deg,rgba(18,28,36,0.85),rgba(9,14,20,0.9));border:1px solid var(--edge);overflow:hidden;
+  box-shadow:0 0 30px -14px rgba(47,211,240,0.5),inset 0 1px 0 rgba(255,255,255,0.06);transition:transform var(--t-base) var(--ease-out),border-color var(--t-base)}
+@media(hover:hover) and (pointer:fine){button.home-tile:hover{transform:translateY(-2px);border-color:var(--glow)}}
+button.home-tile:active{transform:scale(0.98)}
+.home-tile svg{width:clamp(22px,1.6vw,28px);height:clamp(22px,1.6vw,28px);margin-bottom:auto;color:var(--glow-2);filter:drop-shadow(0 0 8px rgba(102,227,244,0.7))}
+.home-tile .tt{font-size:var(--fs-md);font-weight:600;letter-spacing:-0.01em;line-height:1.3;margin-top:var(--sp-2)}
+.home-tile .ts{font-size:var(--fs-2xs);color:var(--text-2);line-height:1.35}
+.home-tile.soon{cursor:default;opacity:0.55;filter:saturate(0.6)}
+.home-tile .soon-tag{position:absolute;top:var(--sp-3);right:var(--sp-3);font-size:10px;letter-spacing:var(--track-caps);text-transform:uppercase;color:var(--text-2);border:1px solid rgba(255,255,255,0.16);border-radius:var(--r-pill);padding:2px 8px}
+.home-tile.c-academics{border-color:rgba(167,139,250,0.55);background:linear-gradient(160deg,rgba(167,139,250,0.16),rgba(9,14,20,0.9) 60%);box-shadow:0 0 30px -12px rgba(167,139,250,0.6)}
+.home-tile.c-academics svg{color:#B59CFF;filter:drop-shadow(0 0 8px rgba(167,139,250,0.7))}
+.home-tile.c-business,.home-tile.c-projects{border-color:rgba(62,220,180,0.4)}
+.home-tile.c-business svg,.home-tile.c-projects svg{color:#5EE8C8}
+.home-tile.c-content svg,.home-tile.c-agents svg{color:#C8B6FF}
+.home-tile.c-content,.home-tile.c-agents{border-color:rgba(167,139,250,0.4)}
+/* brief: the non-negotiables row opens a list in place */
+.cc-nn{cursor:pointer}
+.nn-pop{display:none;flex-direction:column;margin:0 0 var(--sp-2);padding:var(--sp-1) var(--sp-2);border-radius:var(--r-md);background:var(--well);border:1px solid var(--line)}
+.nn-pop.open{display:flex}
+.nn-pop .row{min-height:44px;border-bottom-color:var(--line);cursor:pointer}
+.nn-pop .row-title{font-size:var(--fs-sm)}
+.cat-exam{--c:var(--purple)}.cat-syllabus{--c:var(--warn)}.cat-non_negotiable{--c:var(--success)}.cat-alert,.cat-target{--c:var(--danger)}
+
+/* ── The orb: image from the mock + CSS overlays for state. Every overlay is placed in % of
+   the orb box and sized in container units, so the orb scales as one piece. ── */
+.orb-stage{position:relative;width:min(280px,64vw);aspect-ratio:430/367;container-type:inline-size}
+.orb-img{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;user-select:none;animation:orbBreathe 5s var(--ease-in-out) infinite;transform-origin:50% 40%;transition:filter var(--t-slow),transform var(--t-slow)}
+.orb-eyes{position:absolute;left:34.88%;top:36.78%;width:29.3%;height:2.72%;display:flex;justify-content:space-between;pointer-events:none}
+.orb-eye{width:34.1%;height:100%;border-radius:5px;background:transparent;transition:background var(--t-base),box-shadow var(--t-base)}
+.orb-bubble{position:absolute;left:77.9%;top:5.2%;max-width:57%;min-height:18.5%;box-sizing:border-box;padding:2.6cqw 5cqw;display:flex;align-items:center;
+  border-radius:5cqw 5cqw 5cqw 1.8cqw;font-size:max(12px,4.2cqw);line-height:1.3;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;z-index:3;
+  background:linear-gradient(160deg,rgba(26,56,70,0.82),rgba(14,36,48,0.9));border:1.5px solid rgba(140,235,245,0.7);
+  box-shadow:0 0 30px -6px rgba(47,211,240,0.6),inset 0 1px 0 rgba(255,255,255,0.1);-webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px)}
+.orb-wave{position:absolute;left:83%;top:34.6%;height:9.5%;display:flex;align-items:center;gap:0.95cqw;z-index:3}
+.orb-wave span{width:0.95cqw;min-width:2px;height:24%;border-radius:2px;background:#8FEBFA;box-shadow:0 0 8px rgba(102,227,244,0.8)}
+.orb-wave span:nth-child(2){height:52%}.orb-wave span:nth-child(3){height:86%}.orb-wave span:nth-child(4){height:40%}.orb-wave span:nth-child(5){height:68%}.orb-wave span:nth-child(7){height:46%}
+.orb-wave span:nth-child(odd){animation-delay:0.12s}.orb-wave span:nth-child(3n){animation-delay:0.24s}
+.orb-state{display:none}
+.orb-stage[data-state="listening"] .orb-img{filter:drop-shadow(0 0 28px rgba(62,220,180,0.55)) saturate(1.15)}
+.orb-stage[data-state="listening"] .orb-eye{background:rgba(201,255,241,0.9);box-shadow:0 0 14px #3EDCB4,0 0 30px rgba(62,220,180,0.8)}
+.orb-stage[data-state="listening"] .orb-wave span{animation:waveListen 1.1s var(--ease-in-out) infinite}
+.orb-stage[data-state="thinking"] .orb-img{animation:orbThink 1.6s var(--ease-in-out) infinite;filter:drop-shadow(0 0 24px rgba(47,211,240,0.5))}
+.orb-stage[data-state="thinking"] .orb-eye{background:rgba(230,251,255,0.95);box-shadow:0 0 14px #7FEBFF;animation:eyeScan 1.2s var(--ease-in-out) infinite;width:24%}
+.orb-stage[data-state="speaking"] .orb-img{filter:drop-shadow(0 0 34px rgba(47,211,240,0.7)) saturate(1.2);transform:scale(1.03)}
+.orb-stage[data-state="speaking"] .orb-eye{background:rgba(230,251,255,0.95);box-shadow:0 0 14px #7FEBFF;animation:eyeTalk 0.5s var(--ease-in-out) infinite}
+.orb-stage[data-state="speaking"] .orb-wave span{animation:waveTalk 0.55s var(--ease-in-out) infinite}
+.orb-stage[data-state="acting"] .orb-eye{background:#FFE9A8;box-shadow:0 0 14px #F5C842,0 0 30px rgba(245,200,66,0.8);animation:eyeScan 0.8s var(--ease-in-out) infinite}
+@keyframes orbBreathe{0%,100%{transform:translateY(0) scale(1)}50%{transform:translateY(-1.4%) scale(1.012)}}
+@keyframes orbThink{0%,100%{transform:translateY(0) scale(1)}50%{transform:translateY(-1%) scale(1.02)}}
+@keyframes waveTalk{0%,100%{transform:scaleY(0.4)}50%{transform:scaleY(1.3)}}
+@keyframes waveListen{0%,100%{transform:scaleY(0.6)}50%{transform:scaleY(1)}}
+@keyframes eyeScan{0%,100%{transform:translateX(-20%)}50%{transform:translateX(20%)}}
+@keyframes eyeTalk{0%,100%{transform:scaleY(1)}50%{transform:scaleY(0.55)}}
+/* stacked home (phones, tablets, portrait windows): the orb sits under the greeting without the
+   scene behind it, so its bubble and wave hang off the top-right of the orb instead */
+.home-orb .orb-bubble{left:62%;top:-4%;max-width:none;font-size:max(12px,4.6cqw)}
+.home-orb .orb-wave{display:none}
+
+/* ── Desktop composition (landscape, ≥1024px wide) ── */
+@media (min-width:1024px) and (min-aspect-ratio:6/5){
+  .page--home{
+    --scene-h:min(calc(100dvh - var(--header-h)),calc((100vw - var(--rail-w)) * 0.67));  /* scene ≤ 55% of the width */
+    --scene-w:calc(var(--scene-h) * 712 / 866);
+    padding:calc(var(--scene-h) * 0.06) var(--page-pad) var(--sp-4)}
+  .home-scene-img{display:block;position:absolute;top:0;right:0;height:var(--scene-h);width:var(--scene-w);
+    -webkit-mask-image:linear-gradient(90deg,transparent 0,transparent 12%,#000 24%);mask-image:linear-gradient(90deg,transparent 0,transparent 12%,#000 24%)}  /* hides the mock card baked into the scene */
+  .home{grid-template-columns:minmax(0,1fr) calc(var(--scene-w) * 0.885 - var(--page-pad));
+    grid-template-areas:"intro orb" "cards orb" "dock dock" "tiles tiles"}
+  .home-intro{padding-top:0;margin-bottom:calc(var(--scene-h) * 0.042)}
+  .home-cards{min-height:calc(var(--scene-h) * 0.283)}
+  .home-cards .card{padding:clamp(14px,2.3vh,26px) clamp(16px,1.6vw,26px)}
+  .home-cards .card-head{margin-bottom:clamp(8px,1.4vh,16px)}
+  /* the orb box sits at the scene's own coordinates: 430×367 at (80,103) in the 712×866 scene */
+  .home-orb{position:absolute;padding:0;display:block;right:calc(var(--scene-w) * 0.28371);top:calc(var(--scene-h) * 0.11894);width:calc(var(--scene-w) * 0.60393)}
+  .home-orb .orb-stage{width:100%}
+  .home-orb .orb-bubble{left:77.9%;top:5.2%;max-width:57%;font-size:4.2cqw}
+  .home-orb .orb-wave{display:flex}
+  .home-dock{display:block;justify-self:center;width:min(820px,64%);margin-top:calc(var(--scene-h) * 0.05)}
+  .home-tiles{grid-template-columns:repeat(6,minmax(0,1fr));gap:clamp(12px,1.4vw,24px);margin-top:calc(var(--scene-h) * 0.045)}
+}
+
 /* ═══ TALK BAR — the global command dock. Fixed bottom-centre on every page (each page
    reserves --dock-clear beneath it); on the desktop home it sits in the grid instead. ═══ */
 #cmd-dock{position:fixed;left:var(--rail-w);right:0;bottom:calc(var(--dock-gap) + env(safe-area-inset-bottom));z-index:var(--z-dock);
@@ -736,147 +848,6 @@ input:not(.input):not(.cmd-input),textarea:not(.textarea),select:not(.select){bo
 .sy-file{font-size:12px;color:var(--text-2)}
 @media(max-width:640px){.sy-row{grid-template-columns:12px 44px minmax(0,1fr) auto}.sy-row .sy-meta{display:none}}
 
-#p-home.cc-desktop{padding:0;overflow:hidden}
-.cc-canvas-wrap{position:relative;width:100%;overflow:hidden}
-.cc-canvas{position:relative;width:1582px;height:866px;transform-origin:0 0}
-.cc-scene{position:absolute;left:870px;top:0;width:712px;height:866px;pointer-events:none;user-select:none;z-index:0}
-.cc-scene-dim{position:absolute;inset:0;z-index:0;pointer-events:none;background:linear-gradient(90deg,rgba(10,11,13,0.55) 0%,rgba(10,11,13,0.35) 45%,rgba(10,11,13,0) 70%)}
-.cc-abs{position:absolute;z-index:2}
-.cc-eyebrow{left:90px;top:56px;font-family:var(--font-body);font-size:14px;letter-spacing:0.2em;text-transform:uppercase;color:rgba(234,238,242,0.78);font-weight:500}
-.cc-greeting{left:88px;top:80px;font-family:var(--font-body);font-size:46px;font-weight:600;letter-spacing:-0.025em;line-height:1.15;color:#fff;margin:0;white-space:nowrap}
-.cc-greeting .cc-name{color:#66E3F4;text-shadow:0 0 18px rgba(102,227,244,0.35)}
-.cc-line{left:90px;top:143px;font-size:19.5px;color:rgba(234,238,242,0.88);line-height:1.3;width:760px;min-height:24px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.cc-card{position:absolute;z-index:2;top:215px;height:245px;box-sizing:border-box;border-radius:20px;padding:24px 26px 0;min-width:0;
-  background:linear-gradient(160deg,rgba(16,26,34,0.82) 0%,rgba(10,16,22,0.88) 55%,rgba(8,13,19,0.92) 100%);
-  backdrop-filter:blur(var(--blur-1)) saturate(150%);-webkit-backdrop-filter:blur(var(--blur-1)) saturate(150%);
-  border:1px solid rgba(110,220,236,0.42);
-  box-shadow:inset 0 1px 0 rgba(255,255,255,0.06),inset 0 0 50px -30px rgba(47,211,240,0.35),0 24px 50px -22px rgba(0,0,0,0.8),0 0 40px -12px rgba(47,211,240,0.35)}
-.cc-card::before{content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;background:linear-gradient(120deg,rgba(167,235,242,0.06),transparent 45%)}
-.cc-card.brief{left:70px;width:530px}
-.cc-card.progress{left:622px;width:348px}
-.cc-card-title{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px;position:relative}
-.cc-card-title .t{display:flex;align-items:center;gap:12px;font-size:20px;font-weight:600;letter-spacing:-0.01em;color:#fff}
-.cc-card-title .t svg{width:22px;height:22px;color:#66E3F4;filter:drop-shadow(0 0 6px rgba(102,227,244,0.6))}
-.cc-badge{font-family:var(--font-body);font-size:12px;letter-spacing:0.08em;text-transform:uppercase;padding:7px 13px;border-radius:100px;font-weight:600;
-  background:rgba(62,220,180,0.10);color:#5EE8C8;border:1px solid rgba(62,220,180,0.42);box-shadow:0 0 14px -4px rgba(62,220,180,0.5)}
-.cc-badge.muted{background:rgba(255,255,255,0.06);color:#fff;border-color:rgba(255,255,255,0.14);box-shadow:none;font-weight:600}
-.cc-item{display:flex;align-items:center;gap:14px;height:49px;padding:0 4px 0 2px;border-bottom:1px solid rgba(167,235,242,0.08);position:relative}
-.cc-item:last-child{border-bottom:none}
-.cc-item.done{opacity:0.4}
-.cc-item.done .cc-item-title{text-decoration:line-through}
-.cc-check{width:22px;height:22px;flex-shrink:0;border-radius:5px;border:1.6px solid rgba(190,230,240,0.55);display:flex;align-items:center;justify-content:center;
-  cursor:pointer;color:transparent;transition:all var(--t-fast) var(--ease-spring);background:rgba(255,255,255,0.02)}
-.cc-check.checked,.cc-check:active{background:rgba(62,220,180,0.18);border-color:#5EE8C8;color:#5EE8C8;box-shadow:0 0 12px -2px rgba(62,220,180,0.6)}
-.cc-check.static{cursor:default;opacity:0.55}
-.cc-check-slot{width:22px;height:22px;flex-shrink:0}
-.cc-check svg{width:13px;height:13px}
-.cc-item-main{flex:1;min-width:0}
-.cc-item-title{font-size:17px;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:-0.005em}
-.cc-item-reason{display:none}
-.cc-due{font-family:var(--font-body);font-size:15px;letter-spacing:0.04em;text-transform:uppercase;color:#fff;flex-shrink:0;font-variant-numeric:tabular-nums;font-weight:500}
-.cc-due.overdue{color:#FF6B6B}
-.cc-due.today{color:#66E3F4}
-.cc-due.alert{color:var(--warn)}
-.cc-cat{width:3px;height:3px;border-radius:50%;flex-shrink:0;background:rgba(167,235,242,0.45);margin:0 2px}
-.cc-cat.exam{background:var(--purple)}.cc-cat.syllabus{background:var(--warn)}.cc-cat.non_negotiable{background:var(--success)}.cc-cat.alert,.cc-cat.target{background:var(--danger)}
-.cc-more{display:none}
-.cc-nn{cursor:pointer}
-.cc-nn .cc-nn-count{color:#66E3F4}
-.cc-nn-list{display:none;position:absolute;left:0;right:0;top:100%;z-index:5;padding:8px 10px 10px;border-radius:0 0 14px 14px;background:rgba(10,16,22,0.97);border:1px solid rgba(110,220,236,0.3);border-top:none}
-.cc-nn-list.open{display:block}
-.cc-nn-row{display:flex;align-items:center;gap:12px;padding:8px 4px;font-size:15px;color:var(--text);cursor:pointer;border-radius:8px}
-.cc-nn-row.done{opacity:0.5}.cc-nn-row.done span{text-decoration:line-through}
-.cc-prog{margin:0 0 14px}
-.cc-prog-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px}
-.cc-prog-head .l{font-size:16px;color:#fff}
-.cc-prog-head .v{font-family:var(--font-body);font-size:16px;color:#fff;font-variant-numeric:tabular-nums;font-weight:500}
-.cc-bar{height:7px;border-radius:100px;background:rgba(167,235,242,0.12);overflow:hidden;width:246px}
-.cc-fill{height:100%;border-radius:100px;transition:width 700ms var(--ease-out);box-shadow:0 0 10px -2px currentColor}
-.cc-fill.academics{background:linear-gradient(90deg,#1AC9B0,#3EDCB4 60%,#A7EBF2);color:#3EDCB4}
-.cc-fill.business{background:linear-gradient(90deg,#1A8FBF,#35B8E6);color:#35B8E6}
-.cc-fill.targets{background:linear-gradient(90deg,#6D4CFF,#A78BFA);color:#A78BFA}
-.cc-fill.habits{background:linear-gradient(90deg,#1A8FBF,#7BD3E0);color:#7BD3E0}
-/* tiles: six in a row at the mock's geometry */
-.cc-tiles{position:absolute;z-index:2;left:70px;top:672px;width:1460px;display:grid;grid-template-columns:repeat(6,1fr);gap:24px}
-.cc-tile{display:flex;flex-direction:column;gap:6px;height:135px;padding:22px 24px 0;border-radius:16px;cursor:pointer;text-align:left;position:relative;overflow:hidden;box-sizing:border-box;
-  background:linear-gradient(160deg,rgba(18,28,36,0.85),rgba(9,14,20,0.9));border:1px solid rgba(110,220,236,0.38);color:#fff;font-family:inherit;
-  box-shadow:0 0 30px -14px rgba(47,211,240,0.5),inset 0 1px 0 rgba(255,255,255,0.06);transition:transform var(--t-base) var(--ease-out),border-color var(--t-base)}
-.cc-tile svg{width:26px;height:26px;color:#66E3F4;filter:drop-shadow(0 0 8px rgba(102,227,244,0.7));margin-bottom:6px}
-.cc-tile .tt{font-size:18px;font-weight:600;letter-spacing:-0.01em;color:#fff}
-.cc-tile .ts{font-size:12px;color:rgba(234,238,242,0.78)}
-.cc-tile.academics{border-color:rgba(167,139,250,0.5);background:linear-gradient(160deg,rgba(167,139,250,0.16),rgba(9,14,20,0.9) 60%);box-shadow:0 0 30px -12px rgba(167,139,250,0.6)}
-.cc-tile.academics svg{color:#B59CFF;filter:drop-shadow(0 0 8px rgba(167,139,250,0.7))}
-.cc-tile.soon{cursor:default;opacity:0.55;filter:saturate(0.6)}
-.cc-tile.soon .soon-tag{position:absolute;top:12px;right:12px;font-size:10px;letter-spacing:0.14em;text-transform:uppercase;color:rgba(234,238,242,0.7);border:1px solid rgba(255,255,255,0.16);border-radius:100px;padding:3px 8px}
-.cc-tile.c-business{border-color:rgba(62,220,180,0.4)}.cc-tile.c-business svg{color:#5EE8C8}
-.cc-tile.c-projects{border-color:rgba(62,220,180,0.4)}.cc-tile.c-projects svg{color:#3EDCB4}
-.cc-tile.c-content{border-color:rgba(167,139,250,0.4)}.cc-tile.c-content svg{color:#B59CFF}
-.cc-tile.c-applications{border-color:rgba(110,220,236,0.4)}.cc-tile.c-applications svg{color:#66E3F4}
-.cc-tile.c-agents{border-color:rgba(167,139,250,0.4)}.cc-tile.c-agents svg{color:#C8B6FF}
-@media(hover:hover) and (pointer:fine){.cc-tile:not(.soon):hover{transform:translateY(-2px);border-color:var(--glow)}}
-.cc-empty{font-size:14px;color:var(--muted);padding:14px 4px}
-.cc-skel{height:48px;border-radius:12px;margin:8px 0}
-.cc-summary{display:none}
-/* ── The orb: image from the mock + CSS overlays for state ── */
-.orb-stage{position:absolute;z-index:2;left:950px;top:103px;width:430px;height:367px;perspective:none}
-.orb-img{position:absolute;inset:0;width:430px;height:367px;pointer-events:none;user-select:none;transition:filter var(--t-slow),transform var(--t-slow);animation:orbBreathe 5s var(--ease-in-out) infinite;transform-origin:50% 40%}
-.orb-eyes{position:absolute;left:150px;top:135px;width:126px;height:10px;display:flex;justify-content:space-between;pointer-events:none}
-.orb-eye{width:43px;height:9px;border-radius:5px;background:rgba(230,251,255,0);box-shadow:none;transition:background var(--t-base),box-shadow var(--t-base);transform-origin:center}
-.orb-ring,.orb-floor{display:none}
-.orb-bubble{position:absolute;left:335px;top:19px;width:245px;height:68px;box-sizing:border-box;padding:0 22px;display:flex;align-items:center;border-radius:22px;border-bottom-left-radius:8px;font-size:17px;color:#fff;
-  background:linear-gradient(160deg,rgba(14,32,42,0.9),rgba(8,20,30,0.92));border:1.5px solid rgba(102,227,244,0.55);box-shadow:0 0 30px -8px rgba(47,211,240,0.55),inset 0 1px 0 rgba(255,255,255,0.06);
-  backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;z-index:3;transition:opacity var(--t-slow)}
-.orb-bubble.quiet{opacity:1}
-.orb-wave{position:absolute;left:357px;top:127px;display:flex;align-items:center;gap:4px;height:35px;z-index:3}
-.orb-wave span{width:4px;height:8px;border-radius:2px;background:#8FEBFA;box-shadow:0 0 8px rgba(102,227,244,0.8);transition:height var(--t-base)}
-.orb-wave span:nth-child(1){height:10px}.orb-wave span:nth-child(2){height:18px}.orb-wave span:nth-child(3){height:30px}.orb-wave span:nth-child(4){height:14px}.orb-wave span:nth-child(5){height:24px}.orb-wave span:nth-child(6){height:10px}.orb-wave span:nth-child(7){height:16px}
-.orb-state{display:none}
-@keyframes orbBreathe{0%,100%{transform:translateY(0) scale(1)}50%{transform:translateY(-6px) scale(1.012)}}
-.orb-stage[data-state="listening"] .orb-img{filter:drop-shadow(0 0 28px rgba(62,220,180,0.55)) saturate(1.15)}
-.orb-stage[data-state="listening"] .orb-eye{background:rgba(201,255,241,0.9);box-shadow:0 0 14px #3EDCB4,0 0 30px rgba(62,220,180,0.8)}
-.orb-stage[data-state="listening"] .orb-wave span{animation:waveListen 1.1s var(--ease-in-out) infinite}
-.orb-stage[data-state="thinking"] .orb-img{animation:orbThink 1.6s var(--ease-in-out) infinite;filter:drop-shadow(0 0 24px rgba(47,211,240,0.5))}
-.orb-stage[data-state="thinking"] .orb-eye{background:rgba(230,251,255,0.95);box-shadow:0 0 14px #7FEBFF;animation:eyeScan 1.2s var(--ease-in-out) infinite;width:30px}
-.orb-stage[data-state="speaking"] .orb-img{filter:drop-shadow(0 0 34px rgba(47,211,240,0.7)) saturate(1.2);transform:scale(1.03)}
-.orb-stage[data-state="speaking"] .orb-eye{background:rgba(230,251,255,0.95);box-shadow:0 0 14px #7FEBFF;animation:eyeTalk 0.5s var(--ease-in-out) infinite}
-.orb-stage[data-state="speaking"] .orb-wave span{animation:waveTalk 0.55s var(--ease-in-out) infinite}
-.orb-stage[data-state="acting"] .orb-eye{background:#FFE9A8;box-shadow:0 0 14px #F5C842,0 0 30px rgba(245,200,66,0.8);animation:eyeScan 0.8s var(--ease-in-out) infinite}
-.orb-wave span:nth-child(odd){animation-delay:0.12s}.orb-wave span:nth-child(3n){animation-delay:0.24s}
-@keyframes waveTalk{0%,100%{transform:scaleY(0.4)}50%{transform:scaleY(1.3)}}
-@keyframes waveListen{0%,100%{transform:scaleY(0.6)}50%{transform:scaleY(1)}}
-@keyframes eyeScan{0%,100%{transform:translateX(-6px)}50%{transform:translateX(6px)}}
-@keyframes eyeTalk{0%,100%{transform:scaleY(1)}50%{transform:scaleY(0.55)}}
-@keyframes orbThink{0%,100%{transform:translateY(0) scale(1)}50%{transform:translateY(-4px) scale(1.02)}}
-/* the dock when docked into the home canvas: the mock's centred pill at y 590–690 */
-.cc-canvas #cmd-dock{position:absolute;left:340px;top:auto;bottom:251px;right:auto;width:815px;padding:0;z-index:4}
-.cc-canvas #cmd-dock .cmd-dock-bar{width:815px;max-width:none}
-/* ── small screens: stacked flow ── */
-@media(max-width:1023px){
-  #p-home.cc-desktop{padding:24px 16px 150px;overflow:auto}
-  .cc-canvas{width:auto;height:auto;transform:none!important}
-  .cc-canvas-wrap{height:auto!important}
-  .cc-scene{display:none}
-  .cc-canvas{display:flex;flex-direction:column}
-  .cc-abs,.cc-card,.cc-tiles{position:static}
-  .cc-card.brief,.cc-card.progress{width:auto;left:auto}
-  .cc-eyebrow{order:-5}.cc-greeting{order:-4}.cc-line{order:-3}
-  .orb-stage{position:relative;left:auto;top:auto;order:-2}
-  .cc-greeting{font-size:34px;white-space:normal;margin:8px 0}
-  .cc-line{white-space:normal;width:auto}
-  .cc-card{height:auto;width:auto;margin-top:18px;padding-bottom:12px}
-  .orb-stage{display:block;width:230px;height:196px;margin:12px auto 0;transform:none}
-  .orb-img{width:230px;height:196px}
-  .orb-eyes{left:80px;top:72px;width:68px;height:6px}.orb-eye{width:23px;height:5px}
-  .orb-bubble{left:auto;right:-10px;top:-6px;width:auto;max-width:200px;height:auto;padding:8px 12px;font-size:13px}
-  .orb-wave{display:none}
-  .cc-tiles{width:auto;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;margin-top:20px}
-  .cc-tile{height:110px;padding:14px 14px 0}.cc-tile .tt{font-size:15px}.cc-tile .ts{font-size:11px}
-  .cc-bar{width:100%}
-  .cc-canvas #cmd-dock{position:fixed;left:0;right:0;bottom:10px;width:auto;padding:0 10px}
-  .cc-canvas #cmd-dock .cmd-dock-bar{width:100%}
-}
-/* (legacy block below kept for the stage and other pages) */
-.cc-hero-legacy{display:none}
 /* ═══════════════════════════════════════════════════
    AGENTS — registry + detail
 ═══════════════════════════════════════════════════ */
@@ -1719,11 +1690,6 @@ tr:hover .td-del{opacity:1}
   border:1px solid rgba(167,235,242,0.07);border-radius:var(--radius-md);
   background:rgba(255,255,255,0.015);
 }
-.orb-bubble::after{content:"";position:absolute;left:8px;bottom:-8px;width:14px;height:14px;background:rgba(18,44,56,0.96);border-left:1.5px solid rgba(140,235,245,0.7);border-bottom:1.5px solid rgba(140,235,245,0.7);transform:skewX(-30deg) rotate(-45deg);border-bottom-left-radius:3px}
-.orb-bubble{background:linear-gradient(160deg,rgba(26,56,70,0.82),rgba(14,36,48,0.9));border:1.5px solid rgba(140,235,245,0.7);font-size:18px;box-shadow:0 0 30px -6px rgba(47,211,240,0.6),inset 0 1px 0 rgba(255,255,255,0.1)}
-.cc-tile{padding:22px 24px 0}
-.cc-tile .tt{font-size:19px;margin-top:4px}
-.cc-tile .ts{font-size:12.5px}
 </style>
 </head>
 <body>
@@ -1822,80 +1788,83 @@ tr:hover .td-del{opacity:1}
 
   <!-- ═══ CONTENT — the one scroll container ═══ -->
   <main id="content">
-    <!-- ── COMMAND CENTRE (home) ── -->
-    <div class="page active fade-up cc-desktop" id="p-home">
-      <div class="cc-canvas-wrap" id="cc-canvas-wrap"><div class="cc-canvas" id="cc-canvas">
-        <img class="cc-scene" src="assets/scene.png" alt="" aria-hidden="true">
-        <div class="cc-scene-dim" aria-hidden="true"></div>
+    <!-- ── COMMAND CENTRE (home) — a CSS grid laid out after docs/design/command-centre.png:
+         greeting and cards on the left, the orb on the right over the scene, the talk bar
+         centred, the tiles in a row. The scene is a full-bleed background. ── -->
+    <section class="page page--home active" id="p-home">
+      <div class="home-scene" aria-hidden="true">
+        <div class="home-bleed"></div>
+        <img class="home-scene-img" src="assets/scene.png" alt="">
+      </div>
+      <div class="home">
+        <div class="home-intro">
+          <div class="page-eyebrow">Command Centre</div>
+          <h1 class="home-greeting" id="cc-greeting">Good day, <span class="cc-name">Bandile</span>.</h1>
+          <p class="home-line" id="cc-line"><span class="skel skel-line"></span></p>
+        </div>
 
-        <div class="cc-abs cc-eyebrow">Command Centre</div>
-        <h1 class="cc-abs cc-greeting" id="cc-greeting">Good day, <span class="cc-name">Bandile</span>.</h1>
-        <div class="cc-abs cc-line" id="cc-line"><div class="skel" style="height:18px;max-width:520px"></div></div>
+        <div class="home-cards">
+          <section class="card home-brief">
+            <div class="card-head">
+              <div class="card-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 14v-4M9 18V6M13 16V8M17 14v-4M21 13v-2"/></svg><span>Today's Brief</span></div>
+              <span class="badge badge--success" id="cc-badge">—</span>
+            </div>
+            <div class="list" id="cc-items"><div class="skel skel-row"></div><div class="skel skel-row"></div><div class="skel skel-row"></div></div>
+          </section>
+          <section class="card home-progress">
+            <div class="card-head">
+              <div class="card-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none"/></svg><span>Progress</span></div>
+              <span class="badge" id="cc-month">—</span>
+            </div>
+            <div id="cc-progress"><div class="skel skel-row"></div><div class="skel skel-row"></div></div>
+          </section>
+        </div>
 
-        <div class="cc-card brief">
-          <div class="cc-card-title">
-            <div class="t"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 14v-4M9 18V6M13 16V8M17 14v-4M21 13v-2"/></svg>Today's Brief</div>
-            <span class="cc-badge" id="cc-badge">—</span>
+        <div class="home-orb" id="home-orb">
+          <div class="orb-stage" id="orb-stage" data-state="idle" aria-live="polite">
+            <img class="orb-img" id="orb" src="assets/orb.png" alt="Founder OS assistant">
+            <div class="orb-eyes" aria-hidden="true"><span class="orb-eye"></span><span class="orb-eye"></span></div>
+            <div class="orb-bubble" id="orb-bubble">Ready when you are.</div>
+            <div class="orb-wave" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+            <div class="orb-state" id="orb-state-label">idle</div>
           </div>
-          <div id="cc-items"><div class="skel cc-skel"></div><div class="skel cc-skel" style="opacity:0.6"></div><div class="skel cc-skel" style="opacity:0.35"></div></div>
-          <div id="cc-summary" class="cc-summary" style="display:none"></div>
         </div>
-        <div class="cc-card progress">
-          <div class="cc-card-title">
-            <div class="t"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none"/></svg>Progress</div>
-            <span class="cc-badge muted" id="cc-month">—</span>
+
+        <div class="home-dock" id="home-dock"></div>
+
+        <div class="home-tiles">
+          <div class="home-tile c-business soon" aria-disabled="true">
+            <span class="soon-tag">Soon</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="18" height="13" rx="2.5"/><path d="M8 7V5.5A1.5 1.5 0 0 1 9.5 4h5A1.5 1.5 0 0 1 16 5.5V7M3 12h18"/></svg>
+            <div class="tt">Business</div><div class="ts">Pipeline · Outreach · Revenue</div>
           </div>
-          <div id="cc-progress"><div class="skel cc-skel"></div><div class="skel cc-skel" style="opacity:0.6"></div></div>
+          <button class="home-tile c-academics" onclick="openAcademicsTile()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4 22 9l-10 5L2 9l10-5Z"/><path d="M6 11.5V16c0 1.7 2.7 3 6 3s6-1.3 6-3v-4.5"/><path d="M22 9v5"/></svg>
+            <div class="tt">Academics</div><div class="ts">Syllabus · Exams · Study</div>
+          </button>
+          <div class="home-tile c-projects soon" aria-disabled="true">
+            <span class="soon-tag">Soon</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 9 4.5-9 4.5-9-4.5L12 3Z"/><path d="m3 12 9 4.5 9-4.5"/><path d="m3 16.5 9 4.5 9-4.5"/></svg>
+            <div class="tt">Projects</div><div class="ts">Builds · Delivery · Roadmap</div>
+          </div>
+          <div class="home-tile c-content soon" aria-disabled="true">
+            <span class="soon-tag">Soon</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="m10 9 5 3-5 3V9Z" fill="currentColor" stroke="none"/></svg>
+            <div class="tt">Content</div><div class="ts">Ideas · Performance · Plan</div>
+          </div>
+          <div class="home-tile c-applications soon" aria-disabled="true">
+            <span class="soon-tag">Soon</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18M5 21V10M19 21V10M9 21v-7h6v7M2 10 12 4l10 6"/></svg>
+            <div class="tt">Applications</div><div class="ts">Wharton · Deadlines · Gaps</div>
+          </div>
+          <div class="home-tile c-agents soon" aria-disabled="true">
+            <span class="soon-tag">Soon</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3Z"/><path d="M19 17l.8 2.2L22 20l-2.2.8L19 23l-.8-2.2L16 20l2.2-.8L19 17Z"/></svg>
+            <div class="tt">Agents</div><div class="ts">Research · Outreach · Execution</div>
+          </div>
         </div>
-
-        <div class="orb-stage" id="orb-stage" data-state="idle" aria-live="polite">
-          <img class="orb-img" id="orb" src="assets/orb.png" alt="Founder OS assistant">
-          <div class="orb-eyes" aria-hidden="true"><span class="orb-eye"></span><span class="orb-eye"></span></div>
-          <div class="orb-bubble" id="orb-bubble">Ready when you are.</div>
-          <div class="orb-wave" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
-          <div class="orb-state" id="orb-state-label">idle</div>
-        </div>
-
-        <div class="cc-tiles">
-        <div class="cc-tile c-business soon" >
-          <span class="soon-tag">Coming soon</span>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="18" height="13" rx="2.5"/><path d="M8 7V5.5A1.5 1.5 0 0 1 9.5 4h5A1.5 1.5 0 0 1 16 5.5V7M3 12h18"/></svg>
-          <div class="tt">Business</div>
-          <div class="ts">Pipeline · Outreach · Revenue</div>
-        </div>
-        <div class="cc-tile academics" role="button" tabindex="0" onclick="openAcademicsTile()">
-          
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4 22 9l-10 5L2 9l10-5Z"/><path d="M6 11.5V16c0 1.7 2.7 3 6 3s6-1.3 6-3v-4.5"/><path d="M22 9v5"/></svg>
-          <div class="tt">Academics</div>
-          <div class="ts">Syllabus · Exams · Study</div>
-        </div>
-        <div class="cc-tile c-projects soon" >
-          <span class="soon-tag">Coming soon</span>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 9 4.5-9 4.5-9-4.5L12 3Z"/><path d="m3 12 9 4.5 9-4.5"/><path d="m3 16.5 9 4.5 9-4.5"/></svg>
-          <div class="tt">Projects</div>
-          <div class="ts">Builds · Delivery · Roadmap</div>
-        </div>
-        <div class="cc-tile c-content soon" >
-          <span class="soon-tag">Coming soon</span>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="m10 9 5 3-5 3V9Z" fill="currentColor" stroke="none"/></svg>
-          <div class="tt">Content</div>
-          <div class="ts">Ideas · Performance · Plan</div>
-        </div>
-        <div class="cc-tile c-applications soon" >
-          <span class="soon-tag">Coming soon</span>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18M5 21V10M19 21V10M9 21v-7h6v7M2 10 12 4l10 6"/></svg>
-          <div class="tt">Applications</div>
-          <div class="ts">Wharton · Deadlines · Gaps</div>
-        </div>
-        <div class="cc-tile c-agents soon" >
-          <span class="soon-tag">Coming soon</span>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3Z"/><path d="M19 17l.8 2.2L22 20l-2.2.8L19 23l-.8-2.2L16 20l2.2-.8L19 17Z"/></svg>
-          <div class="tt">Agents</div>
-          <div class="ts">Research · Outreach · Execution</div>
-        </div>
-        </div>
-      </div></div>
-    </div>
+      </div>
+    </section>
 
     <!-- ── DASHBOARD ── -->
     <div class="page fade-up" id="p-dashboard">
@@ -2934,8 +2903,12 @@ async function submitSyllabusImport(){
 let _briefing=null,_ccShowAll=false,_ccLoading=false,_ccNnOpen=false;
 const CC_ICON_CHECK='<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5l3.2 3L13 4.5"/></svg>';
 // Alerts are not tasks: no checkbox, just an empty slot so titles stay aligned.
-const CC_NO_CHECK='<span class="cc-check-slot" aria-hidden="true"></span>';
+const CC_NO_CHECK='<span class="check-slot" aria-hidden="true"></span>';
 
+// A labelled progress bar — the shared meter component.
+function _meter(label,key,val){
+  return `<div class="meter"><div class="meter-head"><span>${escHtml(label)}</span><span class="v">${val==null?"—":val+"%"}</span></div><div class="bar"><div class="bar-fill ${key}" style="width:${Math.max(0,Math.min(100,val||0))}%"></div></div></div>`;
+}
 function _ccDueClass(it){
   const l=(it.due_label||"").toLowerCase();
   if(l.includes("overdue")||l==="yesterday")return "overdue";
@@ -2983,45 +2956,39 @@ function renderHome(){
   const box=document.getElementById("cc-items");
   if(box){
     const nnDone=nnRows.filter(r=>r.done).length;
-    const renderNn=()=>`<div class="cc-item cc-nn" role="button" tabindex="0" aria-expanded="${_ccNnOpen}" onclick="toggleNnList()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleNnList();}">
-        <div class="cc-check static ${nnDone===nnRows.length&&nnRows.length?"checked":""}" aria-hidden="true">${nnDone===nnRows.length&&nnRows.length?CC_ICON_CHECK:""}</div>
-        <span class="cc-cat non_negotiable"></span>
-        <div class="cc-item-main"><div class="cc-item-title">Non-negotiables</div></div>
-        <span class="cc-due today cc-nn-count">${nnDone}/${nnRows.length}</span>
+    const renderNn=()=>`<div class="row cc-item cc-nn" role="button" tabindex="0" aria-expanded="${_ccNnOpen}" onclick="toggleNnList()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleNnList();}">
+        <div class="check static ${nnDone===nnRows.length&&nnRows.length?"checked":""}" aria-hidden="true">${nnDone===nnRows.length&&nnRows.length?CC_ICON_CHECK:""}</div>
+        <span class="dot dot--sm cat-non_negotiable"></span>
+        <div class="row-main"><div class="row-title">Non-negotiables</div></div>
+        <span class="row-meta today cc-nn-count">${nnDone}/${nnRows.length}</span>
       </div>
-      <div class="cc-nn-list ${_ccNnOpen?"open":""}" id="cc-nn-list">${nnRows.map(r=>`
-        <div class="cc-nn-row ${r.done?"done":""}" role="checkbox" aria-checked="${r.done}" tabindex="0" onclick="ccToggleHabit('${escHtml(r.key)}',this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}">
-          <div class="cc-check ${r.done?"checked":""}">${CC_ICON_CHECK}</div><span>${escHtml(r.label)}</span>
+      <div class="nn-pop ${_ccNnOpen?"open":""}" id="cc-nn-list">${nnRows.map(r=>`
+        <div class="row ${r.done?"is-done":""}" role="checkbox" aria-checked="${r.done}" tabindex="0" onclick="ccToggleHabit('${escHtml(r.key)}',this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}">
+          <div class="check ${r.done?"checked":""}">${CC_ICON_CHECK}</div><div class="row-main"><div class="row-title">${escHtml(r.label)}</div></div>
         </div>`).join("")}</div>`;
     box.innerHTML=shown.length?shown.map(it=>{
       if(it._nn)return renderNn();
       const completable=it.completable&&it.target_type==="todo";
       const cb=completable
-        ?`<div class="cc-check" role="checkbox" aria-checked="false" tabindex="0" title="Complete this task" onclick="ccComplete(${Number(it.target_id)},this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}">${CC_ICON_CHECK}</div>`
+        ?`<div class="check" role="checkbox" aria-checked="false" aria-label="Complete: ${escHtml(it.title)}" tabindex="0" onclick="ccComplete(${Number(it.target_id)},this)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}">${CC_ICON_CHECK}</div>`
         :it.category==="alert"?CC_NO_CHECK
-        :`<div class="cc-check static" aria-hidden="true"></div>`;
-      return `<div class="cc-item" data-id="${escHtml(it.id)}">
+        :`<div class="check static" aria-hidden="true"></div>`;
+      return `<div class="row cc-item" data-id="${escHtml(it.id)}">
         ${cb}
-        <span class="cc-cat ${escHtml(it.category)}"></span>
-        <div class="cc-item-main" title="${escHtml(it.reason||"")}${it.suggested_action?` — ${escHtml(it.suggested_action)}`:""}">
-          <div class="cc-item-title">${escHtml(it.title)}</div>
+        <span class="dot dot--sm cat-${escHtml(it.category)}"></span>
+        <div class="row-main" title="${escHtml(it.reason||"")}${it.suggested_action?` — ${escHtml(it.suggested_action)}`:""}">
+          <div class="row-title">${escHtml(it.title)}</div>
         </div>
-        <span class="cc-due ${_ccDueClass(it)}">${escHtml(it.due_label||"")}</span>
+        <span class="row-meta ${_ccDueClass(it)}">${escHtml(it.due_label||"")}</span>
       </div>`;
-    }).join("")+(list.length>CC_MAX?`<div class="cc-more" onclick="_ccShowAll=!_ccShowAll;renderHome()">${_ccShowAll?"Show top 3":`Show all ${list.length}`}</div>`:"")
-    :`<div class="cc-empty">Nothing on the brief. Talk to Founder OS to add something.</div>`;
-  }
-
-  const sum=document.getElementById("cc-summary");
-  if(sum){
-    if(b.summary){sum.style.display="block";sum.innerHTML=`${escHtml(b.summary)}<button class="cc-refresh" onclick="loadBriefing(true)" title="Regenerate (one AI call)">Refresh</button>`;}
-    else{sum.style.display="none";sum.innerHTML="";}
+    }).join("")
+    :`<div class="empty">Nothing on the brief. Talk to Founder OS to add something.</div>`;
   }
 
   const pr=b.progress||{};
   const prog=document.getElementById("cc-progress");
   if(prog){
-    const row=(label,key,val)=>`<div class="cc-prog"><div class="cc-prog-head"><span class="l">${label}</span><span class="v">${val==null?"—":val+"%"}</span></div><div class="cc-bar"><div class="cc-fill ${key}" style="width:${Math.max(0,Math.min(100,val||0))}%"></div></div></div>`;
+    const row=_meter;
     prog.innerHTML=row("Academics","academics",pr.academics)+row("Business","business",pr.business)+row("Targets","targets",pr.targets);
   }
 
@@ -3067,7 +3034,7 @@ function renderAlertsBell(b){
   (b&&b.alerts||[]).forEach(a=>rows.push({sev:a.severity||"info",text:a.message}));
   (b&&b.items||[]).filter(i=>i.category==="task"&&(_ccDueClass(i)==="overdue")).forEach(i=>rows.push({sev:"warn",text:`Overdue: ${i.title} (${i.due_label})`}));
   list.innerHTML=rows.length?rows.map(r=>`<div class="ap-row ${escHtml(r.sev)}"><span class="sev">${escHtml(r.sev)}</span>${escHtml(r.text)}</div>`).join("")
-    :`<div class="cc-empty">Nothing needs your attention.</div>`;
+    :`<div class="empty">Nothing needs your attention.</div>`;
 }
 
 function toggleAlertsPanel(force){
@@ -3099,7 +3066,7 @@ async function loadBriefing(refresh=false){
 
 async function ccComplete(todoId,el){
   if(!todoId)return;
-  if(el){el.classList.add("checked");el.setAttribute("aria-checked","true");const row=el.closest(".cc-item");if(row)row.classList.add("done");}
+  if(el){el.classList.add("checked");el.setAttribute("aria-checked","true");const row=el.closest(".cc-item");if(row)row.classList.add("is-done");}
   try{
     const r=await fetch(`${API_BASE}/todos/${todoId}/complete`,{method:"POST"});
     if(!r.ok)throw new Error("HTTP "+r.status);
@@ -3110,7 +3077,7 @@ async function ccComplete(todoId,el){
     setTimeout(()=>loadBriefing(),400);
   }catch(e){
     showToast("Could not complete the task — backend unreachable","error");
-    if(el){el.classList.remove("checked");const row=el.closest(".cc-item");if(row)row.classList.remove("done");}
+    if(el){el.classList.remove("checked");const row=el.closest(".cc-item");if(row)row.classList.remove("is-done");}
   }
 }
 
@@ -3137,7 +3104,7 @@ async function ccToggleHabit(key,el){
   if(!nn)return;
   const done=!nn.done;
   nn.done=done;
-  if(el){el.classList.toggle("done",done);el.setAttribute("aria-checked",String(done));const c=el.querySelector(".cc-check");if(c)c.classList.toggle("checked",done);}
+  if(el){el.classList.toggle("is-done",done);el.setAttribute("aria-checked",String(done));const c=el.querySelector(".check");if(c)c.classList.toggle("checked",done);}
   const count=document.querySelector(".cc-nn-count");
   if(count){const rows=_briefing.non_negotiables;count.textContent=`${rows.filter(r=>r.done).length}/${rows.length}`;}
   if(S.habits[key]){S.habits[key].done=done;saveState();try{renderNonNeg();}catch(_){}}
@@ -3148,7 +3115,7 @@ async function ccToggleHabit(key,el){
     setTimeout(()=>loadBriefing(),400);
   }catch(e){
     nn.done=!done;
-    if(el){el.classList.toggle("done",!done);const c=el.querySelector(".cc-check");if(c)c.classList.toggle("checked",!done);}
+    if(el){el.classList.toggle("is-done",!done);const c=el.querySelector(".check");if(c)c.classList.toggle("checked",!done);}
     showToast("Could not update — backend unreachable","error");
   }
 }
@@ -5568,7 +5535,7 @@ const STAGE_VIEWS=new Set(Object.keys(STAGE_TITLES));
 function _moveOrb(toStage){
   const orb=document.getElementById("orb-stage");
   if(!orb)return;
-  const target=toStage?document.getElementById("stage-orb-slot"):(document.getElementById("cc-canvas")||document.querySelector(".orb-col"));
+  const target=document.getElementById(toStage?"stage-orb-slot":"home-orb");
   if(target&&orb.parentElement!==target)target.appendChild(orb);
 }
 

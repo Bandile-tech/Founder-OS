@@ -112,7 +112,7 @@ async function api(token, method, p, body, isForm) {
     check(true, "correct password hides the gate");
     await page.waitForFunction(() => document.querySelectorAll("#cc-items .cc-item").length > 0, null, { timeout: 20000 });
     check(new URL(page.url()).pathname === "/app/", "/ redirected to /app/");
-    const imgs = await page.evaluate(() => [...document.querySelectorAll("img.cc-scene, img#orb")]
+    const imgs = await page.evaluate(() => [...document.querySelectorAll("img.home-scene-img, img#orb")]
       .map((i) => i.complete && i.naturalWidth > 0));
     check(imgs.length === 2 && imgs.every(Boolean), "scene and orb images load");
 
@@ -120,7 +120,7 @@ async function api(token, method, p, body, isForm) {
     console.log("2. brief item complete + undo");
     const row = page.locator("#cc-items .cc-item", { hasText: "Finalise Bel Baby delivery" }).first();
     check((await row.count()) === 1, "seeded task appears in Today's Brief");
-    await row.locator(".cc-check").click();
+    await row.locator(".check").click();
     await page.waitForTimeout(1200);
     const after = await api(token, "GET", "/todos");
     const t = after.json.find((x) => x.id === todo.json.id);
@@ -170,7 +170,7 @@ async function api(token, method, p, body, isForm) {
     check(stage.orbInStage, "the orb moved into the stage");
     await page.keyboard.press("Escape");
     await page.waitForTimeout(300);
-    const closed = await page.evaluate(() => ({ shown: document.getElementById("stage").classList.contains("show"), orbHome: !!document.querySelector("#cc-canvas .orb-stage") }));
+    const closed = await page.evaluate(() => ({ shown: document.getElementById("stage").classList.contains("show"), orbHome: !!document.querySelector("#home-orb .orb-stage") }));
     check(!closed.shown && closed.orbHome, "Esc closed the stage and the orb returned home");
     await page.evaluate(() => { handleUiDirective({ view: "brief" }); handleUiDirective({ view: "close" }); });
     check(!(await page.evaluate(() => document.getElementById("stage").classList.contains("show"))), "close directive closes the stage");
