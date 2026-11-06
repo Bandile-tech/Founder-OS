@@ -15,7 +15,8 @@
  *     node tests/e2e/smoke.js
  * Needs: Python env with the backend requirements (PYTHON env var, default `python`),
  * the `playwright` npm package with Chromium installed (`npx playwright install chromium`).
- * Env: PORT (default 8765), HEADED=1 to watch, KEEP=1 to leave the server running.
+ * Env: PORT (default 8765), HEADED=1 to watch, KEEP=1 to leave the server running,
+ * PW_CHANNEL=msedge (or chrome) to use an installed browser instead of Playwright's Chromium.
  */
 const { spawn } = require("child_process");
 const fs = require("fs");
@@ -90,7 +91,7 @@ async function api(token, method, p, body, isForm) {
     const imp = await api(token, "POST", "/syllabus/import", fd, true);
     check(imp.status === 200 && imp.json.created === 10, `imported the syllabus fixture (${JSON.stringify(imp.json)})`);
 
-    browser = await chromium.launch({ headless: !process.env.HEADED });
+    browser = await chromium.launch({ headless: !process.env.HEADED, ...(process.env.PW_CHANNEL ? { channel: process.env.PW_CHANNEL } : {}) });
     const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
     const pageErrors = [];
     page.on("pageerror", (e) => pageErrors.push(e.message));
