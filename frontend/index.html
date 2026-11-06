@@ -3,11 +3,20 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>Founder OS — Command Centre</title>
+<title>Founder OS</title>
+<meta name="theme-color" content="#0A0B0D">
+<meta name="description" content="Founder OS command centre">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="icon" href="icons/favicon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="Founder OS">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..800&family=Geist:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="icon" href="data:,">
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <style>
 /* ═══════════════════════════════════════════════════════════
@@ -1402,8 +1411,9 @@ let S=loadState();
 /* ═══════════════════════════════════════════════════
    SURGICAL BRIDGE: API MAPPING
 ═══════════════════════════════════════════════════ */
-// Use the local backend when the app is served by it (uvicorn), else the deployed API.
-const API_BASE = (location.hostname==="127.0.0.1"||location.hostname==="localhost")
+// One host: the backend serves this page at /app/, so the API is on the same origin. Opened
+// as a local file (file://) the page falls back to the deployed backend.
+const API_BASE = location.protocol.startsWith("http")
   ? location.origin
   : "https://founder-os-backend-f6qn.onrender.com";
 

@@ -332,8 +332,8 @@ One commit per item (6.1 … 6.7), all on the same branch.
   changing the password invalidates every session.
 - Clients send `Authorization: Bearer <token>` (or `X-Founder-Token`). The frontend wraps
   `fetch` to add it and reopens the login gate on 401. Sign out lives in Settings.
-- CORS: `FOUNDER_OS_ORIGINS` (comma-separated), default local dev origins only. **Set the
-  Netlify origin** if the frontend is served from there.
+- CORS: `FOUNDER_OS_ORIGINS` (comma-separated), default local dev origins only. Production is
+  one host (Render serves the app at `/app/` and the API on the same origin), so it stays unset.
 
 ### 6.2 Home screen (Command Centre)
 Built on `GET /briefing/today` (shape in section 2). Checkboxes call the new
@@ -523,6 +523,7 @@ clears the view first, then ends the session; stopping the session closes the st
   (`.orb-eyes`, `.orb-wave`, `.orb-bubble`, drop-shadow filters), not separate images.
 
 ### 9A Home (`#p-home`)
+*Superseded by section 11: the scaled pixel canvas below was replaced by a responsive grid.*
 The home page is a 1582×866 pixel canvas (`.cc-canvas`) positioned at the mock-up's
 coordinates (content origin = 90 px rail, 75 px header) and scaled down by `layoutHome()`
 when the viewport is narrower; below 1024 px it becomes a normal stacked flow. Checked item by
@@ -562,3 +563,65 @@ at 1672×941, 1280×800 and 390×844 in headless Chromium.
 - The five "Coming soon" tiles are placeholders (phases 5–6).
 - The syllabus KPIs and insights are computed client-side from `GET /syllabus` and
   `GET /syllabus/weakest`; there is no dedicated endpoint.
+
+## 11. UI consistency pass (branch `ui-consistency`)
+
+One commit per part. The frontend now has one layout system instead of two: the home page is no
+longer a scaled 1672×941 frame, and every page shares the same shell and components.
+
+### Part 1 — design system and shell
+- Tokens in one `:root` block: fluid `clamp()` type scale `--fs-2xs` … `--fs-display` (body is
+  `--fs-base`, 14–17px), spacing `--sp-1` … `--sp-10`, radii `--r-sm` … `--r-pill`,
+  `--control-h`, `--row-h`, and the shell geometry `--header-h`, `--rail-w`, `--page-pad`,
+  `--content-max`, `--dock-h`, `--dock-clear`.
+- Components in the command centre's glass style: page head, card, list row, check, field,
+  input/select/textarea, button, toggle, segmented control, badge, bar/meter, KPI tile, chip,
+  table, modal, toast. The Design Guide page renders the live token values and every component.
+- `layoutHome()`, `#frame` and `#cc-bleed` are gone. `#content` is the only scroll container and
+  every page pads its bottom by `--dock-clear`.
+- The rail is collapsed by default; the menu button opens it over the content with a scrim and
+  it closes after navigating, on Esc or on a scrim tap.
+
+### Part 2 — home
+A CSS grid with the mock-up's composition. The scene is anchored top-right at the height under
+the header (`--scene-h`); the orb overlay is placed in % of that box at the scene's own
+coordinates, its bubble and wave sized in container units. Rows are spaced in the same unit, so
+1280×720 and 1920×1080 both read as the mock-up with no scrolling. A blurred cover copy of the
+scene fills the page; the mock card baked into the scene's left edge is masked out. Below 1024px
+or in portrait windows the home stacks and the talk bar returns to the viewport bottom.
+
+### Part 3 — every other page
+Timetable, Health, Syllabus, War Room, Annual Targets, Agents, Settings, the stage views, the
+login gate, alerts panel and import dialog use only the shared components. Every legacy style
+block is deleted; no inline styles remain except runtime values. The Dashboard and Academic
+Roadmap pages and their frontend code were deleted (with the hidden log page and the dead
+brain-dump/chat/radar code); their backend tables and endpoints are unchanged.
+
+### Part 4 — phone
+Below 768px the rail is a drawer behind the header hamburger, every page is one column, the talk
+bar spans the width, and inputs are 16px so iOS does not zoom.
+
+### Part 5 — app icon and one host
+`frontend/icons/` (triangle mark on the dark base: `icon.svg` source, 192/512 PNGs, a maskable
+512, `apple-touch-icon.png`, `favicon-32.png`) and `frontend/manifest.json` (`display:
+standalone`, start URL and scope `./` = `/app/`). The page's API base is now its own origin
+whenever it is served over http(s), so Render at `/app/` is the only host; `netlify.toml` is
+deleted and the docs describe one host.
+
+### Verification
+- `python -m pytest -q` → 447 passed (no OpenAI key).
+- `node tests/e2e/smoke.js` → all checks pass (selectors follow the renamed home elements:
+  `img.home-scene-img`, `.check`, `#home-orb .orb-stage`).
+- `node tests/e2e/screens.js` (new) → screenshots of every page plus a stage view and the open
+  menu at 1280×720, 1536×864, 1920×1080 and 390×844, combined into
+  `tests/e2e/out/contact-sheet.jpg`, and passes these checks: computed body font size, header
+  height and rail width identical on every page at each size (14.52px / 63.59px / 76.72px at
+  1280×720; 17px / 76.39px / 92.08px at 1920×1080; 14px / 56px / drawer at 390×844); no
+  horizontal overflow anywhere; every interactive control scrolled to the middle of the page
+  sits above the talk bar; the menu opens and closes after navigating; no page errors.
+- Both scripts accept `PW_CHANNEL=msedge` (or `chrome`) to run on an installed browser.
+
+### Known gaps
+- Likeness to the mock-up is judged by eye from the contact sheet, not by an image diff.
+- On very tall, narrow desktop windows (portrait) the home uses the stacked layout rather than
+  the mock-up's composition.
