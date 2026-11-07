@@ -23,16 +23,25 @@ Not a SaaS product. Not built for other users. No auth layer, no multi-tenancy �
 
 ## Tech stack
 
-- **Frontend:** HTML / CSS / vanilla JavaScript (single file, no build step) — Netlify
-- **Backend:** FastAPI — Render
+- **Frontend:** HTML / CSS / vanilla JavaScript (single file, no build step), served by the backend at `/app/`
+- **Backend:** FastAPI — Render (one host: the same service serves the app and the API)
 - **Persistence:** Supabase Postgres (RLS enforced across all tables), with localStorage as a frontend fallback
 - **AI:** OpenAI APIs (GPT-4o-mini for parsing, GPT-5.4 for orchestration), STT/TTS for voice
 
 ## Running the project
 
-**Option A — Frontend only:** open `frontend/index.html` in a browser. Execution data persists to localStorage.
+Run the backend and open the app it serves:
 
-**Option B — With backend:** run the FastAPI backend, then point the frontend at it (default `http://127.0.0.1:8000/chat`). Enables the AI orchestrator, voice, and Postgres-backed persistence.
+```
+cd backend
+pip install -r requirements.txt      # Python 3.12
+uvicorn main:app --reload
+```
+
+Then visit `http://127.0.0.1:8000/app/` (`/` redirects there). The page calls the API on its own
+origin. In production the same thing runs on Render: the app is at `https://<render-service>/app/`
+and installs to a phone's home screen as "Founder OS" (web app manifest, standalone display).
+Deployment steps: `docs/DEPLOY.md`.
 
 ## Docs
 

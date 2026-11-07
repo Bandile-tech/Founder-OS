@@ -25,8 +25,9 @@ uvicorn main:app --reload
 Visit `http://127.0.0.1:8000/app/` — the backend serves `frontend/` at `/app/` and the API on
 the same origin; `/` redirects (307) to `/app/`. The frontend must load from `/app/`: its
 relative `assets/…` URLs would otherwise hit `/assets/…`, which the auth middleware blocks.
-Frontend-only use (`open frontend/index.html`) still works for viewing local state but every
-feature that matters needs the backend.
+Production is the same single host: Render serves the app at `/app/` and the API beside it
+(there is no Netlify site). Frontend-only use (`open frontend/index.html`) still works for
+viewing local state but every feature that matters needs the backend.
 
 Environment (`backend/.env` locally, Render env vars in production):
 
@@ -34,7 +35,7 @@ Environment (`backend/.env` locally, Render env vars in production):
 |---|---|---|
 | `OPENAI_API_KEY` | unset | Without it everything non-AI works; AI endpoints return 503 |
 | `FOUNDER_OS_PASSWORD` | unset | **Set in production.** Gates every route except /health, /ping, /auth/* |
-| `FOUNDER_OS_ORIGINS` | local dev origins | Comma-separated CORS allow-list (the Netlify origin) |
+| `FOUNDER_OS_ORIGINS` | local dev origins | Comma-separated CORS allow-list. Not needed in production: app and API share one origin |
 | `ASSISTANT_MODEL` | `gpt-5.4-mini` | Assistant, parser, summaries, briefing |
 | `EMBEDDING_MODEL` | `text-embedding-3-small` | Vault / notes / memory retrieval |
 | `ZMW_PER_USD` | `27` | Kwacha → dollar for the revenue scoreboard |
@@ -53,26 +54,51 @@ migration change, also run `python -c "import asyncio, main; asyncio.run(main.st
 
 The same suite runs on Postgres with `TEST_DATABASE_URL=postgresql://…` (throwaway database;
 every test drops and recreates the schema). Browser smoke tests (login, brief item complete +
-undo, syllabus tap-to-advance): `node tests/e2e/smoke.js` from the repo root. Deployment steps
-and rollback: `docs/DEPLOY.md`.
+undo, syllabus tap-to-advance): `node tests/e2e/smoke.js` from the repo root. Layout checks
+and a contact sheet of every page at four sizes: `node tests/e2e/screens.js` (writes
+`tests/e2e/out/contact-sheet.jpg`; both accept `PW_CHANNEL=msedge` to use an installed
+browser). Deployment steps and rollback: `docs/DEPLOY.md`.
 
 ## Architecture
 
 ### Frontend
-One self-contained file, `frontend/index.html` (inline CSS and vanilla JS, no build step).
-Luna palette: near-black base, cyan `#A7EBF2` for signal only, Bricolage Grotesque for display
-numerals, Geist for body. Pages: Command Centre (home, built on `GET /briefing/today`),
-Dashboard, Timetable, Health, Syllabus, Academic Roadmap (legacy), Agents, War Room, Annual
-Targets, Design Guide, Settings. The home page is a 1582×866 pixel canvas laid out at the
-coordinates of `docs/design/command-centre.png`, using the cropped mock-up assets in
-`frontend/assets/` (`orb.png`, `scene.png`). On desktop (≥1024 px, stage closed) the whole mock
-frame — header, rail and canvas inside `#frame`, 1672×941 — is scaled as one unit by
-`layoutHome()`: min(viewport width / 1672, viewport height / 941), up or down, centred; leftover
-space shows the scene blurred at cover size (`#cc-bleed`). Below 1024 px the home page stacks.
-The global command dock is the talk bar (a glowing pill, docked into the home canvas): mic on
-the left starts live voice (WebRTC), typed input in the middle, send on the right, and a
-suggestions chip above it. Every backend call goes through a `fetch` wrapper that attaches
-the session token; a 401 opens the login gate.
+One self-contained file, `frontend/index.html` (inline CSS and vanilla JS, no build step), plus
+`frontend/assets/` (`orb.png`, `scene.png`), `frontend/icons/` (app icon, favicon,
+apple-touch-icon; `icon.svg` is the source) and `frontend/manifest.json` (standalone web app).
+Pages: Command Centre (home, built on `GET /briefing/today`), Timetable, Health, Syllabus,
+Agents, War Room, Annual Targets, Design Guide, Settings. (Dashboard and Academic Roadmap were
+removed from the frontend; their backend tables and endpoints remain.)
+
+**Design system.** All tokens live in one `:root` block: a fluid `clamp()` type scale
+(`--fs-2xs` … `--fs-display`; body is `--fs-base`), a 4px spacing scale (`--sp-1` … `--sp-10`),
+radii, control and row heights, and the shell geometry (`--header-h`, `--rail-w`,
+`--page-pad`, `--content-max`, `--dock-h`, `--dock-clear`). Pages are built only from the shared
+components in the command centre's glass style — `.page-head`, `.card`/`.card-head`, `.row`
+(list row), `.check`, `.field`, `.input`/`.select`/`.textarea`, `.btn`, `.toggle`, `.seg`,
+`.badge`, `.bar`/`.meter`, `.kpi`, `.chip`, `.table`, `.modal`, `.toast`. The Design Guide page
+renders the live tokens and every component; add a component there before using it on a page.
+No inline styles except values set at runtime (bar widths).
+
+**Shell.** The same header height, icon rail width, page padding and content max-width on every
+page; nothing is scaled with a transform. `#content` is the one scroll container. The rail is
+collapsed by default; the menu button (the hamburger on phones) opens it over the content with
+a scrim, and it closes after navigating, on Esc or on a scrim tap. Every page pads its bottom by
+`--dock-clear`, so nothing sits under the talk bar. Below 768px the rail is a drawer and every
+page is one column.
+
+**Home.** A CSS grid after `docs/design/command-centre.png`: greeting and the Brief/Progress
+cards on the left, the orb on the right, the talk bar centred, six tiles in a row. The scene is
+anchored top-right and sized to the height under the header (`--scene-h`); the orb overlay is
+placed at the scene's own coordinates, so it lands on the scene's orb at any size, and the rows
+are spaced in the same unit, which keeps the mock-up's proportions at 1280×720 and 1920×1080
+without scrolling. A blurred cover copy of the scene fills the page. Below 1024px (or in
+portrait windows) the home stacks.
+
+The global command dock is the talk bar (a glowing pill): mic on the left starts live voice
+(WebRTC), typed input in the middle, send on the right, and a suggestions chip above it.
+`placeDock()` puts it in the home grid (`#home-dock`) on the desktop home and fixes it to the
+bottom of the viewport everywhere else. Every backend call goes through a `fetch` wrapper that
+attaches the session token; a 401 opens the login gate. The API base is the page's own origin.
 The orb is the assistant's presence (states idle / listening / thinking / speaking / acting
 as CSS overlays on the orb image). `show_view` directives (`{"type":"ui"}` SSE events, or
 `ui_directive` from the voice tool bridge) open a full-screen stage with a whitelisted view

@@ -15,7 +15,8 @@
  *     node tests/e2e/smoke.js
  * Needs: Python env with the backend requirements (PYTHON env var, default `python`),
  * the `playwright` npm package with Chromium installed (`npx playwright install chromium`).
- * Env: PORT (default 8765), HEADED=1 to watch, KEEP=1 to leave the server running.
+ * Env: PORT (default 8765), HEADED=1 to watch, KEEP=1 to leave the server running,
+ * PW_CHANNEL=msedge (or chrome) to use an installed browser instead of Playwright's Chromium.
  */
 const { spawn } = require("child_process");
 const fs = require("fs");
@@ -90,7 +91,7 @@ async function api(token, method, p, body, isForm) {
     const imp = await api(token, "POST", "/syllabus/import", fd, true);
     check(imp.status === 200 && imp.json.created === 10, `imported the syllabus fixture (${JSON.stringify(imp.json)})`);
 
-    browser = await chromium.launch({ headless: !process.env.HEADED });
+    browser = await chromium.launch({ headless: !process.env.HEADED, ...(process.env.PW_CHANNEL ? { channel: process.env.PW_CHANNEL } : {}) });
     const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
     const pageErrors = [];
     page.on("pageerror", (e) => pageErrors.push(e.message));
@@ -112,7 +113,7 @@ async function api(token, method, p, body, isForm) {
     check(true, "correct password hides the gate");
     await page.waitForFunction(() => document.querySelectorAll("#cc-items .cc-item").length > 0, null, { timeout: 20000 });
     check(new URL(page.url()).pathname === "/app/", "/ redirected to /app/");
-    const imgs = await page.evaluate(() => [...document.querySelectorAll("img.cc-scene, img#orb")]
+    const imgs = await page.evaluate(() => [...document.querySelectorAll("img.home-scene-img, img#orb")]
       .map((i) => i.complete && i.naturalWidth > 0));
     check(imgs.length === 2 && imgs.every(Boolean), "scene and orb images load");
 
@@ -120,7 +121,7 @@ async function api(token, method, p, body, isForm) {
     console.log("2. brief item complete + undo");
     const row = page.locator("#cc-items .cc-item", { hasText: "Finalise Bel Baby delivery" }).first();
     check((await row.count()) === 1, "seeded task appears in Today's Brief");
-    await row.locator(".cc-check").click();
+    await row.locator(".check").click();
     await page.waitForTimeout(1200);
     const after = await api(token, "GET", "/todos");
     const t = after.json.find((x) => x.id === todo.json.id);
@@ -170,7 +171,7 @@ async function api(token, method, p, body, isForm) {
     check(stage.orbInStage, "the orb moved into the stage");
     await page.keyboard.press("Escape");
     await page.waitForTimeout(300);
-    const closed = await page.evaluate(() => ({ shown: document.getElementById("stage").classList.contains("show"), orbHome: !!document.querySelector("#cc-canvas .orb-stage") }));
+    const closed = await page.evaluate(() => ({ shown: document.getElementById("stage").classList.contains("show"), orbHome: !!document.querySelector("#home-orb .orb-stage") }));
     check(!closed.shown && closed.orbHome, "Esc closed the stage and the orb returned home");
     await page.evaluate(() => { handleUiDirective({ view: "brief" }); handleUiDirective({ view: "close" }); });
     check(!(await page.evaluate(() => document.getElementById("stage").classList.contains("show"))), "close directive closes the stage");

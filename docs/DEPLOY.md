@@ -1,8 +1,10 @@
-# Deploying the rebuild (Render + Supabase + Netlify)
+# Deploying Founder OS (Render + Supabase)
 
-The backend runs on Render (FastAPI, Python 3.12) against Supabase Postgres. The frontend is
-one file plus `frontend/assets/`; it can be served by the backend at `/app/` (same origin,
-simplest; `/` redirects there) or by Netlify.
+One host. Render runs the FastAPI backend (Python 3.12) against Supabase Postgres, and the same
+service serves the frontend at `/app/` (`/` redirects there). The frontend is `frontend/index.html`
+plus `frontend/assets/`, `frontend/icons/` and `frontend/manifest.json`; the page calls the API
+on its own origin, so there is no second host, no CORS set-up and nothing else to deploy.
+There is no Netlify site any more (`netlify.toml` was removed).
 
 ## 1. Before merging
 
@@ -24,7 +26,7 @@ configured.
 | 1 | `DATABASE_URL` | Supabase Postgres URL (already set) | migrations run at boot |
 | 2 | `FOUNDER_OS_PASSWORD` | a long passphrase | without it the API boots open |
 | 3 | `FOUNDER_OS_SECRET` | 32+ random chars (`openssl rand -hex 32`) | keeps sessions valid if the password changes |
-| 4 | `FOUNDER_OS_ORIGINS` | `https://<your-netlify-site>.netlify.app` (omit if the backend serves the frontend) | CORS |
+| 4 | `FOUNDER_OS_ORIGINS` | leave unset — the app and the API share one origin. Set it only if some other origin must call the API | CORS |
 | 5 | `OPENAI_API_KEY` | the key | assistant, parser, embeddings, voice |
 | 6 | `ASSISTANT_MODEL` | `gpt-5.4-mini` (default) | cost |
 | 7 | `ZMW_PER_USD` | current rate, e.g. `27` | revenue scoreboard |
@@ -43,8 +45,7 @@ Python version: 3.12 (`PYTHON_VERSION=3.12.x`); the pinned requirements do not b
    `[m013] …`, `[startup] Schema OK: all ORM columns present in live database.`
    The RLS lines (`RLS enabled: …`) should appear for the ten new tables.
 3. If the log shows `Schema drift detected`, the boot refused to serve: see Rollback.
-4. If the frontend is on Netlify, deploy `frontend/` — `index.html` and `assets/` (it points at
-   the Render URL unless served from localhost).
+4. Nothing else to deploy: the frontend ships with the backend and is live at `$API/app/`.
 
 ## 4. Checks after deploying
 
@@ -55,17 +56,22 @@ curl -s $API/health                     # {"ok":true,"ai_configured":true,...}
 curl -s -o /dev/null -w "%{http_code}\n" $API/todos          # 401 — the API is locked
 curl -s -o /dev/null -w "%{http_code} %{redirect_url}\n" $API/   # 307 …/app/
 curl -s -o /dev/null -w "%{http_code}\n" $API/app/assets/orb.png # 200 — no token needed
+curl -s $API/app/manifest.json | head -c 200                     # the web app manifest, no token
+curl -s -o /dev/null -w "%{http_code}\n" $API/app/icons/apple-touch-icon.png  # 200
 curl -s -X POST $API/auth/login -H 'Content-Type: application/json' -d '{"password":"…"}'
 curl -s -H "Authorization: Bearer $TOKEN" $API/briefing/today | head -c 400
 curl -s -H "Authorization: Bearer $TOKEN" $API/syllabus | head -c 200
 curl -s -H "Authorization: Bearer $TOKEN" $API/usage/summary
 ```
 
-Then in the browser, at `$API/app/` (or the Netlify URL): log in, confirm the Command Centre
+Then in the browser, at `$API/app/`: log in, confirm the Command Centre
 renders the brief with its scene and orb images, send one typed
 message to the assistant ("what's due today?"), tick a brief item and press Undo, open the
 Syllabus page and import the tracker CSV, and start a Live session and say one sentence.
 Check `GET /usage/summary` afterwards: every call should be logged.
+
+On a phone, open `$API/app/` and use **Add to Home Screen** (Safari) or **Install app** (Chrome):
+it installs as "Founder OS" with the triangle icon and opens standalone, without browser chrome.
 
 Also confirm in Supabase (Table editor → any new table → RLS) that row-level security shows as
 enabled on `change_log`, `notes`, `syllabus_points`, `embeddings`, `llm_usage` and the rest.
@@ -94,8 +100,14 @@ cd backend && python -c "import asyncio, main; asyncio.run(main.startup())"
 TEST_DATABASE_URL=postgresql://user:pass@127.0.0.1:5432/founder_tests python -m pytest -q
 ```
 
-Browser smoke tests (login, brief item complete + undo, syllabus advance):
+Browser smoke tests (login, brief item complete + undo, syllabus advance) and the layout
+checks with a contact sheet of every page at 1280×720, 1536×864, 1920×1080 and 390×844
+(`tests/e2e/out/contact-sheet.jpg`):
 
 ```bash
 node tests/e2e/smoke.js
+node tests/e2e/screens.js
 ```
+
+Both need the `playwright` npm package; set `PW_CHANNEL=msedge` (or `chrome`) to use an
+installed browser instead of Playwright's Chromium.
