@@ -118,3 +118,46 @@ class TestCompleteTodo:
         assert db.query(models.Todo).filter(models.Todo.id == tid).first().done is False
         db.close()
         assert client.post("/todos/99999/complete").status_code == 404
+
+
+class TestExemptions:
+
+    def test_app_prefix_is_tight(self, locked):
+        assert auth.is_exempt("/app/", "GET") and auth.is_exempt("/app", "GET")
+        assert not auth.is_exempt("/application", "GET")
+        assert not auth.is_exempt("/apples", "GET")
+        assert auth.is_exempt("/anything", "OPTIONS")
+        assert not auth.is_exempt("/docs", "GET")
+
+
+class TestLoginRateLimit:
+
+    def test_lock_after_repeated_failures(self, locked, monkeypatch):
+        auth.reset_rate_limits()
+        monkeypatch.setattr(auth, "LOGIN_MAX_FAILURES", 3)
+        for _ in range(2):
+            assert _login("nope").status_code == 401
+        r = _login("nope")
+        assert r.status_code == 429 and "Retry-After" in r.headers
+        # locked even with the right password
+        assert _login().status_code == 429
+        auth.reset_rate_limits()
+        assert _login().status_code == 200
+
+    def test_success_clears_failures(self, locked, monkeypatch):
+        auth.reset_rate_limits()
+        monkeypatch.setattr(auth, "LOGIN_MAX_FAILURES", 3)
+        _login("nope"); _login("nope")
+        assert _login().status_code == 200
+        _login("nope"); _login("nope")
+        assert _login("nope").status_code == 429
+        auth.reset_rate_limits()
+
+    def test_forwarded_for_is_used(self, locked, monkeypatch):
+        auth.reset_rate_limits()
+        monkeypatch.setattr(auth, "LOGIN_MAX_FAILURES", 2)
+        h = {"X-Forwarded-For": "203.0.113.9, 10.0.0.1"}
+        client.post("/auth/login", json={"password": "x"}, headers=h)
+        assert client.post("/auth/login", json={"password": "x"}, headers=h).status_code == 429
+        assert _login("x").status_code == 401        # a different address is not locked
+        auth.reset_rate_limits()

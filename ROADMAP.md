@@ -10,8 +10,8 @@ Phases 5 and 6 are planned and deliberately not started.
 - Re-runnable migrations on SQLite and Postgres, RLS on every table, schema check at startup.
 - Change log on every write, with undo; deletes need an explicit yes.
 - Usage logging and cost estimates for every model call.
-- Remaining: rotate the password-derived secret to a dedicated `FOUNDER_OS_SECRET`; rate
-  limiting on login; backfill embeddings once a key is set (`retrieval.index_notes/memories`).
+- Remaining: set a dedicated `FOUNDER_OS_SECRET` on Render; backfill embeddings once a key
+  is set (`retrieval.index_notes/memories`).
 
 ## Phase 2 — Conversational intelligence · core built
 - Orchestrator with 22 tools, server-side conversation shared across devices, history budget
@@ -21,8 +21,7 @@ Phases 5 and 6 are planned and deliberately not started.
 - Meaning-based retrieval across the Obsidian vault, notes and memory, searched proactively.
 - Real-time voice over WebRTC with the same tools, change log and confirmation rules; the
   record → transcribe → speak loop as fallback.
-- Remaining: verify the realtime model id against OpenAI's docs; a live smoke test; voice
-  selection by ear.
+- Remaining: a live voice smoke test with a real key; voice selection by ear.
 
 ## Phase 3 — Command centre and planning · core built
 - `GET /briefing/today`: ranked, deterministic brief (overdue, today, deadlines, non-negotiables,

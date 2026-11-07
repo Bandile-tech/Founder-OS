@@ -77,13 +77,10 @@ def run(db=None):
             add_column_if_missing(conn, d, "ai_memory", "kind", "VARCHAR", TAG)
             add_column_if_missing(conn, d, "ai_memory", "tags", "VARCHAR", TAG)
 
-            created = []
-            if create_table_if_missing(conn, d, "conversation_summaries", _CONVERSATION_SUMMARIES, TAG):
-                created.append("conversation_summaries")
-            if create_table_if_missing(conn, d, "llm_usage", _LLM_USAGE, TAG):
-                created.append("llm_usage")
+            create_table_if_missing(conn, d, "conversation_summaries", _CONVERSATION_SUMMARIES, TAG)
+            create_table_if_missing(conn, d, "llm_usage", _LLM_USAGE, TAG)
             create_index(conn, "ix_llm_usage_created_at", "llm_usage", "created_at")
-            enable_rls(conn, d, created, TAG)
+            enable_rls(conn, d, ["conversation_summaries", "llm_usage"], TAG)
         print(f"[{TAG}] Assistant core migration complete on {d}.")
     finally:
         conn.close()

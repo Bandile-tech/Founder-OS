@@ -455,6 +455,7 @@ def get_orchestrator_response(messages: list, db, max_rounds: int = 6,
       {"type": "tool_call", "tool": "...", "args": {...}}
       {"type": "tool_result", "tool": "...", "summary": "...", "error": bool}
       {"type": "error", "content": "..."}            (only when the model call fails)
+      {"type": "ui", "directive": {"view": "...", "params": {...}}}   (show_view)
       {"type": "final", "content": "...", "changes": [...]}
     """
     import orchestrator_tools
@@ -538,6 +539,9 @@ def get_orchestrator_response(messages: list, db, max_rounds: int = 6,
             result, summary = orchestrator_tools.run_tool(name, args, db)
             is_error = isinstance(result, dict) and "error" in result
             yield {"type": "tool_result", "tool": name, "summary": summary, "error": is_error}
+            if isinstance(result, dict) and result.get("ui_directive"):
+                # Only a view name + parameters ever reach the client — the frontend owns rendering.
+                yield {"type": "ui", "directive": result["ui_directive"]}
             tool_msg = {
                 "role": "tool",
                 "tool_call_id": slot["id"] or f"call_{idx}",

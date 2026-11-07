@@ -202,7 +202,8 @@ def _alert_items(db: Session, today: date) -> tuple[list, list]:
         sev = a.get("severity", "info")
         items.append(_item(title=a["message"].split(".")[0], category="alert", due=None, today=today, due_label=sev.upper(),
                            reason=a["message"], action="Review and act", target_type="alert", target_id=a["rule_id"],
-                           score={"critical": 65, "warn": 45, "info": 15}.get(sev, 15)))
+                           score={"critical": 65, "warn": 45, "info": 15}.get(sev, 15),
+                           extra={"alert_check": a.get("check")}))
     return alerts, items
 
 
@@ -325,3 +326,11 @@ def build_briefing(db: Session, *, refresh: bool = False, now: datetime | None =
 @router.get("/briefing/today")
 def briefing_today(refresh: int = Query(0, ge=0, le=1), db: Session = Depends(get_db)):
     return build_briefing(db, refresh=bool(refresh))
+
+
+@router.get("/deadlines")
+def deadlines_endpoint(days: int = Query(14, ge=1, le=90), db: Session = Depends(get_db)):
+    """Overdue, due today, upcoming tasks and exams — the data behind the deadlines view."""
+    import orchestrator_tools
+    result, _summary = orchestrator_tools.get_deadlines(db, days)
+    return result

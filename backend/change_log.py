@@ -20,6 +20,7 @@ import uuid
 from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 import models
@@ -226,12 +227,21 @@ def undo_change(db: Session, change_id: int) -> dict:
     row = db.query(models.ChangeLog).filter(models.ChangeLog.id == change_id).first()
     if row is None:
         raise HTTPException(404, "Change not found")
-    result = _undo_row(db, row)
-    db.commit()
+    try:
+        result = _undo_row(db, row)
+        db.commit()
+    except HTTPException:
+        db.rollback()
+        raise
+    except IntegrityError as exc:
+        # e.g. undoing a create whose row is now referenced by later rows (Postgres enforces FKs)
+        db.rollback()
+        raise HTTPException(409, f"Cannot undo: the record is still referenced ({exc.orig})")
     return result
 
 
 def undo_batch(db: Session, batch_id: str) -> dict:
+    """All-or-nothing: if any change in the batch cannot be undone, nothing is undone."""
     rows = (
         db.query(models.ChangeLog)
         .filter(models.ChangeLog.batch_id == batch_id)
@@ -240,8 +250,15 @@ def undo_batch(db: Session, batch_id: str) -> dict:
     )
     if not rows:
         raise HTTPException(404, "Batch not found")
-    results = [_undo_row(db, r) for r in rows]
-    db.commit()
+    try:
+        results = [_undo_row(db, r) for r in rows]
+        db.commit()
+    except HTTPException:
+        db.rollback()
+        raise
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(409, f"Cannot undo batch: a record is still referenced ({exc.orig})")
     return {
         "batch_id": batch_id,
         "undone": sum(1 for r in results if not r["already_undone"]),

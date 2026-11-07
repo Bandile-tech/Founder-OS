@@ -339,6 +339,20 @@ class TestBriefing:
         assert any(i["category"] == "target" and i["title"] == "Dead target" for i in items)
         assert any(i["category"] == "alert" for i in items)
 
+    def test_alert_items_carry_their_rule_check(self):
+        # The home screen hides the non-negotiable completion alert when the
+        # Non-negotiables row is on the brief; it finds that alert by its check type.
+        _seed_world()
+        b = client.get("/briefing/today").json()
+        rules = {r["id"]: r["check"] for r in ot._load_rules()}
+        alerts = [i for i in b["items"] if i["category"] == "alert"]
+        assert alerts
+        for it in alerts:
+            assert it["alert_check"] == rules[it["target_id"]]
+        nn = [i for i in alerts if i["alert_check"] == "non_negotiable_completion_below"]
+        assert [i["target_id"] for i in nn] == ["habit_drift_7d"]   # ironing open, prayer done → 50% < 60%
+        assert all(a["check"] == rules[a["rule_id"]] for a in b["alerts"])
+
     def test_progress_counts_and_greeting_line(self):
         _seed_world()
         b = client.get("/briefing/today").json()

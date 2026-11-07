@@ -1,6 +1,6 @@
-from fastapi import FastAPI, Depends, HTTPException, Query, UploadFile, File
+from fastapi import FastAPI, Depends, HTTPException, Query, UploadFile, File, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, Response
+from fastapi.responses import StreamingResponse, Response, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -3203,10 +3203,15 @@ def _at_progress_pct(t: AnnualTarget) -> float:
     return min(100.0, (t.current_value / max(t.target_value, 1e-9)) * 100)
 
 
-# 1. Get the path to your frontend folder
-# This logic looks one folder up from 'backend' to find 'frontend'
-current_dir = os.path.dirname(os.path.realpath(__file__))
-frontend_path = os.path.join(current_dir, "..", "frontend")
-
-# 2. Serve your index.html at the main address
-app.mount("/", StaticFiles(directory=frontend_path, html=True), name="frontend")
+# ── ROOT → /app/ ─────────────────────────────────────────────
+# The frontend is served only from the /app mount above. Served at /, its relative
+# "assets/…" URLs resolved to /assets/…, which the auth middleware blocks (an <img> cannot
+# send the bearer token). Redirecting keeps every frontend file under /app/ without
+# widening the auth exemption.
+@app.api_route("/", methods=["GET", "HEAD"], include_in_schema=False)
+@app.api_route("/index.html", methods=["GET", "HEAD"], include_in_schema=False)
+def root_redirect(request: Request):
+    target = "/app/"
+    if request.url.query:
+        target += "?" + request.url.query
+    return RedirectResponse(target, status_code=307)

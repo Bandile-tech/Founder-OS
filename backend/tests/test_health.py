@@ -502,8 +502,10 @@ class TestLiftProgression:
         db.close()
 
         # Deactivate it
-        lift = _db().query(models.Lift).filter(models.Lift.name == "Hip Thrust").first()
-        resp = client.delete(f"/health/lifts/{lift.id}")
+        db = _db()
+        lift_id = db.query(models.Lift).filter(models.Lift.name == "Hip Thrust").first().id
+        db.close()   # an open session here holds a lock that blocks drop_all on Postgres
+        resp = client.delete(f"/health/lifts/{lift_id}")
         assert resp.status_code == 200
 
         progression = client.get("/health/lifts/progression").json()
