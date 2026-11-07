@@ -23,9 +23,6 @@ _RULES_PATH = os.path.join(
     os.path.dirname(__file__), "..", "context", "core", "off_track_rules.json"
 )
 
-TEN_K_START_DATE = date(2026, 6, 1)
-
-
 # ════════════════════════════════════════════════════════════════
 # Tool 1 — route_brain_dump
 # ════════════════════════════════════════════════════════════════
@@ -37,21 +34,26 @@ def route_brain_dump(db, text: str):
     ``main.apply_parse_updates`` — the same audited path used by /parse and /input.
     """
     import main
+    import assistant_state as st
 
-    roadmap_ids = [t.task_id for t in db.query(models.RoadmapTask).all()]
-    context = {"roadmap_ids": roadmap_ids, "today": str(date.today())}
+    context = {
+        "today": str(date.today()),
+        "non_negotiables": [(n.key, n.label) for n in st.active_non_negotiables(db)],
+    }
     parsed = main.get_parse_response(text, context)
     updates = main.apply_parse_updates(db, parsed, date.today())
 
     summary = parsed.get("summary") or "Entry logged."
-    result = {
-        "summary": summary,
-        "advisory": parsed.get("advisory"),
-        "updates": updates,
-        "changes": updates.get("changes", []),
-    }
+    result = {"summary": summary}
+    changed = [c.get("summary") for c in updates.get("changes", []) if c.get("summary")]
+    result["changed"] = changed or ["Nothing was written."]
+    if updates.get("ideas_inboxed"):
+        result["ideas sent to the Inbox note"] = updates["ideas_inboxed"]
     if updates.get("suggestions"):
-        result["suggestions_pending"] = len(updates["suggestions"])
+        n = len(updates["suggestions"])
+        result["waiting for one tap"] = f"{n} low-confidence item{'s' if n != 1 else ''} saved as suggestions"
+    if parsed.get("advisory"):
+        result["advisory"] = parsed["advisory"]
     return result, summary
 
 
@@ -60,42 +62,47 @@ def route_brain_dump(db, text: str):
 # ════════════════════════════════════════════════════════════════
 
 def get_dashboard_state(db):
-    """Live snapshot: KPIs, habits done/total, active todos, overdue count, 10K progress,
-    weakest subject, upcoming exams."""
-    import main
+    """Live snapshot in plain language, from the current sources only: syllabus progress,
+    today's non-negotiables, annual targets, revenue in Kwacha, tasks, exams, the weakest
+    topic and any off-track alerts."""
     import syllabus
+    import assistant_state as st
 
     today = date.today()
-    habits = db.query(models.Habit).filter(models.Habit.date == today).all()
-    habits_done = sum(1 for h in habits if h.done)
-    open_todos = db.query(models.Todo).filter(models.Todo.done == False).all()
+    open_todos = db.query(models.Todo).filter(models.Todo.done == False).all()  # noqa: E712
     overdue = sum(1 for t in open_todos if t.due_date and t.due_date < today)
+    due_today = sum(1 for t in open_todos if t.due_date == today)
 
-    ai_revenue = main._revenue_usd_total(db, since=TEN_K_START_DATE)
+    academics = st.academics_lines(db, today) or ["No syllabus imported yet."]
+    weakest = syllabus.weakest_topics(db, limit=1, today=today)
+    if weakest:
+        academics.append("Weakest topic right now: " + st.topic_line(weakest[0]))
 
-    weakest, _ = surface_weakest_topics(db, limit=1)
-    weak_list = weakest.get("topics", [])
-    weakest_subject = weak_list[0]["subject_name"] if weak_list else None
+    targets = [st.target_line(t) for t in st.targets(db)] or ["No annual targets set."]
+
+    tasks = f"{st.plural(len(open_todos), 'open task')}: {overdue} overdue, {due_today} due today."
 
     exams = [e for e in syllabus.upcoming_exams(db, today) if e["days_away"] >= 0][:4]
+    exam_lines = [f"{e['subject']}{' ' + e['paper'] if e['paper'] else ''} on "
+                  f"{st.day_label(date.fromisoformat(e['exam_date']), today)} "
+                  f"({st.plural(e['days_away'], 'day')} away)" for e in exams] or ["No exam dates set."]
+
+    alerts, _ = detect_off_track(db)
+    alert_lines = [a["message"] for a in alerts] or ["No alerts."]
 
     state = {
-        "kpis": {k: v.get("value") for k, v in main._kpi_state.items()},
-        "habits": {"done": habits_done, "total": len(habits)},
-        "todos_active": len(open_todos),
-        "todos_overdue": overdue,
-        "ten_k_progress": {
-            "target_usd": 10000,
-            "total_progress_usd": ai_revenue,
-            "ai_revenue_usd": ai_revenue,
-        },
-        "weakest_subject": weakest_subject,
-        "upcoming_exams": exams,
+        "as of": today.isoformat(),
+        "academics": academics,
+        "non-negotiables today": st.routine_text(db, today),
+        "annual targets": targets,
+        "revenue": st.revenue_text(db, today),
+        "tasks": tasks,
+        "upcoming exams": exam_lines,
+        "alerts": alert_lines,
     }
-    summary = (
-        f"habits {habits_done}/{len(habits)}, {len(open_todos)} active todos "
-        f"({overdue} overdue), 10K at ${ai_revenue}"
-    )
+    r = st.routine_day(db, today)
+    summary = (f"non-negotiables {r['done']} of {r['total']}, {st.plural(len(open_todos), 'open task')} "
+               f"({overdue} overdue), revenue this year {st.fmt_zmw(st.revenue(db, today)['year_zmw'])}")
     return state, summary
 
 
@@ -124,23 +131,15 @@ def _check_no_revenue_since(db, params) -> bool:
 def _check_non_negotiable_completion_below(db, params) -> bool:
     """Completion of the ACTIVE non-negotiables over the window. Days with no habit row
     for an active key count as not done, so skipping the app does not hide drift."""
+    import assistant_state as st
     threshold = float(params.get("threshold_pct", 60))
     window = int(params.get("window_days", 7))
     today = date.today()
     floor = today - timedelta(days=window - 1)
-    keys = [n.key for n in db.query(models.NonNegotiable).filter(models.NonNegotiable.is_active == True).all()]
-    if not keys:
-        return False
-    rows = db.query(models.Habit).filter(
-        models.Habit.date >= floor, models.Habit.date <= today, models.Habit.key.in_(keys)
-    ).all()
-    if not rows:
+    c = st.routine_completion(db, floor, today, only_days_with_data=True)
+    if not c["has_data"] or not c["possible"]:
         return False   # nothing logged in the window at all — no signal rather than a false alarm
-    days_with_data = {h.date for h in rows}
-    total = len(keys) * len(days_with_data)
-    done = sum(1 for h in rows if h.done)
-    pct = (done / total) * 100 if total else 100
-    return pct < threshold
+    return (c["done"] / c["possible"]) * 100 < threshold
 
 
 # Legacy name kept so older rule files still evaluate.
@@ -210,13 +209,25 @@ def detect_off_track(db):
     return alerts, summary
 
 
+def off_track_report(db):
+    """The detect_off_track tool: the same rules, as plain sentences."""
+    alerts, summary = detect_off_track(db)
+    words = {"critical": "Critical", "warn": "Warning", "info": "Note"}
+    lines = [f"{words.get(a['severity'], 'Note')}: {a['message']}" for a in alerts]
+    return {"alerts": lines or ["Nothing is off track."]}, summary
+
+
 # ════════════════════════════════════════════════════════════════
 # Tool 4 — synthesize_weekly_review
 # ════════════════════════════════════════════════════════════════
 
 def synthesize_weekly_review(db, week_start: str | None = None):
-    """Four-section weekly review computed from live DB data:
-    SHIPPED, REVENUE, NEGOTIATED, NEXT."""
+    """Four-section weekly review computed from live DB data, in plain language:
+    SHIPPED (tasks completed, syllabus topics revised, non-negotiable completion),
+    REVENUE (in Kwacha), NEGOTIATED (clients touched), NEXT."""
+    import syllabus
+    import assistant_state as st
+
     if week_start:
         start = date.fromisoformat(week_start)
     else:
@@ -225,55 +236,57 @@ def synthesize_weekly_review(db, week_start: str | None = None):
     end = start + timedelta(days=6)
     start_dt = datetime_min(start)
     end_dt = datetime_max(end)
+    last_day = min(end, date.today()) if start <= date.today() else end
 
-    # SHIPPED — roadmap tasks completed + habits done this week
-    # RoadmapTask has no title column — task_id is the human-readable key (e.g. "sprint-acc").
-    shipped = [t.task_id for t in db.query(models.RoadmapTask).filter(
-        models.RoadmapTask.done == True
-    ).all()]
-    habit_done = db.query(models.Habit).filter(
-        models.Habit.date >= start, models.Habit.date <= end, models.Habit.done == True
-    ).count()
-    if habit_done:
-        shipped.append(f"{habit_done} habit completions")
+    # SHIPPED — tasks completed, syllabus topics revised, non-negotiables kept this week
+    shipped = [f"Completed: {t.text}" for t in db.query(models.Todo).filter(
+        models.Todo.done == True, models.Todo.completed_at >= start, models.Todo.completed_at <= end,  # noqa: E712
+    ).order_by(models.Todo.completed_at.asc()).all()]
+    for p in db.query(models.SyllabusPoint).filter(
+            models.SyllabusPoint.last_revised >= start, models.SyllabusPoint.last_revised <= end).all():
+        shipped.append(f"Syllabus: {p.subject_name}{' ' + p.paper if p.paper else ''} {p.topic_code} "
+                       f"{p.title} is now {st.STATUS_WORDS.get(p.status, p.status)}")
+    routine = st.routine_completion(db, start, last_day)
+    if routine["possible"]:
+        shipped.append(f"Non-negotiables: {routine['done']} of {routine['possible']} kept "
+                       f"({routine['pct']}%) over {st.plural(routine['days'], 'day')}")
 
-    # REVENUE — revenue rows dated within the week
+    # REVENUE — revenue rows dated within the week, totalled in Kwacha
     rev_rows = db.query(models.Revenue).filter(
         models.Revenue.date >= start, models.Revenue.date <= end
-    ).all()
-    revenue = [
-        {"amount": r.amount, "source": r.source, "date": str(r.date)} for r in rev_rows
-    ]
-    revenue_total = round(sum(r.amount for r in rev_rows), 2)
+    ).order_by(models.Revenue.date.asc()).all()
+    revenue_total = round(sum(st.to_zmw(r.amount, r.currency) for r in rev_rows), 2)
+    revenue = [f"{st.fmt_amount(r.amount, r.currency)}{' from ' + r.source if r.source else ''} "
+               f"on {st.day_label(r.date)}" for r in rev_rows]
+    revenue.append(f"Total this week: {st.fmt_zmw(revenue_total)}"
+                   + (f" (dollars converted at K{st.fmt_number(st.zmw_per_usd())} per $1)"
+                      if any((r.currency or 'USD').upper() == 'USD' for r in rev_rows) else ""))
 
     # NEGOTIATED — clients created or updated this week
     clients = db.query(models.Client).filter(
         models.Client.updated_at >= start_dt, models.Client.updated_at <= end_dt
     ).all()
-    negotiated = [
-        {"name": c.name, "status": c.status, "value": c.value} for c in clients
-    ]
+    negotiated = [f"{c.name}: {c.status}" + (f", worth {st.fmt_number(c.value)}" if c.value else "")
+                  for c in clients] or ["No client activity."]
 
-    # NEXT — top active todos + weakest subtopic
+    # NEXT — top active todos + weakest syllabus topic
     next_items = [t.text for t in db.query(models.Todo).filter(
-        models.Todo.done == False
+        models.Todo.done == False  # noqa: E712
     ).order_by(models.Todo.priority.asc()).limit(5).all()]
-    weakest, _ = surface_weakest_topics(db, limit=1)
-    if weakest.get("topics"):
-        w = weakest["topics"][0]
-        next_items.append(f"Weakest: {w['topic_code']} {w['title']} ({w['subject_name']})")
+    weakest = syllabus.weakest_topics(db, limit=1)
+    if weakest:
+        next_items.append("Weakest topic: " + st.topic_line(weakest[0]))
 
     result = {
-        "week_start": str(start),
-        "week_end": str(end),
-        "SHIPPED": shipped,
-        "REVENUE": {"entries": revenue, "total_usd": revenue_total},
+        "week": f"{st.day_label(start)} to {st.day_label(end)}",
+        "SHIPPED": shipped or ["Nothing recorded as shipped."],
+        "REVENUE": revenue,
         "NEGOTIATED": negotiated,
-        "NEXT": next_items,
+        "NEXT": next_items or ["No open tasks."],
     }
     summary = (
-        f"week {start}: {len(shipped)} shipped, ${revenue_total} revenue, "
-        f"{len(negotiated)} negotiated, {len(next_items)} next"
+        f"week {start}: {len(shipped)} shipped, {st.fmt_zmw(revenue_total)} revenue, "
+        f"{len(clients)} negotiated, {len(next_items)} next"
     )
     return result, summary
 
@@ -294,15 +307,16 @@ def datetime_max(d: date):
 
 def surface_weakest_topics(db, limit: int = 5, subject: str | None = None):
     import syllabus
-    rows = syllabus.weakest_topics(db, limit=limit * 3 if subject else limit)
+    import assistant_state as st
+    rows = syllabus.weakest_topics(db, limit=10_000 if subject else limit)
     if subject:
         code = syllabus.resolve_subject_code(db, subject)
         rows = [r for r in rows if r["subject_code"] == code][:limit]
-    result = {"topics": rows}
+    result = {"topics": [st.topic_line(r) for r in rows] or ["No syllabus topics imported yet."]}
     if rows:
         top = rows[0]
         summary = (f"weakest: {top['subject_name']} {top['paper'] or ''} {top['topic_code']} {top['title']} "
-                   f"({top['status']}; {top['reason']})").replace("  ", " ")
+                   f"({top['reason']})").replace("  ", " ")
     else:
         summary = "no syllabus topics imported yet"
     return result, summary
@@ -581,6 +595,34 @@ def notes_create(db, title: str, kind: str = "general", body: str = "", tags: li
     return notes.serialize(note, body=False), f"created note '{note.title}'"
 
 
+def deadlines_report(db, days: int = 14):
+    """The get_deadlines tool: the same data as sentences."""
+    import assistant_state as st
+    data, summary = get_deadlines(db, days)
+
+    def line(t):
+        due = date.fromisoformat(t["due"]) if t["due"] else None
+        when = ""
+        if due is not None:
+            when = (f" — {abs(t['days'])} day{'s' if abs(t['days']) != 1 else ''} overdue" if t["days"] < 0
+                    else f" — due {st.day_label(due)}")
+        return f"{t['text']}{when} (task {t['id']}, priority {t['priority']})"
+
+    exams = [f"{e['subject']}{' ' + e['paper'] if e['paper'] else ''} exam on "
+             f"{st.day_label(date.fromisoformat(e['exam_date']))} ({st.plural(e['days_away'], 'day')} away)"
+             for e in data["exams"]]
+    result = {
+        "window": f"the next {st.plural(data['window_days'], 'day')}",
+        "overdue": [line(t) for t in data["overdue"]] or ["Nothing overdue."],
+        "due today": [line(t) for t in data["due_today"]] or ["Nothing due today."],
+        "coming up": [line(t) for t in data["upcoming"]] or ["Nothing else due in the window."],
+        "exams": exams or ["No exams in the window."],
+    }
+    if data["undated_count"]:
+        result["undated"] = f"{st.plural(data['undated_count'], 'open task')} without a due date"
+    return result, summary
+
+
 def get_deadlines(db, days: int = 14):
     """Overdue and upcoming tasks (by real due date) plus exams within the window."""
     import syllabus
@@ -643,10 +685,13 @@ SHOW_VIEWS = {
     "note":      {"title"},
     "changes":   {"limit"},
     "progress":  set(),
+    "history":   {"q"},
     "close":     set(),
 }
 _VIEW_ALIASES = {"home": "close", "todays_brief": "brief", "today": "brief", "tasks": "brief",
-                 "notes": "note", "recent_changes": "changes", "undo": "changes", "exams": "deadlines"}
+                 "notes": "note", "recent_changes": "changes", "undo": "changes", "exams": "deadlines",
+                 "conversations": "history", "conversation": "history", "chat_history": "history",
+                 "past_conversations": "history", "chats": "history"}
 
 
 def show_view(db, view: str, params: dict | None = None):
@@ -699,6 +744,8 @@ def show_view(db, view: str, params: dict | None = None):
             clean["limit"] = max(1, min(100, int(clean.get("limit", 30))))
         except (TypeError, ValueError):
             clean["limit"] = 30
+    elif name == "history":
+        label = "past conversations" + (f" matching '{clean['q']}'" if clean.get("q") else "")
 
     directive = {"view": name, "params": clean}
     result = {"ui_directive": directive, "view": name, "params": clean,
@@ -714,7 +761,7 @@ def show_view(db, view: str, params: dict | None = None):
 _TOOL_DISPATCH = {
     "route_brain_dump": lambda db, a: route_brain_dump(db, a.get("text", "")),
     "get_dashboard_state": lambda db, a: get_dashboard_state(db),
-    "detect_off_track": lambda db, a: detect_off_track(db),
+    "detect_off_track": lambda db, a: off_track_report(db),
     "synthesize_weekly_review": lambda db, a: synthesize_weekly_review(db, a.get("week_start")),
     "surface_weakest_topics": lambda db, a: surface_weakest_topics(db, int(a.get("limit", 5)), a.get("subject")),
     "surface_weakest_subtopic": lambda db, a: surface_weakest_topics(db, int(a.get("limit", 1))),   # legacy name
@@ -760,7 +807,7 @@ _TOOL_DISPATCH = {
     "notes_create": lambda db, a: notes_create(
         db, title=a.get("title", ""), kind=a.get("kind", "general"), body=a.get("body", ""), tags=a.get("tags"),
     ),
-    "get_deadlines": lambda db, a: get_deadlines(db, int(a.get("days", 14))),
+    "get_deadlines": lambda db, a: deadlines_report(db, int(a.get("days", 14))),
     "show_view": lambda db, a: show_view(db, view=a.get("view", ""), params=a.get("params") or {k: v for k, v in a.items() if k != "view"}),
     "update_syllabus": lambda db, a: update_syllabus(
         db, topic=a.get("topic", ""), status=a.get("status"), weakness_note=a.get("weakness_note"),
@@ -794,6 +841,103 @@ def run_tool(name: str, args: dict, db):
         return {"error": msg, "tool": name, "args": args or {}}, f"{name} failed — {msg}"
 
 
+# ════════════════════════════════════════════════════════════════
+# What the model sees — plain language, never raw booleans or codes
+# ════════════════════════════════════════════════════════════════
+
+_HIDDEN_KEYS = {"ui_directive", "change", "changes", "batch_id", "colour", "score", "created_at",
+                "updated_at", "expires_at", "requires_confirmation", "kind_code"}
+
+
+def _words(value):
+    import assistant_state as st
+    if isinstance(value, str):
+        if value in st.STATUS_WORDS:
+            return st.STATUS_WORDS[value]
+        if "_" in value and value in st.TARGET_STATUS_WORDS:
+            return st.TARGET_STATUS_WORDS[value]
+    return value
+
+
+def _plain(value):
+    """Recursively turn a tool result into plain language: yes/no for booleans, words for
+    status codes, spaces for underscores in keys, no empty values, no internal plumbing."""
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    if isinstance(value, dict):
+        out = {}
+        for k, v in value.items():
+            if k in _HIDDEN_KEYS or v is None or v == [] or v == {}:
+                continue
+            out[str(k).replace("_", " ")] = _plain(v)
+        return out
+    if isinstance(value, (list, tuple)):
+        return [_plain(v) for v in value]
+    if isinstance(value, (date,)):
+        return value.isoformat()
+    return _words(value)
+
+
+def _topic_label(r: dict) -> str:
+    return (f"{r.get('subject_name') or r.get('subject') or ''} {r.get('paper') or ''} "
+            f"{r.get('topic_code') or ''} {r.get('title') or ''}").replace("  ", " ").strip()
+
+
+def _readable(name: str, result):
+    """Per-tool phrasing for results whose internal shape is structured."""
+    import assistant_state as st
+    if not isinstance(result, dict) or "error" in result:
+        return result
+    if name == "update_syllabus":
+        if result.get("matched"):
+            text = f"{_topic_label(result)} is now {st.STATUS_WORDS.get(result['status'], result['status'])}."
+            if result.get("last_revised") == date.today().isoformat():
+                text += " Marked as revised today."
+            return {"updated": text}
+        if result.get("ambiguous"):
+            return {"not updated": f"Several topics could match '{result.get('topic')}'.",
+                    "candidates": [f"{_topic_label(c)} (topic id {c['id']})" for c in result["candidates"]],
+                    "next step": "Ask Bandile which one he means."}
+        return {"not updated": f"No syllabus topic matches '{result.get('topic')}'."}
+    if name == "complete_task":
+        if result.get("completed") is True:
+            return {"completed": f"{result['text']} (task {result['id']})"}
+        if result.get("already_done"):
+            return {"no change": f"'{result['text']}' was already done."}
+        if result.get("ambiguous"):
+            return {"not completed": "Several open tasks could match.",
+                    "candidates": [f"{c['text']} (task {c['id']})" for c in result["candidates"]],
+                    "next step": "Each is now a one-tap suggestion; tell Bandile they are waiting."}
+        return {"not completed": "No open task matches."}
+    if name == "propose_delete":
+        return {"pending action id": result["id"], "would delete": result["summary"],
+                "next step": "Ask Bandile to confirm in plain words. Call confirm_action only after he says yes."}
+    if name == "confirm_action":
+        if result.get("executed"):
+            return {"done": result["summary"]}
+        return {"not done": f"{result['summary']} — {result.get('reason', 'not executed')}"}
+    if name == "cancel_action":
+        return {"cancelled": result["summary"]}
+    if name == "show_view":
+        return {"on screen": result.get("message")}
+    if name == "add_todos":
+        return {"added": [f"{t['text']} (task {t['id']})" for t in result.get("todos", [])]}
+    if name == "set_exam_date":
+        d = date.fromisoformat(result["exam_date"])
+        return {"set": f"{result['subject']}{' ' + result['paper'] if result.get('paper') else ''} exam on "
+                       f"{st.day_label(d)} ({st.plural(result['days_away'], 'day')} away)."}
+    return result
+
+
+def for_model(name: str, result) -> str:
+    """The JSON string a tool result becomes in the model's context (typed and voice)."""
+    try:
+        shaped = _plain(_readable(name, result))
+    except Exception:  # noqa: BLE001 — phrasing must never lose a result
+        shaped = _plain(result)
+    return json.dumps(shaped, default=str, ensure_ascii=False)
+
+
 TOOL_SCHEMAS = [
     {
         "type": "function",
@@ -818,8 +962,11 @@ TOOL_SCHEMAS = [
         "function": {
             "name": "get_dashboard_state",
             "description": (
-                "Get a live snapshot: KPIs, habits done/total, active and overdue todos, "
-                "10K revenue progress, weakest subject and upcoming exams."
+                "Get what is true right now, in plain language: syllabus progress per subject "
+                "(from the syllabus tracker), today's non-negotiables by name, annual targets "
+                "with pace, revenue in Kwacha, open and overdue tasks, upcoming exams, the "
+                "weakest topic and any off-track alerts. Call it for status, 'what do you know' "
+                "and 'how am I doing' questions; never quote numbers from memory instead."
             ),
             "parameters": {"type": "object", "properties": {}},
         },
@@ -836,7 +983,7 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "synthesize_weekly_review",
-            "description": "Produce a weekly review with SHIPPED, REVENUE, NEGOTIATED, NEXT sections.",
+            "description": "Produce a weekly review with SHIPPED (tasks completed, syllabus topics revised, non-negotiables kept), REVENUE (in Kwacha), NEGOTIATED and NEXT sections.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -1240,13 +1387,14 @@ TOOL_SCHEMAS = [
                 "asks to see, show, open or look at something. Views: 'syllabus' (optional "
                 "subject and paper, e.g. 'Show me my S1 topics' → view syllabus, paper S1), "
                 "'brief' (today's brief), 'deadlines' (optional days), 'note' (by title), "
-                "'changes' (recent changes with undo), 'progress'. Use view 'close' when he says "
+                "'changes' (recent changes with undo), 'progress', 'history' (past conversations, "
+                "optional search q). Use view 'close' when he says "
                 "close, go back or home. Send only the view name and parameters — never HTML."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "view": {"type": "string", "enum": ["syllabus", "brief", "deadlines", "note", "changes", "progress", "close"]},
+                    "view": {"type": "string", "enum": ["syllabus", "brief", "deadlines", "note", "changes", "progress", "history", "close"]},
                     "params": {
                         "type": "object",
                         "properties": {
@@ -1255,6 +1403,7 @@ TOOL_SCHEMAS = [
                             "days": {"type": "integer", "description": "Look-ahead days (deadlines)."},
                             "title": {"type": "string", "description": "Note title (note)."},
                             "limit": {"type": "integer", "description": "How many changes (changes)."},
+                            "q": {"type": "string", "description": "Search words (history)."},
                         },
                     },
                 },
