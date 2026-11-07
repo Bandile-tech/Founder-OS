@@ -107,7 +107,11 @@ The Business tab removed in Stage 6.5 comes back as **one page `p-business` with
 sub-tabs**: Pipeline (5B), Clients (5C), Portfolio (5E), Brand (5D). Research stays on the
 Agents page. Every sub-tab is a list with status chips and at most one tap per row.
 Details of each sub-tab are in the module sections. Built in two UI sessions at the end of
-the phase (`BUILD_ORDER.md` S9, S10), not module by module.
+the phase (`BUILD_ORDER.md` S11, S12), not module by module.
+
+Phase 5 adds **no** `show_view` stage entries (`orchestrator_tools.SHOW_VIEWS`); the Business
+page is reached from the nav, and the assistant answers business questions in text. Stage
+views for pipeline, clients or portfolio are a later decision, not part of this phase.
 
 ### 0.8 Running cost baseline
 

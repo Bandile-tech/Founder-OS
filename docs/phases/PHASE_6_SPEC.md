@@ -59,7 +59,11 @@ tokens that are static stay in Render env vars, not the database.
 Latency floor: **15 minutes** (the cron interval). Nothing in Phase 6 promises faster than
 that while the app is closed, and the specs are written so that is acceptable.
 
-### 0.5 Running cost baseline
+### 0.5 Stage views
+Phase 6 adds **no** `show_view` entries. Agents, Applications and Settings are reached from
+the nav; a later decision can add stage views.
+
+### 0.6 Running cost baseline
 Hosting stays free (Render free web service, Supabase free, Netlify free, GitHub Actions
 free for a public repository). Telegram Bot API is free. Google Calendar API and the Gmail
 IMAP/SMTP path are free. Phase 6's own LLM spend is small (table at the end); the agents

@@ -286,7 +286,10 @@ p = models.PendingAction(
   python -m pytest -q
   python -c "import asyncio, main; asyncio.run(main.startup())"
   ```
-  (the second against the local SQLite file; the test client never fires startup).
+  (the second against your local SQLite file; the test client never fires startup). The
+  suite itself always runs on a throwaway database: `tests/conftest.py` overrides
+  `DATABASE_URL` before `main` is imported (temp SQLite file, or `TEST_DATABASE_URL` for a
+  Postgres run). Run the migration chain on Postgres with `TEST_DATABASE_URL` set too.
 
 ### 5.2 Example
 
@@ -413,7 +416,8 @@ def list_leads(status: str | None = None, db: Session = Depends(get_db)): ...
 - The realtime voice path converts `TOOL_SCHEMAS` automatically
   (`voice_realtime.realtime_tools`) and runs tools through `/voice/realtime/tool` with
   the same `run_tool`. Nothing extra to do for voice.
-- Tool count today: 22 (+1 legacy alias). Phases 5–6 take it to roughly 50. Keep it under
+- Tool count today: 23 including `show_view` (+1 legacy alias). Phases 5–6 take it to
+  roughly 58. Keep it under
   ~60: fold near-identical verbs into one tool (e.g. `draft_outreach` also revises when
   given a `message_id`), and never add a tool whose job an existing tool already does.
 
@@ -503,7 +507,8 @@ Schema entry: `{"type": "function", "function": {"name": "update_deal", "descrip
 
 ## 11. Tests — `backend/tests/`
 
-- `conftest.py`: one shared in-memory SQLite engine, `Base.metadata.create_all`, the
+- `conftest.py`: points the app's `DATABASE_URL` at a throwaway database before `main` is
+  imported (`test_db_isolation.py` asserts it), then one shared in-memory SQLite engine, `Base.metadata.create_all`, the
   dependency override for `get_db`, one shared `client = TestClient(app)`. The autouse
   `fresh_db` fixture drops and recreates every table per test. **Tests never fire
   startup**; `test_startup_handler_runs_with_no_key` calls `main.startup()` directly and
@@ -546,6 +551,17 @@ Schema entry: `{"type": "function", "function": {"name": "update_deal", "descrip
 
 ## 12. Frontend conventions — `frontend/index.html`
 
+- The backend serves the frontend at `/app/` (`/` redirects there); load it from `/app/`
+  or relative `assets/…` URLs hit the auth middleware. The home page is a fixed pixel canvas
+  scaled by `layoutHome()` (see `CLAUDE.md`); add new home tiles only inside that layout.
+- **The stage (`show_view`)**: the orb can open a whitelisted full-screen view
+  (`orchestrator_tools.SHOW_VIEWS`, rendered from `{"type":"ui"}` SSE events or the voice
+  bridge's `ui_directive`). A module that wants a conversational "show me X" adds one
+  entry to `SHOW_VIEWS` (view name → allowed params), its aliases to `_VIEW_ALIASES`, and a
+  stage renderer in `index.html` in the existing KPI cards / list / next actions layout.
+  The model only ever sends a view name and parameters, never HTML.
+- Browser smoke tests: `node tests/e2e/smoke.js` from the repo root. Extend it when a
+  module adds a one-tap flow that matters.
 - One file; pages are `<div class="page" id="p-<name>">`, navigated by `nav('<name>')`,
   rendered in `renderPage(page)` (one branch per page calling `render<Name>()`).
 - `API_BASE` is `location.origin` locally, the Render URL otherwise. `window.fetch` is

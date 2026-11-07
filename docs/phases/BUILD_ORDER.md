@@ -15,8 +15,7 @@ order (m020 before m019); that is fine because they are independent — register
 
 ## How to run a session
 
-1. Start a fresh session on the integration branch (currently
-   `claude/rebuild-spec-review-vfrg4o`; after merge, `main`). Branch per session is
+1. Start a fresh session on `main` (the rebuild and these specs are merged there). Branch per session is
    optional; one commit per session is required.
 2. Paste the session's prompt verbatim. Every prompt is self-contained: it names the spec
    section, the files, the tests and the commit message.
@@ -35,7 +34,7 @@ prompt can be pasted on its own.
 
 ### S1 — 5A.1 Market intelligence on the gateway: logging, scoring, dedup, change log
 
-**Must exist first:** the rebuild branch (Stages 1–6), suite green (391 tests).
+**Must exist first:** the rebuild (Stages 1–9, merged to `main` in PR #1), suite green.
 
 **Files touched:** `backend/llm.py` (`research_model`), `backend/market_intel/agent.py`,
 `backend/market_intel/scoring.py` (new), `backend/models.py`,
@@ -664,7 +663,8 @@ file, vanilla JS, no build step). Rules:
    prefers-reduced-motion. Must work at 390 px wide with no horizontal scroll.
 5. Do not change any backend file. Do not remove or rename existing functions.
 6. Verify with headless Chromium (Playwright is pre-installed: `require('playwright')`)
-   against `uvicorn main:app` with a seeded local SQLite: take a 390-px and a 1280-px
+   against `uvicorn main:app` with a seeded local SQLite, loading `http://127.0.0.1:8000/app/`
+   (not `/`): take a 390-px and a 1280-px
    screenshot of each sub-tab and look at them. Note what you saw in PROGRESS.md.
 7. One commit: `Phase 5 UI.1: Business page — pipeline and clients`.
 8. If blocked, commit nothing half-done and record it in PROGRESS.md.
