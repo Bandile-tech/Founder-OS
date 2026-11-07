@@ -47,9 +47,12 @@ Phases 5 and 6 are planned and deliberately not started.
 Prospecting, outreach, CRM, personal-brand analytics and a project portfolio. The Business
 tab and tiles were removed from the UI until this phase is designed around conversation
 rather than forms. Revenue (with currency) and clients remain in the database.
+Specification: `docs/phases/PHASE_5_SPEC.md`; build sequence: `docs/phases/BUILD_ORDER.md`.
 
 ## Phase 6 — Long-term goals, agents, integrations, proactive communication · planned
 Applications such as Wharton (deadlines, gaps, materials), agent management, external
 integrations (calendar, email, push), and the system reaching out on its own when something
 needs attention. The market-intelligence agent from the earlier build is the seed of the
 agent track.
+Specification: `docs/phases/PHASE_6_SPEC.md`; decisions: `docs/adr/`; build sequence:
+`docs/phases/BUILD_ORDER.md`. Patterns both phases must follow: `docs/CONVENTIONS.md`.
