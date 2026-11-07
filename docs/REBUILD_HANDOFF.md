@@ -490,6 +490,7 @@ Tool `show_view(view, params)` with a fixed whitelist:
 | `note` | `title` → resolved to `note_id` server-side | `GET /notes/{id}` |
 | `changes` | `limit` (1–100) | `GET /changes` with Undo |
 | `progress` | — | briefing progress + per-subject syllabus |
+| `history` (aliases conversations, chat_history) | `q` (search words) | `GET /conversation/history` |
 | `close` (aliases home) | — | closes the stage |
 
 The orchestrator stream emits `{"type":"ui","directive":{"view","params"}}` after the tool
@@ -625,3 +626,62 @@ deleted and the docs describe one host.
 - Likeness to the mock-up is judged by eye from the contact sheet, not by an image diff.
 - On very tall, narrow desktop windows (portrait) the home uses the stacked layout rather than
   the mock-up's composition.
+
+## 12. Assistant reads current data only (branch `assistant-current-data`)
+
+Asked "What do you know?", the assistant used to quote old subject mastery (Maths 94.5%), raw
+habit booleans, `roadmap_tasks` ("Founder OS 7/7") and the $10K scoreboard. The sources were:
+the frontend's `context` object (legacy KPI store overwritten from `/subjects/progress`, a raw
+`{key: true/false}` habit map, annual-target triples) injected as `[Live system context]`;
+`get_dashboard_state` (`_kpi_state`, raw habits, `ten_k_progress`); `synthesize_weekly_review`
+(every done `roadmap_tasks` row, mixed-currency total labelled USD); `route_brain_dump`
+(`roadmap_tasks` ids into the parser); the parser schema (`roadmap_complete`, `kpi_updates`, a
+hard-coded habit list); the briefing's business % of $10K; and the prompt's $10,000 milestone.
+
+### Now
+- `backend/assistant_state.py` — academics from `syllabus_points`, routine from
+  `non_negotiables` (ticks in `habits`, read only here), targets from `annual_targets`, revenue
+  in Kwacha (USD × `ZMW_PER_USD`). Everything phrased in labels and words.
+- Tools: `get_dashboard_state` returns plain-language sections (academics, non-negotiables
+  today, annual targets, revenue, tasks, upcoming exams, alerts); `synthesize_weekly_review`
+  ships completed tasks, revised syllabus topics and non-negotiable completion, with revenue in
+  Kwacha; `surface_weakest_topics`, `get_deadlines` and `detect_off_track` return sentences
+  (`detect_off_track()` and `get_deadlines()` keep their structured shapes for the briefing and
+  `GET /deadlines`; the tool registry calls `off_track_report` / `deadlines_report`).
+- `orchestrator_tools.for_model(name, result)` is what the model sees from every tool, typed and
+  voice: per-tool phrasing, then yes/no for booleans, words for status codes, no nulls, no
+  underscores in keys, no `ui_directive`.
+- Parser: told the active non-negotiables (key = label); `roadmap_complete`, `kpi_updates` and
+  `roadmap_id` are gone from the schema (`apply_parse_updates` still tolerates them). Ticks go
+  through `assistant_state.mark_non_negotiable_done`, which creates the day's row when missing —
+  before, logging only matched rows seeded on the day the server started.
+- Briefing: `progress.business` is the revenue annual target's progress, or `null`.
+- The frontend no longer sends `context`; the server ignores it from older clients.
+- Prompt: revenue tracked in Kwacha; status questions must call `get_dashboard_state` and never
+  quote numbers from history; `show_view history` for past conversations.
+
+### Conversations
+- `GET /conversation/history?q=&before_id=&limit=200&tz_offset=` → `{query, days:[{date, label,
+  messages:[{id, role, text, time, voice, changes}]}], count, has_more, next_before_id}`. User and
+  assistant text only (no tool rows or empty tool-call turns), grouped by the viewer's local day
+  (`tz_offset` is JavaScript's `getTimezoneOffset()`), newest day first, messages in order within
+  a day; `q` is case-insensitive; `before_id` pages back.
+- Frontend: a Conversations page on the rail and the `history` stage view share `historyView()`:
+  search box (250 ms debounce), a card per day, matches highlighted, "Load older messages". New
+  component `.msg` (shown in the Design Guide).
+
+### Verification
+- `tests/test_assistant_current_data.py` (21 tests): an SQL listener runs every registered tool,
+  the briefing and the context build against seeded legacy data and fails on any read of a legacy
+  table, any `habits` read outside `assistant_state` and any `subjects` read outside `syllabus`
+  (a self-test proves the guard fires); every tool's model text has no booleans, nulls, codes or
+  snake_case keys; Kwacha conversion; ticking on a day with no rows; client context ignored;
+  history grouping, search, paging, time zones, auth and the `history` view.
+- Backend suite 468 passed; smoke tests pass; `screens.js` (now including Conversations) passes
+  at 1280×720, 1536×864, 1920×1080 and 390×844.
+
+### Known gaps
+- Old messages and the rolling summary still contain the numbers quoted before this change; the
+  prompt tells the model not to repeat figures it did not get from a tool this turn.
+- Legacy endpoints (`/subjects/progress`, `/kpis`, `/roadmap/*`, `/radar`, `/scoreboard/ten-k`) still
+  exist for compatibility; nothing the assistant reads calls them.

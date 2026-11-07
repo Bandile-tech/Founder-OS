@@ -17,6 +17,7 @@ Covers:
 import asyncio
 import json
 import sys
+from datetime import date
 from pathlib import Path
 from unittest.mock import patch
 
@@ -201,7 +202,7 @@ class TestToolPersistence:
         calls = json.loads(rows[1].tool_calls_json)
         assert calls[0]["function"]["name"] == "get_dashboard_state"
         assert rows[2].tool_call_id == "c1"
-        assert json.loads(rows[2].content)["habits"]["total"] >= 0
+        assert "non-negotiables today" in json.loads(rows[2].content)
 
     def test_next_turn_sees_previous_tool_result(self):
         rounds = [_tool_round("get_dashboard_state", {}, call_id="c1"), _final_round("Done.")]
@@ -399,7 +400,9 @@ class TestModelConfigAndUsage:
     def test_weekly_review_no_longer_crashes(self):
         db = _db()
         db.add(models.RoadmapTask(task_id="sprint-acc", roadmap="sprint", done=True))
+        db.add(models.Todo(text="Send the proposal", done=True, completed_at=date.today()))
         db.commit()
         result, _ = ot.synthesize_weekly_review(db)
         db.close()
-        assert "sprint-acc" in result["SHIPPED"]
+        assert "Completed: Send the proposal" in result["SHIPPED"]
+        assert not any("sprint-acc" in line for line in result["SHIPPED"])   # roadmap_tasks no longer read

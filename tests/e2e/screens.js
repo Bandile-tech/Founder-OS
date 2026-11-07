@@ -34,7 +34,7 @@ const VIEWPORTS = [
   { name: "1920x1080", width: 1920, height: 1080 },
   { name: "390x844", width: 390, height: 844, mobile: true },
 ];
-const PAGES = ["home", "timetable", "health", "syllabus", "agents", "warroom", "annual", "guide", "settings"];
+const PAGES = ["home", "timetable", "health", "syllabus", "history", "agents", "warroom", "annual", "guide", "settings"];
 // Extra states worth seeing on the sheet (not part of the per-page consistency checks).
 const EXTRAS = ["stage", "menu"];
 
@@ -84,6 +84,9 @@ async function seed() {
   fd.set("level", "AS");
   fd.set("papers", "P1,S1");
   await api("POST", "/syllabus/import", fd);
+  // A short conversation for the Conversations page (saved like live-voice transcript lines).
+  await api("POST", "/voice/realtime/transcript", { role: "user", text: "Revised S1 probability, still shaky on conditional probability." });
+  await api("POST", "/voice/realtime/transcript", { role: "assistant", text: "Marked S1 Probability as revised and saved the note about conditional probability." });
 }
 
 // Runs in the page: shell measurements, overflow and dock coverage for the active page.

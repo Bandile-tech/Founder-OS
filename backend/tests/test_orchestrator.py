@@ -66,7 +66,11 @@ class TestRouteBrainDump:
             result, summary = ot.route_brain_dump(db, "did scripture today")
             db.close()
 
-        assert any(h["key"] == "scripture_prayer" for h in result["updates"]["habits_updated"])
+        assert any("Scripture" in line for line in result["changed"])
+        db = _db()
+        h = db.query(models.Habit).filter(models.Habit.key == "scripture_prayer", models.Habit.date == TODAY).first()
+        db.close()
+        assert h.done is True
 
         db = _db()
         habit = db.query(models.Habit).filter(models.Habit.key == "scripture_prayer").first()
@@ -81,8 +85,9 @@ class TestDashboardState:
         state, summary = ot.get_dashboard_state(db)
         db.close()
         assert "gate_status" not in state and "gate" not in state   # trading removed
-        assert "habits" in state and "done" in state["habits"] and "total" in state["habits"]
-        assert "ten_k_progress" in state and "todos_overdue" in state
+        for key in ("academics", "non-negotiables today", "annual targets", "revenue", "tasks"):
+            assert key in state
+        assert "ten_k_progress" not in state and "kpis" not in state and "habits" not in state
 
 
 class TestDetectOffTrack:
@@ -129,8 +134,8 @@ class TestWeakestTopics:
 
         result, summary = ot.surface_weakest_topics(db, limit=2)
         db.close()
-        assert result["topics"][0]["topic_code"] == "1.3"
-        assert "not started" in result["topics"][0]["reason"]
+        assert result["topics"][0].startswith("Maths 9709 P1 1.3 Coordinate geometry")
+        assert "not started" in result["topics"][0]
 
 
 # ════════════════════════════════════════════════════════════════

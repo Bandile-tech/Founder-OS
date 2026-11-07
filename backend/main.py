@@ -71,6 +71,8 @@ app.include_router(_notes.router)
 app.include_router(_syllabus.router)
 app.include_router(_briefing.router)
 app.include_router(_voice_realtime.router)
+import conversation as _conversation
+app.include_router(_conversation.router)
 
 # Serve frontend from ../frontend if it exists
 FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend")
@@ -1368,49 +1370,18 @@ def _apply_parse_updates_inner(db: Session, parsed: dict, today: date) -> dict:
         elif task:
             result["roadmap_completed"].append(task_id)
 
-    # ── Habit updates — three-tier fuzzy matching ─────────────
+    # ── Non-negotiables — matched against the ACTIVE non_negotiables (exact key →
+    #    label substring → shared word). The day's tick row is created when missing, so
+    #    logging works on any day, not only on the day the server started.
     if parsed.get("habits_done"):
-        today_habits = db.query(Habit).filter(Habit.date == today).all()
+        import assistant_state as _state
         for ai_key in parsed["habits_done"]:
-            matched_habit = None
-            strategy = None
-            ai_key_lo = ai_key.strip().lower()
-
-            # Tier 1: exact key match
-            for h in today_habits:
-                if h.key == ai_key:
-                    matched_habit, strategy = h, "exact_key"
-                    break
-
-            # Tier 2: label substring match (either direction)
-            if not matched_habit:
-                for h in today_habits:
-                    label_lo = h.label.lower()
-                    if ai_key_lo in label_lo or label_lo in ai_key_lo:
-                        matched_habit, strategy = h, "label_substring"
-                        break
-
-            # Tier 3: any word overlap between ai_key words and label words
-            if not matched_habit:
-                ai_words = {w for w in ai_key_lo.split() if len(w) > 2}
-                for h in today_habits:
-                    label_words = {w for w in h.label.lower().split() if len(w) > 2}
-                    if ai_words & label_words:
-                        matched_habit, strategy = h, "keyword_overlap"
-                        break
-
-            if matched_habit:
-                before = change_log.snapshot(matched_habit)
-                matched_habit.done = True
-                change_log.record_update(db, matched_habit, before, f"Habit done: {matched_habit.label}")
-                result["habits_updated"].append({
-                    "key":      matched_habit.key,
-                    "label":    matched_habit.label,
-                    "strategy": strategy,
-                })
-                print(f"[parse] habit '{ai_key}' matched '{matched_habit.key}' via {strategy}")
+            hit = _state.mark_non_negotiable_done(db, str(ai_key), today)
+            if hit:
+                result["habits_updated"].append(hit)
+                print(f"[parse] non-negotiable '{ai_key}' matched '{hit['key']}' via {hit['strategy']}")
             else:
-                print(f"[parse] habit '{ai_key}' — no match (today: {[h.key for h in today_habits]})")
+                print(f"[parse] non-negotiable '{ai_key}' — no active match")
 
     # ── Annual target updates ─────────────────────────────────
     for u in parsed.get("annual_updates") or []:

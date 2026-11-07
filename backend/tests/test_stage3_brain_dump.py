@@ -216,7 +216,8 @@ class TestTradingRemoved:
         db = _db()
         state, _ = ot.get_dashboard_state(db)
         db.close()
-        assert "gate" not in state and "trading_pl_usd" not in state["ten_k_progress"]
+        assert "gate" not in state and "ten_k_progress" not in state
+        assert "trading" not in json.dumps(state).lower()
 
     def test_trading_endpoints_untouched(self):
         assert client.get("/trading/gate").status_code == 200
@@ -253,8 +254,11 @@ class TestDueDates:
         _todo("Far thing", due=str(TODAY + timedelta(days=40)))
         _todo("Done thing", due=str(TODAY - timedelta(days=9)), done=True)
         db = _db()
-        result, summary = ot.run_tool("get_deadlines", {"days": 14}, db)
+        result, summary = ot.get_deadlines(db, 14)
+        readable, _ = ot.run_tool("get_deadlines", {"days": 14}, db)
         db.close()
+        assert readable["overdue"] == [readable["overdue"][0]] and "Overdue thing — 3 days overdue" in readable["overdue"][0]
+        assert "Today thing" in readable["due today"][0]
         assert [t["text"] for t in result["overdue"]] == ["Overdue thing"]
         assert result["overdue"][0]["days"] == -3
         assert [t["text"] for t in result["due_today"]] == ["Today thing"]

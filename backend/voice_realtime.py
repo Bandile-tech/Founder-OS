@@ -187,7 +187,7 @@ def run_realtime_tool(payload: ToolCallRequest, db: Session = Depends(get_db)):
                          "function": {"name": payload.name, "arguments": json.dumps(args)}}],
         )
         result, summary = orchestrator_tools.run_tool(payload.name, args, db)
-        output = json.dumps(result, default=str)
+        output = orchestrator_tools.for_model(payload.name, result)
         conversation.save_message(db, "tool", output, session_id=session_tag, tool_call_id=call_id)
         changes = change_log.current_batch_changes(db)
     finally:
