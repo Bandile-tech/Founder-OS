@@ -96,6 +96,59 @@ def row_to_message(row: models.ChatMessage) -> dict:
     return {"role": row.role, "content": row.content or ""}
 
 
+INTERRUPTED_RESULT = json.dumps({"error": "interrupted, no result"})
+
+
+def interrupted_result_message(tool_call_id: str) -> dict:
+    return {"role": "tool", "tool_call_id": tool_call_id, "content": INTERRUPTED_RESULT}
+
+
+def sanitize_history(messages: list[dict]) -> list[dict]:
+    """Return a copy of ``messages`` that OpenAI will accept, whatever was persisted.
+
+    * every assistant ``tool_calls`` entry is followed immediately by one tool message
+      per tool_call_id; a missing result is replaced by a synthetic "interrupted" one
+    * a tool message that does not answer the assistant message right before it
+      (no preceding tool_calls, unknown id, duplicate, or separated from its call) is dropped
+    * the first non-system message is a user message: anything before it is dropped
+
+    Runs before every model call, so a thread damaged by an interrupted turn (typed or
+    voice) repairs itself without a data migration. The input is never mutated."""
+    out: list[dict] = []
+    i, n = 0, len(messages)
+    while i < n:
+        m = messages[i]
+        role = m.get("role")
+        if role == "tool":
+            i += 1                                  # orphan: no preceding tool_calls
+            continue
+        calls = m.get("tool_calls") if role == "assistant" else None
+        if not calls:
+            out.append(m)
+            i += 1
+            continue
+        valid = [c for c in calls if isinstance(c, dict) and c.get("id")]
+        ids = [c["id"] for c in valid]
+        j, answers = i + 1, {}
+        while j < n and messages[j].get("role") == "tool":
+            tid = messages[j].get("tool_call_id")
+            if tid in ids and tid not in answers:
+                answers[tid] = messages[j]
+            j += 1
+        i = j
+        if not valid:
+            if (m.get("content") or "").strip():
+                out.append({"role": "assistant", "content": m["content"]})
+            continue
+        out.append({**m, "tool_calls": valid})
+        for tid in ids:
+            out.append(answers.get(tid) or interrupted_result_message(tid))
+    first = next((k for k, m in enumerate(out) if m.get("role") != "system"), len(out))
+    while first < len(out) and out[first].get("role") != "user":
+        out.pop(first)
+    return out
+
+
 def _window_start(rows: list[models.ChatMessage], turns: int) -> int:
     """Index of the first row inside the verbatim window: the Nth most recent user turn.
     Starting at a user row guarantees no orphaned tool result opens the window."""
@@ -126,7 +179,7 @@ def build_history(db, thread_id: str = DEFAULT_THREAD_ID, *, refresh_summary: bo
         summary_row = _maybe_refresh_summary(db, thread_id, older, summary_row)
 
     summary = summary_row.summary if (summary_row and summary_row.summary) else None
-    return [row_to_message(r) for r in window], summary
+    return sanitize_history([row_to_message(r) for r in window]), summary
 
 
 # ── Rolling summary ──────────────────────────────────────────

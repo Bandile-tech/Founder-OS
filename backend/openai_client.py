@@ -440,7 +440,8 @@ AI_UNAVAILABLE_REPLY = (
     "AI is not configured on this server (OPENAI_API_KEY is missing). "
     "Everything else keeps working; the assistant is offline."
 )
-AI_FAILED_REPLY = "The assistant could not complete that request. Nothing was changed by this turn."
+AI_FAILED_REPLY = ("Something went wrong on my side and I couldn't finish that. "
+                   "Anything already done is listed under the reply with Undo. Please try again.")
 
 
 def get_orchestrator_response(messages: list, db, max_rounds: int = 6,
@@ -465,6 +466,7 @@ def get_orchestrator_response(messages: list, db, max_rounds: int = 6,
     """
     import orchestrator_tools
     import change_log
+    import conversation
 
     convo = [{"role": "system", "content": _load_orchestrator_prompt()}]
     ctx_msg = (context or {}).get("message")
@@ -481,6 +483,8 @@ def get_orchestrator_response(messages: list, db, max_rounds: int = 6,
         # tool-call fragments accumulated by stream index
         calls: dict = {}
 
+        # Whatever history we were handed, never send an invalid tool-call sequence.
+        convo[:] = conversation.sanitize_history(convo)
         try:
             for delta in _stream_completion(convo, orchestrator_tools.TOOL_SCHEMAS):
                 if "content" in delta:
@@ -500,12 +504,14 @@ def get_orchestrator_response(messages: list, db, max_rounds: int = 6,
                 # finish_reason is informational; loop control is driven by whether we
                 # accumulated any tool calls below.
         except llm.AIUnavailable as exc:
-            yield {"type": "error", "content": str(exc)}
+            print(f"[orchestrator] AI unavailable: {exc}")
+            yield {"type": "error", "content": AI_UNAVAILABLE_REPLY}
             yield _final(AI_UNAVAILABLE_REPLY)
             return
         except Exception as exc:  # noqa: BLE001 — network / API failure
+            # Detail goes to the logs only; the screen gets the friendly message.
             print(f"[orchestrator] model call failed: {type(exc).__name__}: {exc}")
-            yield {"type": "error", "content": f"{type(exc).__name__}: {exc}"}
+            yield {"type": "error", "content": AI_FAILED_REPLY}
             yield _final(content_acc or AI_FAILED_REPLY)
             return
 
@@ -541,7 +547,11 @@ def get_orchestrator_response(messages: list, db, max_rounds: int = 6,
             except (ValueError, TypeError):
                 args = {}
             yield {"type": "tool_call", "tool": name, "args": args}
-            result, summary = orchestrator_tools.run_tool(name, args, db)
+            try:
+                result, summary = orchestrator_tools.run_tool(name, args, db)
+            except Exception as exc:  # noqa: BLE001 — run_tool should never raise; stay valid if it does
+                print(f"[orchestrator] tool {name} crashed: {type(exc).__name__}: {exc}")
+                result, summary = {"error": "The tool failed."}, "The tool failed."
             is_error = isinstance(result, dict) and "error" in result
             yield {"type": "tool_result", "tool": name, "summary": summary, "error": is_error}
             if isinstance(result, dict) and result.get("ui_directive"):

@@ -1629,9 +1629,11 @@ def _ai_http_error(exc: Exception) -> HTTPException:
     """Map an AI-layer failure to a clean HTTP error instead of a 500 traceback."""
     if isinstance(exc, llm.AIUnavailable):
         return HTTPException(status_code=503, detail=str(exc))
+    # Provider detail stays in the logs; the screen only ever gets a friendly message.
+    print(f"[ai] request failed: {type(exc).__name__}: {exc}")
     if isinstance(exc, ParseFailed):
-        return HTTPException(status_code=502, detail=f"Parser failed: {exc}. Nothing was written.")
-    return HTTPException(status_code=502, detail=f"AI request failed: {type(exc).__name__}: {exc}")
+        return HTTPException(status_code=502, detail="I couldn't understand that one. Nothing was written. Please try again.")
+    return HTTPException(status_code=502, detail="The assistant hit a problem. Please try again in a moment.")
 
 
 def _run_parse(db: Session, text: str) -> dict:
@@ -1821,7 +1823,8 @@ def voice_transcribe(audio: UploadFile = File(...)):
     except llm.AIUnavailable as e:
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Transcription failed: {e}")
+        print(f"[voice] transcription failed: {type(e).__name__}: {e}")
+        raise HTTPException(status_code=502, detail="I couldn't transcribe that. Please try again.")
     if not text:
         raise HTTPException(status_code=422, detail="No speech detected")
     return {"text": text}
@@ -1837,7 +1840,8 @@ def voice_speak(request: schemas.SpeakRequest):
     except llm.AIUnavailable as e:
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Speech synthesis failed: {e}")
+        print(f"[voice] speech synthesis failed: {type(e).__name__}: {e}")
+        raise HTTPException(status_code=502, detail="I couldn't speak that reply. Please try again.")
     return Response(content=audio_bytes, media_type="audio/mpeg")
 
 
