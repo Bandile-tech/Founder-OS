@@ -122,7 +122,7 @@ class TestToolBridge:
         body = r.json()
         assert body["result"]["completed"] is True and body["error"] is False
         assert body["changes"][0]["table"] == "todos" and body["changes"][0]["action"] == "update"
-        assert json.loads(body["output"])["completed"] is True
+        assert "Business essay" in json.loads(body["output"])["completed"]
         db = _db()
         rows = conversation.thread_rows(db)
         db.close()

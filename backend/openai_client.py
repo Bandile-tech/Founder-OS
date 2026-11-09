@@ -149,14 +149,19 @@ def get_parse_response(text: str, context: dict) -> dict:
     Parse a brain dump into structured JSON.
     Returns a dict with kpi_updates, todos_add, etc.
     """
-    roadmap_ids = context.get("roadmap_ids", [])
     today = context.get("today", "2026-05-03")
+    nn = context.get("non_negotiables") or [
+        ("scripture_prayer", "Scripture & Prayer"), ("ironing", "Clothes ironed"),
+        ("python_session", "Python session"), ("sprint_training", "Sprint training"),
+        ("academics", "Academic study block")]
+    nn_keys = "|".join(k for k, _ in nn)
+    nn_lines = "; ".join(f"{k} = {label}" for k, label in nn)
 
     system_prompt = f"""You are the Founder OS parsing engine for Bandile Masocha.
 
 Context: Year 12, Trident College, Zambia. A-levels: Maths 9709, Further Maths 9231, Business 9609, Economics 9708. CIE exams Oct-Nov 2026. Building Aether AI services. Compound lifting: Bench Press, Pull-ups, Squat, Incline DB Press, Barbell Row. Local currency is Zambian Kwacha (K / ZMW); business is also done in US dollars ($ / USD).
 
-Known roadmap task IDs: {', '.join(roadmap_ids)}
+Daily non-negotiables (key = label): {nn_lines}
 
 Parse the brain dump and return ONLY valid JSON, no markdown, no explanation.
 
@@ -177,7 +182,7 @@ INTENT RULE — NOT EVERY SENTENCE IS A TASK. Label every todos_add item:
 confidence is your 0.0-1.0 certainty in that label. Hedged language ("maybe", "might", "someday", "could") lowers confidence for commitment and raises it for idea. When genuinely unsure, give a low confidence rather than guessing a commitment.
 
 Input: "Maybe I should start a newsletter someday"
-Correct output: "todos_add": [{{"text": "Start a newsletter", "priority": 5, "category": "business", "due": null, "roadmap_id": null, "intent": "idea", "confidence": 0.9}}]
+Correct output: "todos_add": [{{"text": "Start a newsletter", "priority": 5, "category": "business", "due": null, "intent": "idea", "confidence": 0.9}}]
 Wrong output: a task with intent "commitment".
 
 COMPLETION RULE: when Bandile says he finished, completed or did a task that already exists ("finished the Business essay", "done with the CEO email"), put the task's distinguishing words in todos_complete (e.g. "Business essay"). Do not also add it as a new task.
@@ -197,11 +202,9 @@ Wrong output: "todos_add": [{{"text": "read Deep Work"}}]
 Schema:
 {{
   "summary": "one-line summary",
-  "kpi_updates": [{{"key": "maths_syllabus|further_maths|business|economics", "value": number}}],
-  "todos_add": [{{"text": "string", "priority": 1, "category": "health|academics|business|personal", "due": "YYYY-MM-DD|null", "roadmap_id": "id-or-null", "intent": "commitment|idea|discussion", "confidence": 0.0-1.0}}],
+  "todos_add": [{{"text": "string", "priority": 1, "category": "health|academics|business|personal", "due": "YYYY-MM-DD|null", "intent": "commitment|idea|discussion", "confidence": 0.0-1.0}}],
   "todos_complete": ["distinguishing words of an existing task"],
-  "roadmap_complete": ["roadmap-task-id"],
-  "habits_done": ["scripture_prayer|ironing|python_session|sprint_training|academics"],
+  "habits_done": ["{nn_keys}"],
   "annual_updates": [{{"name_fragment": "string", "current": number}}],
   "reading_updates": [{{"title_fragment": "string", "progress": "string_or_null"}}],
   "bible_log": [{{"book": "string (e.g. Proverbs)", "chapter": integer, "notes": "string_or_null"}}],
@@ -221,6 +224,8 @@ Schema:
 Health extraction rules: extract sleep_hours from phrases like "slept 7 hours". Set mobility_done=true if mobility/stretching mentioned. Set session_done=true if a training session is mentioned. For lifts, populate lift_logs array — one entry per lift mentioned. lift_name is the exact lift name (e.g. "Bench Press", "Deadlift", "Squat"). If a new lift name is mentioned that isn't in the known list, include it anyway — the system will auto-create it. Omit health_updates key entirely if no health content found. Omit lift_logs key entirely if no lifts mentioned.
 
 Trading is not tracked here. Ignore trades, backtests and P&L entirely; never invent keys for them.
+
+Syllabus progress is not logged here: revision of a topic is handled by the assistant's update_syllabus tool, so never output percentages for subjects.
 
 Today is {today}. Return valid JSON only."""
 
@@ -555,7 +560,7 @@ def get_orchestrator_response(messages: list, db, max_rounds: int = 6,
             tool_msg = {
                 "role": "tool",
                 "tool_call_id": slot["id"] or f"call_{idx}",
-                "content": json.dumps(result, default=str),
+                "content": orchestrator_tools.for_model(name, result),
             }
             convo.append(tool_msg)
             if on_message:

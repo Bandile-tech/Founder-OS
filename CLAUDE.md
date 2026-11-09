@@ -66,7 +66,8 @@ One self-contained file, `frontend/index.html` (inline CSS and vanilla JS, no bu
 `frontend/assets/` (`orb.png`, `scene.png`), `frontend/icons/` (app icon, favicon,
 apple-touch-icon; `icon.svg` is the source) and `frontend/manifest.json` (standalone web app).
 Pages: Command Centre (home, built on `GET /briefing/today`), Timetable, Health, Syllabus,
-Agents, War Room, Annual Targets, Design Guide, Settings. (Dashboard and Academic Roadmap were
+Conversations (the server-side thread from `GET /conversation/history`, grouped by local day,
+newest day first, searchable), Agents, War Room, Annual Targets, Design Guide, Settings. (Dashboard and Academic Roadmap were
 removed from the frontend; their backend tables and endpoints remain.)
 
 **Design system.** All tokens live in one `:root` block: a fluid `clamp()` type scale
@@ -102,10 +103,12 @@ attaches the session token; a 401 opens the login gate. The API base is the page
 The orb is the assistant's presence (states idle / listening / thinking / speaking / acting
 as CSS overlays on the orb image). `show_view` directives (`{"type":"ui"}` SSE events, or
 `ui_directive` from the voice tool bridge) open a full-screen stage with a whitelisted view
-(syllabus, brief, deadlines, note, changes, progress) laid out as KPI cards, list, next best
+(syllabus, brief, deadlines, note, changes, progress, history) laid out as KPI cards, list, next best
 actions; the panel always ends above the dock. Live voice with no view open is the centred
 full-screen orb with the transcript beneath it; a view opened during voice sits beside it.
-All user text is escaped with `escHtml` before it reaches `innerHTML`; `mdHtml` escapes raw HTML
+The frontend sends the assistant only the typed text: no client-side state rides along (the
+server ignores a `context` field from older clients). All user text is escaped with `escHtml`
+before it reaches `innerHTML`; `mdHtml` escapes raw HTML
 before markdown runs.
 
 ### Backend (FastAPI, `backend/`)
@@ -116,8 +119,9 @@ before markdown runs.
 | `llm.py` | The only OpenAI gateway: lazy client, model config, usage logging, cost estimates |
 | `openai_client.py` | Prompts: parser schema, orchestrator loop (`get_orchestrator_response`) |
 | `orchestrator.py` | `POST /orchestrator` SSE bridge: history budget, memory, persistence of tool calls |
-| `orchestrator_tools.py` | The tool registry (23 tools, incl. `show_view` UI directives) and `run_tool` (never raises) |
-| `conversation.py` | One default thread, verbatim window + rolling summary, replay of tool results |
+| `orchestrator_tools.py` | The tool registry (23 tools, incl. `show_view` UI directives), `run_tool` (never raises) and `for_model` (plain-language tool output) |
+| `conversation.py` | One default thread, verbatim window + rolling summary, replay of tool results, `GET /conversation/history` |
+| `assistant_state.py` | Everything the assistant knows about Bandile's state, from the current sources only (see below) |
 | `memory_service.py` | Long-term memory (`remember` tool, recall) |
 | `change_log.py` | Every write recorded with before/after snapshots; undo; batches live on `db.info` |
 | `actions.py` | Pending deletes needing confirmation; suggestions accepted with one tap |
@@ -140,9 +144,20 @@ calls through `run_tool` inside one change-log batch → every message of the tu
 assistant tool calls, tool results, final) is saved to the default thread → the final SSE
 event carries `changes`, which the UI shows with Undo.
 
-`route_brain_dump` → parser (`get_parse_response`) → `apply_parse_updates` (atomic, one
-commit, everything logged). Commitments become tasks, ideas go to the Inbox note, discussion
+`route_brain_dump` → parser (`get_parse_response`, told the active non-negotiables) →
+`apply_parse_updates` (atomic, one commit, everything logged). Commitments become tasks, ideas go to the Inbox note, discussion
 writes nothing, low-confidence items become suggestions.
+
+### What the assistant reads (current sources only)
+`assistant_state.py` is the single place the assistant's view of the world comes from:
+academics from `syllabus_points`, the daily routine from `non_negotiables` (a day's ticks live
+in `habits`, keyed by the non-negotiable; only `assistant_state` reads them, always through the
+active list), targets from `annual_targets`, revenue from `revenue` in Kwacha with USD converted
+at `ZMW_PER_USD`. The legacy tables (`subjects`/`topics`/`subtopics` mastery, `roadmap_tasks`,
+`kpi_snapshots`, the $10K scoreboard, trading) are never read by a tool, the context or the
+briefing; `tests/test_assistant_current_data.py` fails if one is. Every tool result passes through
+`orchestrator_tools.for_model` before the model sees it (typed and voice): labels instead of keys,
+words instead of booleans and status codes, no nulls.
 
 ### Data
 SQLite at `backend/founder_os.db` locally; Postgres on Supabase in production with RLS enabled
@@ -167,9 +182,12 @@ on new tables. No destructive migrations.
   `bulletproof` (green). One tap or `update_syllabus` advances; `last_revised` is automatic.
 - **Exam dates** per `(subject_code, paper)` in `exam_dates`, falling back to `subjects.exam_date`.
 - **Currency**: revenue rows carry `USD` or `ZMW`; conversions use `ZMW_PER_USD`.
-- **Habit keys** (non-negotiables): `scripture_prayer`, `ironing`, `python_session`,
-  `sprint_training`, `academics` — referenced by the parser.
-- **KPI keys**: `maths_syllabus`, `further_maths`, `business`, `economics` (sprint KPIs and
-  trading are no longer tracked by the assistant).
+- **Non-negotiables**: the active rows of `non_negotiables` (seeded with `scripture_prayer`,
+  `ironing`, `python_session`, `sprint_training`, `academics`). The parser is given the active
+  keys and labels; a tick creates the day's `habits` row when it is missing.
+- **Business progress** on the home screen is the revenue annual target's progress (a numeric
+  target named "revenue" or measured in ZMW/USD), or empty when there is none.
+- **KPI keys** (`maths_syllabus` …) and `roadmap_tasks` are legacy: the parser no longer emits
+  them and the assistant never reads them.
 - **Trading** tables and `/trading/*` endpoints still exist but nothing in the UI or the
   assistant reads them.

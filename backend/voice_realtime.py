@@ -198,7 +198,7 @@ def run_realtime_tool(payload: ToolCallRequest, db: Session = Depends(get_db)):
         except Exception as exc:  # noqa: BLE001 — run_tool should never raise
             print(f"[voice] tool {payload.name} crashed: {type(exc).__name__}: {exc}")
             result, summary = {"error": "The tool failed."}, "The tool failed."
-        output = json.dumps(result, default=str)
+        output = orchestrator_tools.for_model(payload.name, result)
         conversation.save_message(db, "tool", output, session_id=session_tag, tool_call_id=call_id)
         closed = True
         changes = change_log.current_batch_changes(db)

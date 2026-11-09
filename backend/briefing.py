@@ -36,7 +36,6 @@ from database import get_db
 router = APIRouter()
 
 DEADLINE_WINDOW_DAYS = 14
-TEN_K_TARGET_USD = 10000
 
 
 def _greeting(now: datetime) -> str:
@@ -121,23 +120,17 @@ def _task_items(db: Session, today: date) -> tuple[list, dict]:
 
 
 def _non_negotiables(db: Session, today: date) -> tuple[list, list, int]:
-    active = db.query(models.NonNegotiable).filter(models.NonNegotiable.is_active == True).order_by(
-        models.NonNegotiable.sort_order, models.NonNegotiable.id).all()
-    existing = {h.key: h for h in db.query(models.Habit).filter(models.Habit.date == today).all()}
+    import assistant_state
+    day = assistant_state.routine_day(db, today)
     rows, items = [], []
-    done = 0
-    for nn in active:
-        h = existing.get(nn.key)
-        is_done = bool(h and h.done)
-        done += 1 if is_done else 0
-        rows.append({"key": nn.key, "label": nn.label, "done": is_done, "habit_id": h.id if h else None})
-        if not is_done:
-            items.append(_item(title=nn.label, category="non_negotiable", due=today, today=today, due_label="Today",
+    for nn in day["items"]:
+        rows.append({"key": nn["key"], "label": nn["label"], "done": nn["done"], "habit_id": nn["habit_id"]})
+        if not nn["done"]:
+            items.append(_item(title=nn["label"], category="non_negotiable", due=today, today=today, due_label="Today",
                                reason="Daily non-negotiable not yet done", action="Tick it off",
-                               target_type="habit", target_id=h.id if h else None, completable=False,
-                               score=55, extra={"habit_key": nn.key}))
-    pct = round(100 * done / len(active)) if active else 0
-    return rows, items, pct
+                               target_type="habit", target_id=nn["habit_id"], completable=False,
+                               score=55, extra={"habit_key": nn["key"]}))
+    return rows, items, day["pct"]
 
 
 def _exam_items(db: Session, today: date) -> tuple[list, list]:
@@ -207,10 +200,12 @@ def _alert_items(db: Session, today: date) -> tuple[list, list]:
     return alerts, items
 
 
-def _business_pct(db: Session) -> int:
-    import main
-    usd = main._revenue_usd_total(db, since=main.TEN_K_START_DATE)
-    return max(0, min(100, round(100 * usd / TEN_K_TARGET_USD)))
+def _business_pct(db: Session) -> int | None:
+    """Progress of the revenue annual target, or None when no revenue target is set.
+    (The old $10K scoreboard is no longer read.)"""
+    import assistant_state
+    t = assistant_state.revenue_target(db)
+    return t["progress_pct"] if t else None
 
 
 # ── Summary (optional, cached, one call per day) ─────────────

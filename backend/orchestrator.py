@@ -28,8 +28,11 @@ def _sse(event: dict) -> str:
 
 
 def _enrich_user_text(request, db) -> str:
-    """Append today's activity log and any live client context to the user's text —
-    mirroring the existing /input and /chat behaviour."""
+    """Append today's activity log to the user's text.
+
+    A ``context`` object sent by an older client is ignored on purpose: it carried the
+    legacy KPI store, raw habit booleans and old subject mastery. Live state reaches the
+    model only through tools (get_dashboard_state), which read the current sources."""
     text = request.text.strip()
     context_parts: list[str] = []
     today_logs = db.query(models.DailyLog).filter(
@@ -39,8 +42,6 @@ def _enrich_user_text(request, db) -> str:
         log_lines = "\n".join(f"- {l.entry}" for l in today_logs if l.entry)
         if log_lines:
             context_parts.append(f"[Today's activity log]\n{log_lines}")
-    if getattr(request, "context", None):
-        context_parts.append(f"[Live system context]\n{json.dumps(request.context)}")
     if context_parts:
         text += "\n\n" + "\n\n".join(context_parts)
     return text

@@ -15,9 +15,14 @@ Server-side conversation state for the assistant.
 
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
+
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy import func
+from sqlalchemy.orm import Session
 
 import models
+from database import get_db
 
 DEFAULT_THREAD_ID = "default"
 TOOL_RESULT_REPLAY_CHARS = 1500
@@ -247,3 +252,74 @@ def context_message(summary: str | None, memories: list[str] | None) -> dict | N
     if not parts:
         return None
     return {"role": "system", "content": "\n\n".join(parts)}
+
+
+# ── Conversations page ───────────────────────────────────────
+
+router = APIRouter()
+
+HISTORY_PAGE_LIMIT = 200
+
+
+def _day_label(day, today) -> str:
+    if day == today:
+        return "Today"
+    if day == today - timedelta(days=1):
+        return "Yesterday"
+    fmt = "%A %d %B" if day.year == today.year else "%A %d %B %Y"
+    return day.strftime(fmt).replace(" 0", " ")
+
+
+def history(db, *, q: str | None = None, before_id: int | None = None, limit: int = HISTORY_PAGE_LIMIT,
+            tz_offset_minutes: int = 0, thread_id: str = DEFAULT_THREAD_ID, now: datetime | None = None) -> dict:
+    """The thread's spoken and typed messages (user and assistant text only — no tool
+    plumbing), grouped by the viewer's local day, newest day first. Within a day the
+    messages read in order. ``q`` filters case-insensitively; ``before_id`` pages back."""
+    query = (db.query(models.ChatMessage)
+             .filter(models.ChatMessage.thread_id == thread_id,
+                     models.ChatMessage.role.in_(["user", "assistant"]),
+                     models.ChatMessage.content != ""))
+    q = (q or "").strip()
+    if q:
+        query = query.filter(func.lower(models.ChatMessage.content).contains(q.lower()))
+    if before_id:
+        query = query.filter(models.ChatMessage.id < int(before_id))
+    rows = query.order_by(models.ChatMessage.id.desc()).limit(limit + 1).all()
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+
+    # tz_offset_minutes follows JavaScript's getTimezoneOffset(): minutes to ADD to local
+    # time to get UTC (Lusaka, UTC+2, is -120).
+    shift = timedelta(minutes=-int(tz_offset_minutes or 0))
+    today = ((now or datetime.utcnow()) + shift).date()
+    days: dict = {}
+    for r in rows:
+        local = (r.created_at or datetime.utcnow()) + shift
+        day = days.setdefault(local.date(), [])
+        changes = 0
+        if r.changes_json:
+            try:
+                changes = len(json.loads(r.changes_json) or [])
+            except (ValueError, TypeError):
+                changes = 0
+        day.append({
+            "id": r.id, "role": r.role, "text": r.content,
+            "time": local.strftime("%H:%M"),
+            "voice": (r.session_id or "").startswith("voice"),
+            "changes": changes,
+        })
+    out = []
+    for day in sorted(days, reverse=True):
+        msgs = sorted(days[day], key=lambda m: m["id"])
+        out.append({"date": day.isoformat(), "label": _day_label(day, today), "messages": msgs})
+    return {"query": q, "days": out, "count": len(rows), "has_more": has_more,
+            "next_before_id": rows[-1].id if (has_more and rows) else None}
+
+
+@router.get("/conversation/history")
+def conversation_history(q: str | None = Query(None, max_length=200),
+                         before_id: int | None = Query(None, ge=1),
+                         limit: int = Query(HISTORY_PAGE_LIMIT, ge=1, le=500),
+                         tz_offset: int = Query(0, ge=-900, le=900),
+                         db: Session = Depends(get_db)):
+    return history(db, q=q, before_id=before_id, limit=limit, tz_offset_minutes=tz_offset)

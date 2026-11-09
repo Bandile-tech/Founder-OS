@@ -281,6 +281,14 @@ body.nav-open #nav-scrim{display:block}
 .dot--sm{width:4px;height:4px;box-shadow:none}
 .dot.success{--c:var(--success)}.dot.danger{--c:var(--danger)}.dot.warn{--c:var(--warn)}.dot.purple{--c:var(--purple)}.dot.glow{--c:var(--glow)}
 .list{display:flex;flex-direction:column}
+/* Message - one line of a conversation (Conversations page, history view) */
+.msg{display:flex;align-items:flex-start;gap:var(--sp-3);padding:var(--sp-3) var(--sp-1);border-bottom:1px solid var(--line);min-width:0}
+.msg:last-child{border-bottom:none}
+.msg-who{flex:none;width:clamp(76px,7vw,104px);padding-top:3px;font-size:var(--fs-2xs);letter-spacing:var(--track-caps);text-transform:uppercase;color:var(--muted)}
+.msg--assistant .msg-who{color:var(--glow-2)}
+.msg-body{flex:1;min-width:0;font-size:var(--fs-base);line-height:1.6;color:var(--text);white-space:pre-wrap;overflow-wrap:anywhere}
+.msg-meta{flex:none;padding-top:2px;font-size:var(--fs-xs);line-height:1.5;color:var(--text-2);text-align:right;font-variant-numeric:tabular-nums}
+mark.hl{background:rgba(167,235,242,0.18);color:#fff;border-radius:3px;padding:0 2px}
 
 /* Check — square tick box */
 .check{width:22px;height:22px;flex:none;border-radius:6px;border:1.6px solid rgba(190,230,240,0.55);background:rgba(255,255,255,0.02);
@@ -774,6 +782,10 @@ button.home-tile:active{transform:scale(0.98)}
   .form-row > .input--num,.form-row > .input--narrow{flex:1 1 120px}
   .row--wrap .row-actions{width:100%;justify-content:flex-end}
   .sy-meta{display:none}
+  .msg{flex-wrap:wrap;gap:var(--sp-1) var(--sp-3)}
+  .msg-who{width:auto;padding-top:0}
+  .msg-meta{margin-left:auto;padding-top:0}
+  .msg-body{flex-basis:100%;order:1}
   .sy-state{min-width:0}
   .home-cards{grid-template-columns:minmax(0,1fr)}
   .home-tiles{grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--sp-3)}
@@ -873,6 +885,10 @@ button.home-tile:active{transform:scale(0.98)}
     <button class="nav-item" onclick="nav('syllabus',this)" title="Syllabus">
       <span class="ni"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2.2" y="2.2" width="11.6" height="11.6" rx="2"/><path d="M5 6h6M5 8.5h6M5 11h3.5"/></svg></span>
       <span class="nav-label">Syllabus</span>
+    </button>
+    <button class="nav-item" onclick="nav('history',this)" title="Conversations">
+      <span class="ni"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.4 4.2a1.7 1.7 0 0 1 1.7-1.7h7.8a1.7 1.7 0 0 1 1.7 1.7v5.3a1.7 1.7 0 0 1-1.7 1.7H7.3l-3 2.5v-2.5h-.2a1.7 1.7 0 0 1-1.7-1.7Z"/><path d="M5.2 5.9h5.6M5.2 8.1h3.4"/></svg></span>
+      <span class="nav-label">Conversations</span>
     </button>
     <button class="nav-item" onclick="nav('agents',this)" title="Agents">
       <span class="ni"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="3.6" r="1.9"/><circle cx="3.4" cy="12.2" r="1.9"/><circle cx="12.6" cy="12.2" r="1.9"/><path d="M7.1 5.3 4.4 10.5M8.9 5.3l2.7 5.2M5.3 12.2h5.4"/></svg></span>
@@ -1045,6 +1061,14 @@ button.home-tile:active{transform:scale(0.98)}
       <div id="sy-body" class="stack-lg"><div class="skel skel-row"></div><div class="skel skel-row"></div><div class="skel skel-row"></div></div>
     </section>
 
+    <!-- ── CONVERSATIONS ── -->
+    <section class="page" id="p-history">
+      <div class="page-head">
+        <div><div class="page-eyebrow">Assistant</div><h1 class="page-title">Conversations</h1><div class="page-sub">Everything said to Founder OS, typed or spoken. Newest day first.</div></div>
+      </div>
+      <div id="hist-body" class="stack-lg"></div>
+    </section>
+
     <!-- ── WAR ROOM ── -->
     <section class="page" id="p-warroom">
       <div class="page-head">
@@ -1200,6 +1224,11 @@ button.home-tile:active{transform:scale(0.98)}
           <div class="row"><div class="check checked" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5l3.2 3L13 4.5"/></svg></div><span class="dot dot--sm"></span><div class="row-main"><div class="row-title">A completed row</div></div><span class="row-meta overdue">Due Nov 7</span></div>
           <div class="row"><div class="check" aria-hidden="true"></div><span class="dot dot--sm"></span><div class="row-main"><div class="row-title">A row with a subtitle</div><div class="row-sub">Secondary line in --fs-xs</div></div><span class="row-meta">19:00</span></div>
           <div class="row is-now"><span class="dot glow"></span><div class="row-main"><div class="row-title">The current row</div></div><span class="row-meta">Now</span></div>
+        </div>
+        <div class="section-label">Messages</div>
+        <div class="list">
+          <div class="msg msg--user"><div class="msg-who">You</div><div class="msg-body">Revised S1 probability, still shaky on conditional probability.</div><div class="msg-meta">19:42</div></div>
+          <div class="msg msg--assistant"><div class="msg-who">Founder OS</div><div class="msg-body">Marked S1 1.2 Probability as revised and saved the <mark class="hl">conditional probability</mark> note.</div><div class="msg-meta">19:42<br>1 change</div></div>
         </div>
         <div class="section-label">Buttons</div>
         <div class="cluster"><button class="btn btn--primary">Primary</button><button class="btn">Default</button><button class="btn btn--ghost">Ghost</button><button class="btn btn--danger">Delete</button><button class="btn btn--sm">Small</button><button class="btn btn--icon" aria-label="Close">✕</button></div>
@@ -2033,6 +2062,7 @@ function nav(page,el){
   const pg=document.getElementById("p-"+page);
   if(pg){pg.classList.add("active");pg.classList.add("fade-up");setTimeout(()=>pg.classList.remove("fade-up"),700)}
   document.body.dataset.page=page;
+  if(page==="history"){const h=document.getElementById("hist-body");if(h)delete h.dataset.ready;}
   const c=document.getElementById("content");if(c)c.scrollTop=0;
   renderPage(page);
   closeSidebar();
@@ -2052,6 +2082,7 @@ document.addEventListener("keydown",e=>{if(e.key==="Escape"&&document.body.class
 function renderPage(page){
   if(page==="home"){renderHome();loadBriefing();}
   else if(page==="syllabus"){renderSyllabus()}
+  else if(page==="history"){const h=document.getElementById("hist-body");if(h&&!h.dataset.ready){h.dataset.ready="1";historyView(h,"");}}
   else if(page==="health"){renderHealth()}
   else if(page==="annual"){renderAnnualTargets()}
   else if(page==="timetable"){renderTimetable()}
@@ -2939,12 +2970,8 @@ async function submitUnifiedInput(){
   let sessionId=localStorage.getItem("founderOS_session");
   if(!sessionId){sessionId=Date.now().toString(36)+Math.random().toString(36).slice(2);localStorage.setItem("founderOS_session",sessionId);}
 
-  const ctx={
-    kpis:S.kpis,
-    habits:Object.fromEntries(Object.entries(S.habits).map(([k,h])=>[k,h.done])),
-    todosActive:S.todos.filter(t=>!t.done).length,
-    annualTargets:S.annualTargets.map(a=>({name:a.name,current:a.current,target:a.target})),
-  };
+  // No client-side state is sent: the assistant reads live state through its tools,
+  // from the current sources (syllabus, non-negotiables, annual targets, revenue).
 
   let reasoning="";
   let finalText="";
@@ -2977,7 +3004,7 @@ async function submitUnifiedInput(){
 
   try{
     const r=await fetch(`${API_BASE}/orchestrator`,{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({text,session_id:sessionId,context:ctx})});
+      body:JSON.stringify({text,session_id:sessionId})});
     if(!r.ok||!r.body)throw new Error("Backend "+r.status);
 
     const reader=r.body.getReader();
@@ -3210,7 +3237,7 @@ async function speakText(text){
    STAGE — show_view directives from the orchestrator (view name + params only, never HTML)
 ═══════════════════════════════════════════════════ */
 const STAGE={open:false,view:null,params:null,voice:false};
-const STAGE_TITLES={syllabus:"Syllabus",brief:"Today's Brief",deadlines:"Deadlines",note:"Note",changes:"Recent changes",progress:"Progress"};
+const STAGE_TITLES={syllabus:"Syllabus",brief:"Today's Brief",deadlines:"Deadlines",note:"Note",changes:"Recent changes",progress:"Progress",history:"Conversations"};
 const STAGE_VIEWS=new Set(Object.keys(STAGE_TITLES));
 
 function _moveOrb(toStage){
@@ -3354,6 +3381,8 @@ async function renderStageView(){
       const r=await fetch(`${API_BASE}/changes?limit=${Number(p.limit||30)}`);const rows=await r.json();
       body.innerHTML=rows.length?`<div id="stage-changes"></div>`:`<div class="empty">No changes recorded yet.</div>`;
       if(rows.length)renderChangesStrip(rows,document.getElementById("stage-changes"));
+    }else if(v==="history"){
+      historyView(body,p.q||"");
     }else if(v==="progress"){
       if(!_briefing)await loadBriefing();
       const pr=(_briefing&&_briefing.progress)||{};
@@ -3362,6 +3391,63 @@ async function renderStageView(){
         +(d.subjects&&d.subjects.length?`<div><div class="stage-section">By subject</div>${d.subjects.map(sb=>_meter(sb.subject_name,"academics",sb.progress.pct)).join("")}</div>`:"");
     }
   }catch(e){body.innerHTML=`<div class="empty">Could not load this view (${escHtml(e.message)}).</div>`;}
+}
+
+/* ═══════════════════════════════════════════════════
+   CONVERSATIONS — the server-side thread, grouped by local day, newest day first,
+   searchable. Used by the Conversations page and the "history" stage view.
+═══════════════════════════════════════════════════ */
+function _hlText(text,q){
+  let h=escHtml(text||"");
+  if(q){
+    const re=new RegExp(escHtml(q).replace(/[.*+?^${}()|[\]\\]/g,"\\$&"),"gi");
+    h=h.replace(re,m=>`<mark class="hl">${m}</mark>`);
+  }
+  return h;
+}
+function _msgHtml(m,q){
+  const who=m.role==="user"?"You":"Founder OS";
+  const meta=escHtml(m.time||"")+(m.voice?" · voice":"")+(m.changes?`<br>${Number(m.changes)} change${m.changes===1?"":"s"}`:"");
+  return `<div class="msg msg--${m.role==="user"?"user":"assistant"}"><div class="msg-who">${who}</div><div class="msg-body">${_hlText(m.text,q)}</div><div class="msg-meta">${meta}</div></div>`;
+}
+function historyView(host,initialQ){
+  if(!host)return;
+  const st={q:String(initialQ||"").trim(),days:[],next:null,seq:0,count:0};
+  host.innerHTML=`<div class="form-row"><input class="input" type="search" placeholder="Search past conversations" aria-label="Search past conversations" value="${escHtml(st.q)}"><span class="badge badge--muted" data-count>—</span></div>
+    <div class="stack-lg" data-days><div class="skel skel-row"></div><div class="skel skel-row"></div><div class="skel skel-row"></div></div><div data-more></div>`;
+  const input=host.querySelector("input"),daysEl=host.querySelector("[data-days]"),moreEl=host.querySelector("[data-more]"),countEl=host.querySelector("[data-count]");
+  const draw=()=>{
+    countEl.textContent=`${st.count}${st.next?"+":""} message${st.count===1?"":"s"}`;
+    daysEl.innerHTML=st.days.length?st.days.map(d=>`<div class="card"><div class="card-head"><div class="card-title"><span>${escHtml(d.label)}</span></div><span class="badge badge--muted">${d.messages.length}</span></div><div class="list">${d.messages.map(m=>_msgHtml(m,st.q)).join("")}</div></div>`).join("")
+      :`<div class="card"><div class="empty">${st.q?`No messages match “${escHtml(st.q)}”.`:"No conversations yet. Talk to Founder OS and they will appear here."}</div></div>`;
+    moreEl.innerHTML=st.next?`<button class="btn" type="button">Load older messages</button>`:"";
+    const b=moreEl.querySelector("button");
+    if(b)b.addEventListener("click",()=>{b.disabled=true;b.textContent="Loading…";load(true);});
+  };
+  const load=async(append)=>{
+    const seq=++st.seq;
+    const params=new URLSearchParams({tz_offset:String(new Date().getTimezoneOffset())});
+    if(st.q)params.set("q",st.q);
+    if(append&&st.next)params.set("before_id",String(st.next));
+    try{
+      const r=await fetch(`${API_BASE}/conversation/history?${params}`);
+      if(!r.ok)throw new Error("Backend "+r.status);
+      const d=await r.json();
+      if(seq!==st.seq)return;
+      if(append){
+        d.days.forEach(day=>{
+          const same=st.days.find(x=>x.date===day.date);
+          if(same)same.messages=[...day.messages,...same.messages];else st.days.push(day);
+        });
+        st.count+=d.count;
+      }else{st.days=d.days;st.count=d.count;}
+      st.next=d.has_more?d.next_before_id:null;
+      draw();
+    }catch(e){if(seq===st.seq)daysEl.innerHTML=`<div class="card"><div class="empty">Could not load conversations (${escHtml(e.message)}).</div></div>`;}
+  };
+  let t=null;
+  input.addEventListener("input",()=>{clearTimeout(t);t=setTimeout(()=>{st.q=input.value.trim();st.next=null;load(false);},250);});
+  load(false);
 }
 
 function handleUiDirective(d){
