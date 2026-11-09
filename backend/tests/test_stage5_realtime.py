@@ -89,12 +89,13 @@ class TestSession:
             r = client.post("/voice/realtime/session")
         assert r.json()["model"] == "gpt-realtime-mini"
 
-    def test_upstream_rejection_is_502_with_message(self, monkeypatch):
+    def test_upstream_rejection_is_502_with_friendly_message(self, monkeypatch, capsys):
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
         with patch("voice_realtime.httpx.post",
                    return_value=_Resp(400, {"error": {"message": "Unknown model: gpt-realtime-mini"}})):
             r = client.post("/voice/realtime/session")
-        assert r.status_code == 502 and "Unknown model" in r.json()["detail"]
+        assert r.status_code == 502 and "Unknown model" not in r.json()["detail"]
+        assert "Unknown model" in capsys.readouterr().out       # detail kept in the logs
 
     def test_usage_logged(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test")

@@ -57,6 +57,9 @@ confirm_action.
 """
 
 
+VOICE_UNAVAILABLE = "Voice isn't available right now. Please try again in a moment."
+
+
 def realtime_model() -> str:
     return os.getenv("REALTIME_MODEL") or DEFAULT_REALTIME_MODEL
 
@@ -130,19 +133,22 @@ def create_realtime_session(db: Session = Depends(get_db)):
             json=body, timeout=20.0,
         )
     except httpx.HTTPError as exc:
-        raise HTTPException(502, f"Could not reach OpenAI realtime: {exc}")
+        print(f"[voice] could not reach OpenAI realtime: {exc}")
+        raise HTTPException(502, VOICE_UNAVAILABLE)
     if resp.status_code >= 400:
         detail = resp.text[:600]
         try:
             detail = resp.json().get("error", {}).get("message", detail)
         except Exception:  # noqa: BLE001
             pass
-        raise HTTPException(502, f"OpenAI rejected the realtime session ({resp.status_code}): {detail}")
+        print(f"[voice] OpenAI rejected the realtime session ({resp.status_code}): {detail}")
+        raise HTTPException(502, VOICE_UNAVAILABLE)
     data = resp.json()
     secret = data.get("value") or (data.get("client_secret") or {}).get("value")
     expires_at = data.get("expires_at") or (data.get("client_secret") or {}).get("expires_at")
     if not secret:
-        raise HTTPException(502, "OpenAI returned no client secret.")
+        print("[voice] OpenAI returned no client secret.")
+        raise HTTPException(502, VOICE_UNAVAILABLE)
     llm.log_usage(db, model=realtime_model(), purpose="realtime_session",
                   duration_ms=int((time.monotonic() - started) * 1000))
     return {
@@ -180,17 +186,31 @@ def run_realtime_tool(payload: ToolCallRequest, db: Session = Depends(get_db)):
     session_tag = f"voice:{payload.voice_session_id}" if payload.voice_session_id else "voice"
 
     change_log.begin_batch(db, "assistant")
+    closed = False
     try:
         conversation.save_message(
             db, "assistant", "", session_id=session_tag,
             tool_calls=[{"id": call_id, "type": "function",
                          "function": {"name": payload.name, "arguments": json.dumps(args)}}],
         )
-        result, summary = orchestrator_tools.run_tool(payload.name, args, db)
+        try:
+            result, summary = orchestrator_tools.run_tool(payload.name, args, db)
+        except Exception as exc:  # noqa: BLE001 — run_tool should never raise
+            print(f"[voice] tool {payload.name} crashed: {type(exc).__name__}: {exc}")
+            result, summary = {"error": "The tool failed."}, "The tool failed."
         output = json.dumps(result, default=str)
         conversation.save_message(db, "tool", output, session_id=session_tag, tool_call_id=call_id)
+        closed = True
         changes = change_log.current_batch_changes(db)
     finally:
+        if not closed:
+            # Cancelled between saving the call and saving its result: close it so the
+            # shared thread never holds an unanswered tool call.
+            try:
+                conversation.save_message(db, "tool", conversation.INTERRUPTED_RESULT,
+                                          session_id=session_tag, tool_call_id=call_id)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[voice] could not close tool call {call_id}: {exc}")
         change_log.end_batch(db)
     return {
         "call_id": call_id, "name": payload.name, "result": result, "summary": summary,

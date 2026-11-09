@@ -18,7 +18,7 @@ import orchestrator_tools
 import conversation
 import memory_service
 import change_log
-from openai_client import get_orchestrator_response
+from openai_client import get_orchestrator_response, AI_FAILED_REPLY
 
 MEMORY_RECALL_LIMIT = 5
 
@@ -72,36 +72,63 @@ def orchestrator_stream(request, db):
     # Persist the raw user turn (not the context-enriched one).
     conversation.save_message(db, "user", text, thread_id=thread_id, session_id=session_id)
 
+    open_calls: list[str] = []      # tool_call ids saved without a result yet
+
     def _persist(msg: dict):
         if msg.get("role") == "assistant":
             conversation.save_message(
                 db, "assistant", msg.get("content") or "", thread_id=thread_id,
                 session_id=session_id, tool_calls=msg.get("tool_calls"),
             )
+            open_calls.extend(c["id"] for c in msg.get("tool_calls") or [] if c.get("id"))
         elif msg.get("role") == "tool":
             conversation.save_message(
                 db, "tool", msg.get("content") or "", thread_id=thread_id,
                 session_id=session_id, tool_call_id=msg.get("tool_call_id"),
             )
+            if msg.get("tool_call_id") in open_calls:
+                open_calls.remove(msg["tool_call_id"])
 
     change_log.begin_batch(db, "assistant")
     final_text = ""
     changes: list = []
     try:
-        for event in get_orchestrator_response(
-            messages, db, on_message=_persist,
-            context={"message": ctx} if ctx else None,
-        ):
-            if event.get("type") == "final":
-                final_text = event.get("content", "")
-                changes = event.get("changes") or []
-            yield _sse(event)
+        try:
+            for event in get_orchestrator_response(
+                messages, db, on_message=_persist,
+                context={"message": ctx} if ctx else None,
+            ):
+                if event.get("type") == "final":
+                    final_text = event.get("content", "")
+                    changes = event.get("changes") or []
+                yield _sse(event)
+        except Exception as exc:  # noqa: BLE001 — never let a raw error reach the screen
+            print(f"[orchestrator] turn failed: {type(exc).__name__}: {exc}")
+            final_text = AI_FAILED_REPLY
+            try:
+                db.rollback()       # a failed flush leaves the session unusable until then
+                changes = change_log.current_batch_changes(db)
+            except Exception:  # noqa: BLE001
+                changes = []
+            yield _sse({"type": "error", "content": AI_FAILED_REPLY})
+            yield _sse({"type": "final", "content": AI_FAILED_REPLY, "changes": changes})
     finally:
-        change_log.end_batch(db)
-        conversation.save_message(
-            db, "assistant", final_text, thread_id=thread_id, session_id=session_id,
-            changes=changes or None,
-        )
+        # A turn that failed or was cancelled (dropped connection, restart) may have saved
+        # tool calls with no results. Close them before saving so the thread stays valid.
+        try:
+            for call_id in open_calls:
+                conversation.save_message(
+                    db, "tool", conversation.INTERRUPTED_RESULT, thread_id=thread_id,
+                    session_id=session_id, tool_call_id=call_id,
+                )
+            open_calls.clear()
+            change_log.end_batch(db)
+            conversation.save_message(
+                db, "assistant", final_text, thread_id=thread_id, session_id=session_id,
+                changes=changes or None,
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(f"[orchestrator] could not save turn: {type(exc).__name__}: {exc}")
 
 
 def run_off_track(db) -> list:
