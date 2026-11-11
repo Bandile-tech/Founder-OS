@@ -75,6 +75,8 @@ import conversation as _conversation
 app.include_router(_conversation.router)
 import leads as _leads
 app.include_router(_leads.router)
+import crm as _crm
+app.include_router(_crm.router)
 
 # Serve frontend from ../frontend if it exists
 FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend")
@@ -160,6 +162,8 @@ async def startup():
         run_m014(db)        # m014 — research cost/recommendation/dedup columns, research_objectives
         from migrations.m015_leads_outreach import run as run_m015
         run_m015(db)        # m015 — leads, lead_imports, outreach_messages, todos.lead_id/client_id
+        from migrations.m016_crm import run as run_m016
+        run_m016(db)        # m016 — contacts, deals, projects, payments, recurring_revenue, communications
         _validate_schema(engine)   # raises if any ORM column is absent from the live DB
         _seed_non_negotiables_if_empty(db)
         _verify_seed_integrity(db)
@@ -2459,11 +2463,18 @@ def update_social_score(payload: schemas.SocialScoreUpdate, db: Session = Depend
 
 # ── CLIENTS ───────────────────────────────────────────────────
 @app.get("/clients")
-def get_clients(db: Session = Depends(get_db)):
-    clients = db.query(Client).order_by(Client.created_at.desc()).all()
+def get_clients(status: Optional[str] = None, q: Optional[str] = None, db: Session = Depends(get_db)):
+    query = db.query(Client)
+    if status:
+        query = query.filter(Client.status == status)
+    if q and q.strip():
+        frag = q.strip().lower()
+        query = query.filter(func.lower(Client.name).contains(frag)
+                             | func.lower(func.coalesce(Client.company, "")).contains(frag))
+    clients = query.order_by(Client.created_at.desc()).all()
     return [{"id": c.id, "name": c.name, "company": c.company, "status": c.status,
              "value": c.value, "service": c.service, "notes": c.notes,
-             "created_at": str(c.created_at)} for c in clients]
+             "created_at": str(c.created_at), **_crm.client_extras(db, c)} for c in clients]
 
 
 @app.post("/clients")
@@ -2480,17 +2491,27 @@ def update_client(client_id: int, payload: schemas.ClientUpdate, db: Session = D
     client = db.query(Client).filter(Client.id == client_id).first()
     if not client:
         raise HTTPException(404, "Client not found")
-    if payload.status is not None:
-        client.status = payload.status
-    if payload.value is not None:
-        client.value = payload.value
-    if payload.notes is not None:
-        client.notes = payload.notes
-    if payload.service is not None:
-        client.service = payload.service
-    client.updated_at = datetime.utcnow()
-    db.commit()
-    return {"id": client.id, "status": client.status}
+    if payload.status is not None and payload.status not in _crm.CLIENT_STATUSES:
+        raise HTTPException(400, f"Invalid status. Must be one of: {', '.join(_crm.CLIENT_STATUSES)}")
+    with _change_log.batch_scope(db, "ui"):
+        before = _change_log.snapshot(client)
+        if payload.status is not None:
+            client.status = payload.status
+        if payload.value is not None:
+            client.value = payload.value
+        if payload.notes is not None:
+            client.notes = payload.notes
+        if payload.service is not None:
+            client.service = payload.service
+        if payload.currency is not None:
+            client.currency = _normalise_currency(payload.currency)
+        if payload.tags is not None:
+            client.tags = ",".join(t.strip() for t in payload.tags if t and t.strip()) or None
+        client.updated_at = datetime.utcnow()
+        change = _change_log.record_update(db, client, before, f"Updated client: {client.name[:70]}")
+        db.commit()
+    return {"id": client.id, "status": client.status, "currency": client.currency,
+            "tags": _crm.tag_list(client.tags), "change": change}
 
 
 @app.delete("/clients/{client_id}")

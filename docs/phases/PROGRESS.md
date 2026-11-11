@@ -108,6 +108,45 @@ Decisions where the spec was silent:
 - `GET /leads?q=` is a case-insensitive contains match on name or company; the fuzzy
   accept rule (`fuzzy_pick`) is used where a write depends on the match.
 
+### S6 — 5C.1 CRM schema, clients, contacts, deals, communications (done)
+
+Shipped: `Contact`, `Deal`, `Project`, `Payment`, `RecurringRevenue`, `Communication`
+models and four new `clients` columns (m016, with RLS, the partial unique index on
+`payments (recurring_id, period_start)` and both backfills); `crm.py` with the lookups,
+`client_health`, `add_contact`, `log_communication`, `create_deal`, `update_deal` and the
+endpoints `GET /clients/{id}`, `POST /clients/{id}/contacts`, `PATCH /contacts/{id}`,
+`GET/POST /deals`, `PATCH /deals/{id}`, `GET/POST /communications`; `GET /clients` and
+`PATCH /clients/{id}` extended in place in `main.py` (existing fields kept, the patch is now
+logged); tools `crm_lookup`, `log_communication`, `update_deal`, `add_contact`; the
+"CLIENTS, DEALS AND PAYMENTS" prompt section; six more deletable tables;
+`retrieval.index_crm`; `business_common.parse_day`. Tests: `tests/test_phase5c_crm.py`
+(acceptance tests 1, 6, 7 plus clients, contacts and health).
+
+Deferred to S7: payments, recurring revenue, reconciliation, `GET /crm/summary`, the
+briefing items and the overdue alert.
+
+Decisions where the spec was silent:
+- `clients.currency` is added with no SQL default so that rows which predate the column are
+  the ones holding NULL; the backfill sets exactly those to `USD` and is safe to re-run. New
+  clients get `ZMW` from the ORM default.
+- Silence (no communication in 21 / 45 days) only counts for clients whose status is
+  `active`, and is measured from the last communication or, when there is none, from the
+  day the client was created.
+- "Deal in negotiation > 30 days" is measured from the deal's `updated_at`.
+- Health is computed live in `GET /clients` and `GET /clients/{id}`; the stored column is
+  refreshed by the CRM summary and the housekeeping agent (S7, S14).
+- Communications are embedded as `source_type="crm"` and project notes as `"crm_project"`
+  (the spec gives both the same type, but the `embeddings` key is `(type, id)` and the two
+  tables' ids would collide).
+- Bumping `last_activity_at` on a client's active projects is not written to the change log
+  (bookkeeping, not a statement of Bandile's).
+- Making a contact primary clears the flag on the client's previous primary contact (logged).
+- `update_deal` with only a client and no deal name acts on that client's one open deal; with
+  several open deals it returns them as candidates.
+- `business_common.parse_day` wraps `syllabus.parse_date_text` and adds today, tomorrow,
+  yesterday, weekday names, "in N days", "N days ago", "end of month" and "end of week". With
+  `past=True` (communications, payments received) a date never resolves to the future.
+
 ## Environment variables added so far
 
 | Var | Default | Session | Purpose |

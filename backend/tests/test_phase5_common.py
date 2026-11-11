@@ -63,3 +63,29 @@ def test_days_since():
     assert bc.days_since(None) is None
     assert bc.days_since(date.today() - timedelta(days=9)) == 9
     assert bc.days_since(datetime.utcnow() - timedelta(days=3, hours=2)) == 3
+
+
+def test_parse_day_reads_spoken_days():
+    wed = date(2026, 11, 11)                      # a Wednesday
+    assert bc.parse_day("today", wed) == wed
+    assert bc.parse_day("Tomorrow", wed) == date(2026, 11, 12)
+    assert bc.parse_day("yesterday", wed) == date(2026, 11, 10)
+    assert bc.parse_day("in 3 days", wed) == date(2026, 11, 14)
+    assert bc.parse_day("in 2 weeks", wed) == date(2026, 11, 25)
+    assert bc.parse_day("2 days ago", wed) == date(2026, 11, 9)
+    assert bc.parse_day("end of month", wed) == date(2026, 11, 30)
+    assert bc.parse_day("end of the week", wed) == date(2026, 11, 13)
+    assert bc.parse_day("friday", wed) == date(2026, 11, 13)
+    assert bc.parse_day("next Wednesday", wed) == date(2026, 11, 18)     # never today
+    assert bc.parse_day("last friday", wed) == date(2026, 11, 6)
+    assert bc.parse_day("2026-12-01", wed) == date(2026, 12, 1)
+    assert bc.parse_day("12 May", wed) == date(2027, 5, 12)              # the next occurrence
+    assert bc.parse_day("", wed) is None and bc.parse_day("soonish", wed) is None
+
+
+def test_parse_day_past_never_lands_in_the_future():
+    wed = date(2026, 11, 11)
+    assert bc.parse_day("monday", wed, past=True) == date(2026, 11, 9)
+    assert bc.parse_day("wednesday", wed, past=True) == wed
+    assert bc.parse_day("12 May", wed, past=True) == date(2026, 5, 12)
+    assert bc.parse_day("20 November", wed, past=True) == date(2025, 11, 20)

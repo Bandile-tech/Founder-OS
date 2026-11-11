@@ -224,6 +224,8 @@ class ClientUpdate(BaseModel):
     value: Optional[float] = None
     notes: Optional[str] = None
     service: Optional[str] = None
+    currency: Optional[str] = None
+    tags: Optional[List[str]] = None
 
 
 class RevenueCreate(BaseModel):

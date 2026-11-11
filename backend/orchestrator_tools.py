@@ -1199,7 +1199,8 @@ TOOL_SCHEMAS = [
                         "type": "string",
                         "enum": ["todos", "notes", "revenue", "ai_memory", "books",
                                  "daily_bible_log", "clients", "lift_logs", "daily_logs",
-                                 "leads", "outreach_messages"],
+                                 "leads", "outreach_messages", "contacts", "deals", "projects",
+                                 "payments", "recurring_revenue", "communications"],
                         "description": "Which table the record lives in.",
                     },
                     "record_id": {"type": "integer", "description": "The record's id."},
@@ -1530,4 +1531,214 @@ _register(
                                          "replied", "converted", "lost"]),
         "limit": _int("How many to return (default 10)."),
     },
+)
+
+
+# ── 5C: clients, deals, communications ───────────────────────
+
+def _ambiguous(kind: str, fragment: str, scored, label):
+    return ({"ambiguous": True, "candidates": _candidates(scored, label)},
+            f"{len(scored)} {kind}s could match '{fragment}' — ask which")
+
+
+def _client_label(c) -> str:
+    return f"{c.name} ({c.company})" if c.company and c.company != c.name else c.name
+
+
+def crm_lookup(db, query: str, kind: str = "any"):
+    """Read-only lookup of a client, contact, deal or project by name."""
+    import crm
+    kind = kind if kind in ("client", "contact", "deal", "project", "any") else "any"
+    candidates = []
+    if kind in ("client", "any"):
+        client, scored = crm.find_client(db, query)
+        if client is not None:
+            return {"kind": "client", "client": crm.client_detail(db, client)}, f"client {client.name}"
+        candidates += [{"kind": "client", "id": c.id, "name": _client_label(c)} for _s, c in scored[:3]]
+    if kind in ("deal", "any"):
+        deal, scored = crm.find_deal(db, query)
+        if deal is not None:
+            return {"kind": "deal", "deal": crm.serialize_deal(db, deal)}, f"deal {deal.title}"
+        candidates += [{"kind": "deal", "id": d.id, "name": d.title} for _s, d in scored[:3]]
+    if kind in ("project", "any"):
+        project, scored = crm.find_project(db, query)
+        if project is not None:
+            return {"kind": "project", "project": crm.serialize_project(db, project)}, f"project {project.title}"
+        candidates += [{"kind": "project", "id": p.id, "name": p.title} for _s, p in scored[:3]]
+    if kind in ("contact", "any"):
+        contact, scored = crm.find_contact(db, query)
+        if contact is not None:
+            client = db.query(models.Client).filter(models.Client.id == contact.client_id).first()
+            return ({"kind": "contact", "contact": crm.serialize_contact(contact),
+                     "client_name": client.name if client else None}, f"contact {contact.name}")
+        candidates += [{"kind": "contact", "id": c.id, "name": c.name} for _s, c in scored[:3]]
+    if candidates:
+        return {"ambiguous": True, "candidates": candidates}, f"{len(candidates)} records could match '{query}'"
+    return {"found": False, "query": query}, f"nothing in the CRM matches '{query}'"
+
+
+def log_communication(db, who: str, summary: str, channel: str = "whatsapp",
+                      direction: str = "out", when: str | None = None):
+    """Log a conversation with a client, or with a lead when no client matches."""
+    import business_common
+    import change_log
+    import crm
+    import leads
+    occurred = None
+    if when:
+        day = business_common.parse_day(when, past=True)
+        if day is None:
+            return {"error": f"could not read the date '{when}'"}, f"could not read the date '{when}'"
+        if day != date.today():
+            occurred = datetime(day.year, day.month, day.day, 12, 0, 0)
+    client, client_scored = crm.find_client(db, who)
+    lead = None
+    if client is None:
+        if client_scored:
+            return _ambiguous("client", who, client_scored, _client_label)
+        lead, lead_scored = leads.pick_lead(db, who)
+        if lead is None:
+            if lead_scored:
+                return _ambiguous("lead", who, lead_scored, lambda l: l.name)
+            return {"error": f"no client or lead matches '{who}'"}, f"no client or lead matches '{who}'"
+    with change_log.batch_scope(db, "assistant"):
+        try:
+            result = crm.log_communication(db, client=client, lead=lead, channel=channel,
+                                           direction=direction, summary=summary,
+                                           occurred_at=occurred, source="conversation")
+        except ValueError as exc:
+            return {"error": str(exc)}, str(exc)
+        db.commit()
+    return result, f"logged {result['channel']} with {result['with']}"
+
+
+def update_deal(db, deal: str | None = None, client: str | None = None, stage: str | None = None,
+                amount: float | None = None, currency: str | None = None,
+                expected_close: str | None = None, lost_reason: str | None = None,
+                create: bool = False):
+    """Update a deal, or create it when ``create`` is true and nothing matches."""
+    import business_common
+    import change_log
+    import crm
+    close = None
+    if expected_close:
+        close = business_common.parse_day(expected_close)
+        if close is None:
+            msg = f"could not read the date '{expected_close}'"
+            return {"error": msg}, msg
+    owner = None
+    if client:
+        owner, scored = crm.find_client(db, client)
+        if owner is None:
+            if scored:
+                return _ambiguous("client", client, scored, _client_label)
+            return {"error": f"no client matches '{client}'"}, f"no client matches '{client}'"
+    found, scored = crm.find_deal(db, deal, owner) if deal else (None, [])
+    if found is None and owner is not None and not deal and not create:
+        open_deals = db.query(models.Deal).filter(
+            models.Deal.client_id == owner.id, models.Deal.stage.notin_(("won", "lost"))).all()
+        if len(open_deals) == 1:
+            found = open_deals[0]
+        elif open_deals:
+            scored = [(1.0, d) for d in open_deals]
+    with change_log.batch_scope(db, "assistant"):
+        try:
+            if found is not None:
+                result = crm.update_deal(db, found, stage=stage, amount=amount, currency=currency,
+                                         expected_close=close, lost_reason=lost_reason)
+                verb = "updated"
+            elif scored and not create:
+                return _ambiguous("deal", deal or client or "", scored, lambda d: d.title)
+            elif create:
+                if owner is None:
+                    msg = "a new deal needs a client that is already on file"
+                    return {"error": msg}, msg
+                result = crm.create_deal(db, owner, deal or f"{owner.name} deal", amount, currency,
+                                         stage=stage or "lead", expected_close=close)
+                verb = "created"
+            else:
+                msg = f"no deal matches '{deal or client or ''}'"
+                return {"error": msg}, msg
+        except ValueError as exc:
+            return {"error": str(exc)}, str(exc)
+        db.commit()
+    summary = f"deal '{result['title']}' {verb} — {result['stage']}"
+    if result.get("project"):
+        summary += f"; project '{result['project']['title']}' created"
+    return result, summary
+
+
+def add_contact(db, client: str, name: str, role: str | None = None, email: str | None = None,
+                phone: str | None = None, whatsapp: str | None = None, is_primary: bool = False):
+    import change_log
+    import crm
+    owner, scored = crm.find_client(db, client)
+    if owner is None:
+        if scored:
+            return _ambiguous("client", client, scored, _client_label)
+        return {"error": f"no client matches '{client}'"}, f"no client matches '{client}'"
+    with change_log.batch_scope(db, "assistant"):
+        try:
+            result = crm.add_contact(db, owner, name=name, role=role, email=email, phone=phone,
+                                     whatsapp=whatsapp, is_primary=bool(is_primary))
+        except ValueError as exc:
+            return {"error": str(exc)}, str(exc)
+        db.commit()
+    return result, f"added contact {result['name']} at {owner.name}"
+
+
+_register(
+    "crm_lookup", lambda db, a: crm_lookup(db, query=a.get("query", ""), kind=a.get("kind", "any")),
+    "Look up a client, contact, deal or project by name. Read-only. Returns the full record "
+    "for one clear match and candidates otherwise.",
+    {"query": _str("Name or part of it."),
+     "kind": _str("What to look for (default any).", ["client", "contact", "deal", "project", "any"])},
+    ["query"],
+)
+
+_register(
+    "log_communication",
+    lambda db, a: log_communication(db, who=a.get("who", ""), summary=a.get("summary", ""),
+                                    channel=a.get("channel", "whatsapp"),
+                                    direction=a.get("direction", "out"), when=a.get("when")),
+    "Record a conversation Bandile had with a client (or a lead): a call, meeting, message. "
+    "ONLY when he states that it happened.",
+    {"who": _str("Client or lead name, or part of it."),
+     "summary": _str("One or two lines on what was said."),
+     "channel": _str("How (default whatsapp).", ["whatsapp", "email", "call", "meeting", "linkedin", "other"]),
+     "direction": _str("out when Bandile reached out, in when they did (default out).", ["out", "in"]),
+     "when": _str("When it happened, e.g. 'yesterday', '12 May'. Default now.")},
+    ["who", "summary"],
+)
+
+_register(
+    "update_deal",
+    lambda db, a: update_deal(db, deal=a.get("deal"), client=a.get("client"), stage=a.get("stage"),
+                              amount=a.get("amount"), currency=a.get("currency"),
+                              expected_close=a.get("expected_close"), lost_reason=a.get("lost_reason"),
+                              create=bool(a.get("create", False))),
+    "Change a deal's stage, amount or expected close date. ONLY when Bandile states the "
+    "change; never move a stage on your own assessment. Set create true only when he "
+    "explicitly describes a new deal (the client must already exist).",
+    {"deal": _str("Deal title, part of it, or its id."),
+     "client": _str("The client the deal belongs to."),
+     "stage": _str("New stage.", ["lead", "proposal", "negotiation", "won", "lost"]),
+     "amount": _num("Deal amount."),
+     "currency": _str("ZMW or USD (default ZMW)."),
+     "expected_close": _str("Expected close date as he said it."),
+     "lost_reason": _str("Why it was lost."),
+     "create": {"type": "boolean", "description": "Create the deal when none matches."}},
+)
+
+_register(
+    "add_contact",
+    lambda db, a: add_contact(db, client=a.get("client", ""), name=a.get("name", ""), role=a.get("role"),
+                              email=a.get("email"), phone=a.get("phone"), whatsapp=a.get("whatsapp"),
+                              is_primary=bool(a.get("is_primary", False))),
+    "Add a person at a client. ONLY when Bandile names a new contact for a client on file.",
+    {"client": _str("Client name or part of it."), "name": _str("The contact's name."),
+     "role": _str("Their role."), "email": _str("Email."), "phone": _str("Phone as given."),
+     "whatsapp": _str("WhatsApp number if different."),
+     "is_primary": {"type": "boolean", "description": "True if this is now the main contact."}},
+    ["client", "name"],
 )

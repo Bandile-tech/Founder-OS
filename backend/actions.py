@@ -45,6 +45,12 @@ DELETABLE = {
     "daily_logs": (models.DailyLog, "entry"),
     "leads": (models.Lead, "name"),
     "outreach_messages": (models.OutreachMessage, "body"),
+    "contacts": (models.Contact, "name"),
+    "deals": (models.Deal, "title"),
+    "projects": (models.Project, "title"),
+    "payments": (models.Payment, "title"),
+    "recurring_revenue": (models.RecurringRevenue, "title"),
+    "communications": (models.Communication, "summary"),
 }
 
 

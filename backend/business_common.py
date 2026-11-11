@@ -79,3 +79,54 @@ def days_since(dt) -> int | None:
     if isinstance(dt, date):
         return (date.today() - dt).days
     return None
+
+
+_WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+
+
+def parse_day(text, today: date | None = None, *, past: bool = False) -> date | None:
+    """A spoken day → a date: today, tomorrow, yesterday, a weekday name, "in 3 days",
+    "end of month", "end of week", or anything ``syllabus.parse_date_text`` reads
+    ("12 May", "2026-05-12").
+
+    ``past=True`` is for things that already happened (a call, a payment): a weekday means
+    its most recent occurrence and a day-month with no year is never in the future."""
+    import calendar
+    from datetime import timedelta
+
+    import syllabus
+
+    today = today or date.today()
+    t = " ".join(str(text or "").lower().replace(",", " ").split())
+    if not t:
+        return None
+    if t in ("today", "now", "tonight", "this morning", "this afternoon", "this evening"):
+        return today
+    if t == "tomorrow":
+        return today + timedelta(days=1)
+    if t == "yesterday":
+        return today - timedelta(days=1)
+    m = re.fullmatch(r"in (\d+) (day|days|week|weeks)", t)
+    if m:
+        n = int(m.group(1)) * (7 if m.group(2).startswith("week") else 1)
+        return today + timedelta(days=n)
+    m = re.fullmatch(r"(\d+) (day|days|week|weeks) ago", t)
+    if m:
+        n = int(m.group(1)) * (7 if m.group(2).startswith("week") else 1)
+        return today - timedelta(days=n)
+    if t in ("end of month", "end of the month", "month end"):
+        return today.replace(day=calendar.monthrange(today.year, today.month)[1])
+    if t in ("end of week", "end of the week"):
+        return today + timedelta(days=(4 - today.weekday()) % 7)
+    words = t.split()
+    if words[-1] in _WEEKDAYS and words[:-1] in ([], ["next"], ["this"], ["on"], ["last"]):
+        target = _WEEKDAYS.index(words[-1])
+        if words[:-1] == ["last"]:
+            return today - timedelta(days=((today.weekday() - target) % 7) or 7)
+        if past:
+            return today - timedelta(days=(today.weekday() - target) % 7)
+        return today + timedelta(days=((target - today.weekday()) % 7) or 7)
+    parsed = syllabus.parse_date_text(str(text).strip(), today)
+    if parsed is not None and past and parsed > today and not re.search(r"\d{4}", t):
+        parsed = parsed.replace(year=parsed.year - 1)
+    return parsed

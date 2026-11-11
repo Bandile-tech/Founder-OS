@@ -87,6 +87,7 @@ def _seed_legacy_and_current():
     db.add(models.Revenue(amount=500, currency="ZMW", source="Wamu's Bakes", date=TODAY))
     db.add(models.Revenue(amount=20, currency="USD", source="Consulting", date=TODAY))
     db.add(models.Todo(text="Send the proposal", priority=1, done=False, due_date=TODAY))
+    db.add(models.Client(name="Bel Baby", status="active"))
     db.commit()
     db.close()
 
@@ -147,6 +148,10 @@ def _run_every_tool(db) -> dict:
             ("show_view", {"view": "history", "params": {"q": "probability"}}),
             ("add_lead", {"name": "Mercy Banda", "company": "Sunrise Pharmacy", "segment": "lusaka pharmacies"}),
             ("find_leads", {"segment": "lusaka pharmacies"}),
+            ("crm_lookup", {"query": "Bel Baby"}),
+            ("log_communication", {"who": "Bel Baby", "summary": "Called about the delivery date"}),
+            ("update_deal", {"deal": "Website build", "client": "Bel Baby", "amount": 4000, "create": True}),
+            ("add_contact", {"client": "Bel Baby", "name": "Mrs Banda", "phone": "0977 000 222"}),
         ]
         for name, args in calls:
             result, _summary = ot.run_tool(name, args, db)

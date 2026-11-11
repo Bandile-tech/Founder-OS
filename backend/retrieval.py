@@ -147,6 +147,15 @@ def index_memories(db: Session) -> dict:
     return index_items(db, "memory", [(m.id, 0, f"{m.context_data} {m.tags or ''}") for m in all_memories(db)])
 
 
+def index_crm(db: Session) -> dict:
+    """Backfill: communications as ``crm`` and project notes as ``crm_project``."""
+    comms = db.query(models.Communication).all()
+    result = index_items(db, "crm", [(c.id, 0, c.summary) for c in comms])
+    projects = db.query(models.Project).filter(models.Project.notes.isnot(None)).all()
+    more = index_items(db, "crm_project", [(p.id, 0, f"{p.title}\n{p.notes}") for p in projects])
+    return {k: result[k] + more[k] for k in ("embedded", "reused", "pruned")}
+
+
 # ── Search ───────────────────────────────────────────────────
 
 def search(db: Session, query: str, source_types: list[str] | None = None,

@@ -254,6 +254,10 @@ class Client(Base):
     notes = Column(Text, default="")
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    lead_id = Column(Integer, nullable=True)          # the lead this client was converted from
+    currency = Column(String, default="ZMW")          # USD | ZMW (rows older than the CRM are USD)
+    tags = Column(String, nullable=True)              # comma-separated
+    health = Column(String, default="green")          # green|amber|red, computed by crm.client_health
 
 
 class Revenue(Base):
@@ -855,3 +859,127 @@ class OutreachMessage(Base):
     created_by        = Column(String, nullable=False, default="assistant")
     created_at        = Column(DateTime, default=datetime.utcnow)
     updated_at        = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+# ── PHASE 5C: CRM ────────────────────────────────────────────
+
+class Contact(Base):
+    """A person at a client."""
+    __tablename__ = "contacts"
+
+    id         = Column(Integer, primary_key=True, index=True)
+    client_id  = Column(Integer, nullable=False)
+    name       = Column(String, nullable=False)
+    role       = Column(String, nullable=True)
+    email      = Column(String, nullable=True)
+    phone      = Column(String, nullable=True)
+    whatsapp   = Column(String, nullable=True)
+    is_primary = Column(Boolean, default=False)
+    notes      = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class Deal(Base):
+    """Something being sold to a client. stage: lead → proposal → negotiation → won | lost."""
+    __tablename__ = "deals"
+
+    id             = Column(Integer, primary_key=True, index=True)
+    client_id      = Column(Integer, nullable=False)
+    title          = Column(String, nullable=False)
+    stage          = Column(String, nullable=False, default="lead")
+    amount         = Column(Float, nullable=True)
+    currency       = Column(String, default="ZMW")
+    probability    = Column(Integer, nullable=True)     # percent; defaults by stage
+    expected_close = Column(Date, nullable=True)
+    won_at         = Column(DateTime, nullable=True)
+    lost_reason    = Column(Text, nullable=True)
+    notes          = Column(Text, nullable=True)
+    project_id     = Column(Integer, nullable=True)     # set when a won deal becomes a project
+    created_at     = Column(DateTime, default=datetime.utcnow)
+    updated_at     = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class Project(Base):
+    """Something being delivered: client work or an internal project (shared with the
+    portfolio). status: planned | active | paused | delivered | closed | cancelled."""
+    __tablename__ = "projects"
+
+    id                = Column(Integer, primary_key=True, index=True)
+    title             = Column(String, nullable=False)
+    kind              = Column(String, nullable=False, default="client")   # client | internal
+    client_id         = Column(Integer, nullable=True)
+    deal_id           = Column(Integer, nullable=True)
+    status            = Column(String, nullable=False, default="active")
+    priority          = Column(Integer, default=3)       # 1 high … 5 low
+    expected_value    = Column(Float, nullable=True)
+    currency          = Column(String, default="ZMW")
+    effort_hours_week = Column(Float, nullable=True)
+    start_date        = Column(Date, nullable=True)
+    due_date          = Column(Date, nullable=True)
+    delivered_at      = Column(DateTime, nullable=True)
+    next_action       = Column(Text, nullable=True)
+    blocked_reason    = Column(Text, nullable=True)
+    last_activity_at  = Column(DateTime, nullable=True)  # bumped by updates, communications, payments
+    health            = Column(String, default="green")
+    notes             = Column(Text, nullable=True)
+    created_at        = Column(DateTime, default=datetime.utcnow)
+    updated_at        = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class Payment(Base):
+    """Money a client owes or has paid. A paid payment always has one linked revenue row.
+    status: due | paid | overdue | cancelled."""
+    __tablename__ = "payments"
+
+    id           = Column(Integer, primary_key=True, index=True)
+    client_id    = Column(Integer, nullable=False)
+    deal_id      = Column(Integer, nullable=True)
+    project_id   = Column(Integer, nullable=True)
+    title        = Column(String, nullable=True)
+    amount       = Column(Float, nullable=False)
+    currency     = Column(String, nullable=False, default="ZMW")
+    status       = Column(String, nullable=False, default="due")
+    due_date     = Column(Date, nullable=True)
+    paid_at      = Column(Date, nullable=True)
+    revenue_id   = Column(Integer, nullable=True)        # revenue.id, set when paid
+    recurring_id = Column(Integer, nullable=True)        # set for generated instalments
+    period_start = Column(Date, nullable=True)
+    notes        = Column(Text, nullable=True)
+    created_at   = Column(DateTime, default=datetime.utcnow)
+    updated_at   = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class RecurringRevenue(Base):
+    """A retainer or subscription that generates a due payment each period."""
+    __tablename__ = "recurring_revenue"
+
+    id           = Column(Integer, primary_key=True, index=True)
+    client_id    = Column(Integer, nullable=False)
+    title        = Column(String, nullable=False)
+    amount       = Column(Float, nullable=False)
+    currency     = Column(String, nullable=False, default="ZMW")
+    interval     = Column(String, nullable=False, default="monthly")   # monthly|quarterly|annual
+    day_of_month = Column(Integer, default=1)
+    next_due     = Column(Date, nullable=False)
+    active       = Column(Boolean, default=True)
+    ended_at     = Column(Date, nullable=True)
+    created_at   = Column(DateTime, default=datetime.utcnow)
+    updated_at   = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class Communication(Base):
+    """One conversation with a client, contact or lead, as a line or two."""
+    __tablename__ = "communications"
+
+    id                  = Column(Integer, primary_key=True, index=True)
+    client_id           = Column(Integer, nullable=True)
+    contact_id          = Column(Integer, nullable=True)
+    lead_id             = Column(Integer, nullable=True)
+    channel             = Column(String, nullable=False)     # whatsapp|email|call|meeting|linkedin|other
+    direction           = Column(String, nullable=False)     # out | in
+    summary             = Column(Text, nullable=False)
+    occurred_at         = Column(DateTime, nullable=False, default=datetime.utcnow)
+    outreach_message_id = Column(Integer, nullable=True)
+    source              = Column(String, default="conversation")
+    created_at          = Column(DateTime, default=datetime.utcnow)
