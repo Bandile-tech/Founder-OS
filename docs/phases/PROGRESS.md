@@ -688,6 +688,38 @@ Decisions where the spec was silent:
 - A sync that fails leaves stored posts and numbers alone and puts the adapter's message in
   `last_error`; the next good sync clears it.
 
+### S10 — 5D.2 performance, insight, ideas and calendar, tools, briefing (done)
+
+Shipped: `brand/analytics.py` (`performance`, `insight`, `progress`, `posts_last_30d`);
+endpoints `GET /brand/performance`, `GET /brand/posts`, `PATCH /brand/posts/{id}`,
+`GET/POST /brand/ideas`, `PATCH /brand/ideas/{id}`, `POST /brand/ideas/{id}/advance`,
+`GET /brand/calendar`, `GET /brand/insight`; tools `brand_performance`, `add_content_idea`,
+`mark_posted`; the "PERSONAL BRAND" prompt section; briefing `_content_items`,
+`progress.brand` and `brand_target_posts_30d`; `content_ideas` deletable; all `/brand`
+endpoint shapes in the hand-off doc. Tests: acceptance tests 5–9 in
+`tests/test_phase5d_brand.py`.
+
+Deferred: nothing from §5D except the X importer (see S9). The Brand tab is the next
+session.
+
+Decisions where the spec was silent:
+- `engagement` sums only the components the platform reported; with none reported it is
+  null. `engagement_rate` is null unless both an engagement and a reach figure (views, else
+  impressions) were measured. Top posts leave out posts with neither a rate nor a view
+  count.
+- The weekly insight is not generated when there is no key or no post in the window; it
+  returns `text: null`. `GET /brand/performance` only ever shows the cached text.
+- `platform` omitted means all platforms and is cached under the key `all`.
+- The calendar places a post on its local day (`FOUNDER_OS_TZ`), not its UTC day; a test
+  run just after local midnight caught the difference. It also returns the unscheduled
+  backlog (ideas and drafts with no date), which the Brand tab needs.
+- A date on an idea schedules it (`idea` or `drafted` → `scheduled`); `score` is clamped to
+  1–5.
+- `mark_posted` links the idea and the post both ways when the URL matches a stored post.
+- The tool result carries a sentence telling the model that absent values were not
+  measured and must not be estimated (empty values are stripped from what the model sees).
+- Briefing: an account in `error` shows the error item and not the cadence-gap item.
+
 ## Environment variables added so far
 
 | Var | Default | Session | Purpose |

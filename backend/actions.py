@@ -55,6 +55,7 @@ DELETABLE = {
     "project_updates": (models.ProjectUpdate, "text"),
     "applications": (models.Application, "name"),
     "application_requirements": (models.ApplicationRequirement, "title"),
+    "content_ideas": (models.ContentIdea, "title"),
 }
 
 

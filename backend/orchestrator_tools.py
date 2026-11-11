@@ -1206,7 +1206,8 @@ TOOL_SCHEMAS = [
                                  "daily_bible_log", "clients", "lift_logs", "daily_logs",
                                  "leads", "outreach_messages", "contacts", "deals", "projects",
                                  "payments", "recurring_revenue", "communications",
-                                 "project_updates", "applications", "application_requirements"],
+                                 "project_updates", "applications", "application_requirements",
+                                 "content_ideas"],
                         "description": "Which table the record lives in.",
                     },
                     "record_id": {"type": "integer", "description": "The record's id."},
@@ -2670,3 +2671,117 @@ def _check_application_at_risk(db, params):
 
 
 _RULE_CHECKS["application_at_risk"] = _check_application_at_risk
+
+
+# ── 5D: personal brand ───────────────────────────────────────
+
+def brand_performance(db, platform: str | None = None, days: int = 90):
+    """What the connected platforms report. Read-only; never an estimate."""
+    from brand import analytics
+    data = analytics.performance(db, (platform or "").strip().lower() or None, days)
+    if not data["connected"]:
+        msg = "No social account is connected" + (f" for {platform}" if platform else "") + ", so there are no numbers."
+        return ({"connected": False, "message": msg,
+                 "note": "Say that nothing is connected. Do not estimate reach, followers or engagement."},
+                "no social account connected")
+    row = analytics.cached_insight(db, data["platform"])
+    result = {
+        "connected": True, "window_days": data["days"],
+        "accounts": [{"platform": a["platform"], "handle": a["handle"], "followers": a["followers"],
+                      "followers_change_30_days": a["followers_delta_30d"], "last_synced_at": a["last_synced_at"],
+                      "status": a["status"], "problem": a["last_error"]} for a in data["accounts"]],
+        "top_posts": [{"title": t["post"]["title"], "platform": t["post"]["platform"], "format": t["post"]["kind"],
+                       "views": t["views"], "impressions": t["impressions"], "engagement": t["engagement"],
+                       "engagement_rate": t["engagement_rate"], "posted_at": t["posted_at"]} for t in data["top_posts"]],
+        "by_format": data["by_format"], "cadence": data["cadence"],
+        "posts_last_30_days": analytics.posts_last_30d(db), "target_posts_30_days": analytics.TARGET_POSTS_30D,
+        "weekly_insight": row.text if row else None,
+        "note": "Every number here was reported by the platform. A value that is absent was not measured: "
+                "say so, never estimate it.",
+    }
+    return result, f"{len(data['accounts'])} account(s), {data['cadence']['posts_in_window']} post(s) in {data['days']} days"
+
+
+def add_content_idea(db, title: str | None = None, angle: str | None = None, platform: str | None = None,
+                     format: str | None = None, scheduled_for: str | None = None, idea_id: int | None = None):
+    """Add a content idea, or update one (idea_id). A date schedules it."""
+    import brand
+    import business_common
+    import change_log
+    when = None
+    if scheduled_for:
+        when = business_common.parse_day(scheduled_for)
+        if when is None:
+            msg = f"could not read the date '{scheduled_for}'"
+            return {"error": msg}, msg
+    with change_log.batch_scope(db, "assistant"):
+        try:
+            if idea_id:
+                idea = db.query(models.ContentIdea).filter(models.ContentIdea.id == int(idea_id)).first()
+                if idea is None:
+                    return {"error": f"idea {idea_id} not found"}, f"idea {idea_id} not found"
+                result = brand.update_idea(db, idea, title=title, angle=angle, platform=platform, format=format,
+                                           scheduled_for=when)
+                verb = "updated"
+            else:
+                result = brand.create_idea(db, title or "", angle=angle, platform=platform, format=format,
+                                           scheduled_for=when, source="conversation")
+                verb = "added"
+        except ValueError as exc:
+            return {"error": str(exc)}, str(exc)
+        db.commit()
+    out = {"idea_id": result["id"], "title": result["title"], "status": result["status"],
+           "scheduled_for": result["scheduled_for"], "platform": result["platform"], "format": result["format"],
+           "change": result.get("change")}
+    return out, f"idea '{result['title']}' {verb}" + (f", scheduled for {when.isoformat()}" if when else "")
+
+
+def mark_posted(db, idea, url: str | None = None):
+    """An idea was published."""
+    import brand
+    import change_log
+    target, scored = brand.find_idea(db, idea)
+    if target is None:
+        if scored:
+            return _ambiguous("idea", str(idea), scored, lambda i: i.title)
+        return {"error": f"no open idea matches '{idea}'"}, f"no open idea matches '{idea}'"
+    with change_log.batch_scope(db, "assistant"):
+        result = brand.mark_posted(db, target, url)
+        db.commit()
+    out = {"idea_id": result["id"], "title": result["title"], "status": result["status"],
+           "linked_to_a_stored_post": result["linked_post_id"] is not None, "changes": result["changes"]}
+    return out, f"'{result['title']}' marked posted" + (" and linked to its post" if result["linked_post_id"] else "")
+
+
+_register(
+    "brand_performance",
+    lambda db, a: brand_performance(db, platform=a.get("platform"), days=int(a.get("days", 90) or 90)),
+    "What the connected social platforms report: followers, top posts, formats, posting "
+    "cadence. Read-only. The only source of content numbers: when nothing is connected it "
+    "says so, and you must never estimate reach, followers or engagement.",
+    {"platform": _str("One platform, e.g. youtube or linkedin. Omit for all."),
+     "days": _int("How far back to look (default 90).")},
+)
+
+_register(
+    "add_content_idea",
+    lambda db, a: add_content_idea(db, title=a.get("title"), angle=a.get("angle"), platform=a.get("platform"),
+                                   format=a.get("format"), scheduled_for=a.get("scheduled_for"),
+                                   idea_id=a.get("idea_id")),
+    "Add a content idea, or update or reschedule one (pass idea_id). ONLY when Bandile "
+    "labels something an idea for content, or asks to schedule a post.",
+    {"title": _str("The idea in a line."), "angle": _str("The angle or hook."),
+     "platform": _str("Where it would go, e.g. youtube, linkedin."),
+     "format": _str("What it is.", ["short", "video", "post", "article", "thread"]),
+     "scheduled_for": _str("The day to post it, as he said it."),
+     "idea_id": _int("An existing idea to update or reschedule.")},
+)
+
+_register(
+    "mark_posted",
+    lambda db, a: mark_posted(db, idea=a.get("idea", ""), url=a.get("url")),
+    "Mark a content idea as posted. ONLY when Bandile says he has posted it.",
+    {"idea": _str("The idea's title, part of it, or its id."),
+     "url": _str("The post's URL, if he gave it.")},
+    ["idea"],
+)

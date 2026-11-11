@@ -175,6 +175,9 @@ def _run_every_tool(db) -> dict:
             ("update_requirement", {"application": "Wharton", "requirement": "essays", "status": "in_progress"}),
             ("application_status", {"application": "Wharton"}),
             ("application_gaps", {"application": "Wharton"}),
+            ("brand_performance", {}),
+            ("add_content_idea", {"title": "A short on how I built the bakery site", "format": "short", "scheduled_for": "friday"}),
+            ("mark_posted", {"idea": "bakery site"}),
         ]
         for name, args in calls:
             result, _summary = ot.run_tool(name, args, db)

@@ -26,7 +26,9 @@ Response shape (the target home screen is built against this):
 Phase 5 adds the item categories ``payment``, ``deal``, ``client``, ``project`` (target
 types of the same names), ``outreach`` (target types ``outreach_message`` and ``lead``) and
 ``opportunity`` (target types ``research_finding``, ``opportunity_pipeline`` and
-``research_objective``); Phase 6 adds ``application`` (target types ``application``,
+``research_objective``) and ``content`` (target types ``content_idea`` and
+``social_account``; ``progress.brand`` is posts in the last 30 days against
+``brand_target_posts_30d``, null with no account); Phase 6 adds ``application`` (target types ``application``,
 ``application_requirement`` and ``application_gap``);
 none of them is completable from a checkbox. ``progress.projects`` is the share of projects
 delivered or closed in the last 90 days out of those plus the active ones (null with no
@@ -252,6 +254,40 @@ def _opportunity_items(db: Session, today: date) -> tuple[list, int]:
                            action="Run it (one tap on Agents)", target_type="research_objective",
                            target_id=o.id, score=12))
     return items, len(fresh)
+
+
+def _content_items(db: Session, today: date) -> tuple[list, int | None]:
+    """Ideas scheduled for today or overdue, accounts that cannot be read, and a posting
+    gap. Returns the items and the brand progress (None with no account)."""
+    from brand import analytics
+    items = []
+    for idea in db.query(models.ContentIdea).filter(
+            models.ContentIdea.status.in_(("idea", "drafted", "scheduled")),
+            models.ContentIdea.scheduled_for.isnot(None), models.ContentIdea.scheduled_for <= today).all():
+        days = (today - idea.scheduled_for).days
+        items.append(_item(title=idea.title, category="content", due=idea.scheduled_for, today=today,
+                           due_label="Today" if days == 0 else f"{days}d overdue",
+                           reason="Scheduled for today" if days == 0 else f"Was due to go out {days} day{'s' if days != 1 else ''} ago",
+                           action="Post it, then say 'posted'", target_type="content_idea", target_id=idea.id,
+                           score=58 if days == 0 else 66))
+    now = datetime.utcnow()
+    for account in analytics._accounts(db):
+        label = f"{account.platform.capitalize()} {account.handle or ''}".strip()
+        if account.status == "error":
+            items.append(_item(title=f"{label} cannot be read", category="content", today=today, due_label="",
+                               reason=account.last_error or "The last sync failed",
+                               action="Fix the connection in Settings", target_type="social_account",
+                               target_id=account.id, score=20))
+            continue
+        last = db.query(models.ContentPost).filter(
+            models.ContentPost.account_id == account.id, models.ContentPost.posted_at.isnot(None),
+        ).order_by(models.ContentPost.posted_at.desc()).first()
+        if last is not None and (now - last.posted_at).days > 14:
+            items.append(_item(title=f"Nothing posted on {label} lately", category="content", today=today,
+                               due_label="", reason=f"Last post {(now - last.posted_at).days} days ago",
+                               action="Pick an idea from the backlog", target_type="social_account",
+                               target_id=account.id, score=22))
+    return items, analytics.progress(db)
 
 
 def _application_items(db: Session, today: date) -> tuple[list, int]:
@@ -534,10 +570,12 @@ def build_briefing(db: Session, *, refresh: bool = False, now: datetime | None =
     portfolio_items, projects_pct = _portfolio_items(db, today)
     opportunity_items, opportunities_new = _opportunity_items(db, today)
     application_items, applications_at_risk = _application_items(db, today)
+    content_items, brand_pct = _content_items(db, today)
     alerts, alert_items = _alert_items(db, today)
 
     items = (task_items + nn_items + exam_items + syl_items + target_items + alert_items
-             + crm_items + outreach_items + portfolio_items + opportunity_items + application_items)
+             + crm_items + outreach_items + portfolio_items + opportunity_items + application_items
+             + content_items)
     items.sort(key=lambda i: i["score"], reverse=True)
 
     counts["payments_overdue"] = business_detail["overdue_count"]
@@ -561,7 +599,9 @@ def build_briefing(db: Session, *, refresh: bool = False, now: datetime | None =
             "targets": targets_pct,
             "habits": habits_pct,
             "projects": projects_pct,
+            "brand": brand_pct,
         },
+        "brand_target_posts_30d": 8,
         "business_detail": business_detail,
         "counts": {**counts, "items": len(items), "non_negotiables_done": sum(1 for r in nn_rows if r["done"]),
                    "non_negotiables_total": len(nn_rows), "exams_upcoming": len(exams)},

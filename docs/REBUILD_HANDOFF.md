@@ -344,6 +344,46 @@ Briefing additions: items with category `project` — blocked (62), overdue (70 
 active, null with no projects). Alert `projects_blocked` (warn) at two blocked active
 projects.
 
+### Personal brand (Phase 5D — `backend/brand/`)
+
+Real platform data only. A number the platform did not give is `null`, never 0; nothing is
+estimated and no metric can be typed in.
+
+An account: `{id, platform, handle, external_id, access (api_key|export|oauth), status
+(connected|error|disconnected), last_synced_at, last_error, created_at, updated_at,
+followers, followers_delta_30d, following, posts_count, total_views, metrics_captured_at,
+posts_stored}`. A post: `{id, account_id, platform, external_id, url, title, kind
+(video|short|post|article|thread), posted_at, idea_id, topic_tags[], views, likes, comments,
+shares, saves, impressions, watch_time_s, engagement, engagement_rate, captured_at}` where
+`engagement` is likes + comments + shares + saves over the values that were measured and
+`engagement_rate` is engagement ÷ views (or impressions when there are no views). An idea:
+`{id, title, angle, platform, format, status (idea|drafted|scheduled|posted|dropped),
+scheduled_for, posted_post_id, source, score, created_at, updated_at}`.
+
+| Method & path | Body / query | Returns |
+|---|---|---|
+| `GET /brand/accounts` | | `[account]` |
+| `POST /brand/accounts` | `{platform, handle?, external_id?}` | 201 account + `change`. YouTube resolves the handle to the channel id now; a failure is 400 with the adapter's message (`YOUTUBE_API_KEY not set`, `no YouTube channel found for @x`). LinkedIn is connected by importing its export |
+| `POST /brand/accounts/{id}/sync` | | `{ok, posts_new, posts_updated, metrics_rows, account_rows, status, last_error, account, changes}`; a failed sync is 200 with `ok: false`, `status: error` |
+| `DELETE /brand/accounts/{id}` | | account (`status: disconnected`) + `change`; nothing is deleted |
+| `POST /brand/import` | multipart `file` (CSV saved from the platform's export), `platform` (`linkedin`) | `{account_id, platform, account_created, rows, posts_new, posts_updated, metrics_rows, batch_id}`; 400 when the file has none of the expected columns or the platform has no importer |
+| `GET /brand/performance` | `platform?`, `days=90` | `{connected, platform, days, accounts[], top_posts: [{post, views, impressions, engagement, engagement_rate, posted_at}], by_format: {kind: {count, median_views, median_engagement_rate}}, cadence: {posts_in_window, per_week, gap_days_since_last}, trend: [{week_start, posts, views, engagement}] (12 weeks), insight, brand_target_posts_30d, posts_last_30d}` |
+| `GET /brand/posts` | `platform?`, `limit=50` | `[post]` newest first |
+| `PATCH /brand/posts/{id}` | `{topic_tags?: [str], idea_id?}` | post + `change` |
+| `GET /brand/ideas` | `status?` (comma list) | `[idea]` |
+| `POST /brand/ideas` | `{title, angle?, platform?, format?, scheduled_for?}` | 201 idea + `change` (a date makes it `scheduled`) |
+| `PATCH /brand/ideas/{id}` | `{title?, angle?, platform?, format?, status?, scheduled_for?, score?, posted_post_id?}` | idea + `change` |
+| `POST /brand/ideas/{id}/advance` | | idea + `change` (idea → drafted → scheduled → posted); 409 `scheduling needs a date` when the next step is `scheduled` and there is no date; 400 once it is posted or dropped |
+| `GET /brand/calendar` | `from?`, `to?` (default this week and next) | `{from, to, days: [{date, is_today, ideas[], posted[]}], backlog[]}` |
+| `GET /brand/insight` | `platform?`, `refresh=0\|1` | `{week_start, platform, text \| null, cached}` |
+
+Snapshots are append-only and written only when a number changed. The weekly insight is at
+most one model call per platform per ISO week; `GET /brand/performance` returns the cached
+text and never generates it. Briefing additions: items with category `content` — an idea
+scheduled for today (58) or overdue (66), an account in `error` (20), no post for more than
+14 days on a connected account (22); `progress.brand` (posts in 30 days against
+`brand_target_posts_30d: 8`, `null` with no account).
+
 ### Agents and the scheduler (Phase 6B — `backend/agents/`)
 
 An agent in the registry: `{key, name, description, phase, enabled, schedule: {interval_minutes,
