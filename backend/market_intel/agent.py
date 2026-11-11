@@ -17,17 +17,26 @@ evidence-backed opportunities:
 
 The agent SURFACES findings (status='surfaced'). It never writes to the
 opportunity pipeline — promotion is an explicit, separate action.
+
+Every model call goes through ``llm.chat_completion`` with a ``market_intel_<role>``
+purpose, so each run's calls and cost are logged. A finding that repeats one already on
+file is not inserted again: the existing row's ``times_seen`` goes up and the run reports
+it under ``repeated``. Surfacing, dismissing and repeating are recorded in the change log.
 """
 
 import json
+import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 
+import change_log
+import llm
 import models
-from market_intel import adapters, memory
+from market_intel import adapters, memory, scoring
 
-MODEL = "gpt-4o-mini"
+DUPLICATE_COSINE_MIN = 0.90    # embeddings: this similar or more is the same opportunity
+DUPLICATE_WORD_OVERLAP = 0.60  # keyword fallback: share of the shorter problem's words
 MAX_THREADS = 4
 MAX_QUERIES_PER_THREAD = 3
 EVIDENCE_PER_SOURCE = 4
@@ -67,18 +76,19 @@ def _load_founder_profile() -> str:
     return _DEFAULT_PROFILE
 
 
-def _llm_json(system: str, user: str, temperature: float = 0.4) -> dict:
-    """One JSON-mode completion. Returns {} on any failure so a single bad
-    call degrades the run instead of crashing it."""
-    from openai_client import client
-
+def _llm_json(system: str, user: str, temperature: float = 0.4,
+              purpose: str = "market_intel") -> dict:
+    """One JSON-mode completion through the gateway (logged under ``purpose``). Returns {}
+    on any failure so a single bad call degrades the run instead of crashing it."""
     try:
-        resp = client.chat.completions.create(
-            model=MODEL,
-            messages=[
+        resp = llm.chat_completion(
+            [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
+            db=None,
+            purpose=purpose,
+            model=llm.research_model(),
             response_format={"type": "json_object"},
             temperature=temperature,
         )
@@ -107,7 +117,7 @@ def _plan(objective: str, profile: str, digest: str) -> dict:
         f"FOUNDER PROFILE:\n{profile}\n\n"
         f"LESSON MEMORY:\n{digest}"
     )
-    plan = _llm_json(system, user)
+    plan = _llm_json(system, user, purpose="market_intel_planner")
     threads = plan.get("threads") or []
     threads = [
         {
@@ -164,7 +174,7 @@ def _research_thread(objective: str, thread: dict) -> dict:
         f"OBJECTIVE:\n{objective}\n\nTHREAD FOCUS:\n{thread['focus']}\n\n"
         f"EVIDENCE:\n{numbered}"
     )
-    out = _llm_json(system, user)
+    out = _llm_json(system, user, purpose="market_intel_researcher")
     candidates = []
     for c in out.get("candidates") or []:
         if not c.get("problem"):
@@ -211,7 +221,7 @@ def _analyze(objective: str, candidates: list) -> list:
         "Score honestly against the evidence — unsupported claims score low."
     )
     user = f"OBJECTIVE:\n{objective}\n\nCANDIDATES:\n{_candidates_block(candidates)}"
-    out = _llm_json(system, user, temperature=0.2)
+    out = _llm_json(system, user, temperature=0.2, purpose="market_intel_analyst")
 
     by_id = {c["id"]: c for c in candidates}
     analyzed = []
@@ -247,7 +257,7 @@ def _advise(profile: str, candidates: list) -> list:
         '"scores": {"founder_fit": 0-10, "speed_to_mvp": 0-10}}]}'
     )
     user = f"FOUNDER PROFILE:\n{profile}\n\nCANDIDATES:\n{_candidates_block(candidates)}"
-    out = _llm_json(system, user, temperature=0.2)
+    out = _llm_json(system, user, temperature=0.2, purpose="market_intel_advisor")
 
     by_id = {c["id"]: c for c in candidates}
     for a in out.get("assessments") or []:
@@ -275,7 +285,7 @@ def _verify(objective: str, candidates: list) -> tuple:
         '"verdict": "accept" or "reject", "reason": "one sentence"}]}'
     )
     user = f"OBJECTIVE:\n{objective}\n\nCANDIDATES:\n{_candidates_block(candidates)}"
-    out = _llm_json(system, user, temperature=0.0)
+    out = _llm_json(system, user, temperature=0.0, purpose="market_intel_verifier")
 
     verdicts = {v.get("id"): v for v in out.get("verdicts") or []}
     accepted, rejected = [], []
@@ -312,7 +322,7 @@ def _extract_lessons(objective: str, accepted: list, rejected: list) -> list:
         + f"\n\nREJECTED ({len(rejected)}): "
         + "; ".join(f"{r['reason']}" for r in rejected[:10])
     )
-    out = _llm_json(system, user)
+    out = _llm_json(system, user, purpose="market_intel_lessons")
     return (out.get("lessons") or [])[:3]
 
 
@@ -330,7 +340,7 @@ _ALL_AXES = _ANALYST_AXES + ("founder_fit", "speed_to_mvp")
 
 def _finalize_scores(candidate: dict) -> dict:
     scores = {k: _clamp_score((candidate.get("scores") or {}).get(k)) for k in _ALL_AXES}
-    scores["overall"] = round(sum(scores.values()) / len(_ALL_AXES), 1)
+    scores["overall"] = scoring.overall(scores)
     return scores
 
 
@@ -357,7 +367,110 @@ def _serialize_finding(f: models.ResearchFinding) -> dict:
         "status": f.status,
         "notes": f.notes,
         "created_at": str(f.created_at) if f.created_at else None,
+        "recommendation": f.recommendation,
+        "times_seen": f.times_seen or 1,
+        "dismissed_reason": f.dismissed_reason,
+        "reviewed_at": str(f.reviewed_at) if f.reviewed_at else None,
     }
+
+
+# ── Deduplication across runs ────────────────────────────────
+
+def _words(text: str) -> set:
+    return set(re.findall(r"[a-z0-9]+", (text or "").lower()))
+
+
+def _finding_text(problem: str, customer_segment: str | None) -> str:
+    return f"{problem}\n{customer_segment or ''}"
+
+
+def _find_duplicate(db, problem: str, customer_segment: str | None):
+    """The finding already on file that this candidate repeats, or None.
+
+    With embeddings: the nearest stored finding at cosine >= 0.90. Without a key: the same
+    customer segment (case-insensitive) and at least 60 % of the shorter problem's words
+    shared."""
+    import retrieval
+
+    hits = retrieval.search(db, _finding_text(problem, customer_segment), ["finding"],
+                            limit=1, min_score=DUPLICATE_COSINE_MIN)
+    if hits is not None:
+        if not hits:
+            return None
+        return db.query(models.ResearchFinding).filter(
+            models.ResearchFinding.id == hits[0]["source_id"]).first()
+
+    segment = (customer_segment or "").strip().lower()
+    new_words = _words(problem)
+    if not segment or not new_words:
+        return None
+    for f in db.query(models.ResearchFinding).order_by(models.ResearchFinding.id).all():
+        if (f.customer_segment or "").strip().lower() != segment:
+            continue
+        old_words = _words(f.problem)
+        if not old_words:
+            continue
+        shared = len(new_words & old_words) / min(len(new_words), len(old_words))
+        if shared >= DUPLICATE_WORD_OVERLAP:
+            return f
+    return None
+
+
+def _index_finding(db, finding: models.ResearchFinding) -> None:
+    """Embed the finding so later runs can recognise a repeat. Never fails a run."""
+    try:
+        import retrieval
+        retrieval.index_one(db, "finding", finding.id,
+                            _finding_text(finding.problem, finding.customer_segment))
+    except Exception as exc:                # noqa: BLE001
+        print(f"[market_intel] finding index failed: {exc}")
+
+
+def _note_repeat(db, existing: models.ResearchFinding, candidate: dict) -> None:
+    """A repeat is counted on the existing finding and brings its new evidence along."""
+    before = change_log.snapshot(existing)
+    existing.times_seen = (existing.times_seen or 1) + 1
+    try:
+        evidence = json.loads(existing.evidence) if existing.evidence else []
+    except (ValueError, TypeError):
+        evidence = []
+    if not isinstance(evidence, list):
+        evidence = []
+    seen = {e.get("ref") for e in evidence if isinstance(e, dict)}
+    for item in candidate.get("evidence") or []:
+        if isinstance(item, dict) and item.get("ref") not in seen:
+            evidence.append(item)
+            seen.add(item.get("ref"))
+    existing.evidence = json.dumps(evidence)
+    change_log.record_update(db, existing, before, f"Seen again: {existing.problem[:70]}")
+
+
+def _record_cost(db, project: models.ResearchProject) -> None:
+    """Cost and call count of the run, from the usage rows logged while it ran."""
+    rows = db.query(models.LLMUsage).filter(
+        models.LLMUsage.purpose.like("market_intel_%"),
+        models.LLMUsage.created_at >= project.created_at,
+        models.LLMUsage.created_at <= project.completed_at,
+    ).all()
+    project.llm_calls = len(rows)
+    project.cost_usd = round(sum(r.estimated_cost_usd or 0.0 for r in rows), 6)
+
+
+def dismiss_finding(db, finding_id: int, reason: str | None = None) -> dict:
+    """Mark a finding as not worth pursuing. Idempotent. Records the change; the caller
+    commits. Returns the serialised finding plus ``change`` (None when already dismissed)."""
+    finding = db.query(models.ResearchFinding).filter(
+        models.ResearchFinding.id == finding_id).first()
+    if finding is None:
+        return {"error": f"finding {finding_id} not found"}
+    if finding.status == "dismissed":
+        return {**_serialize_finding(finding), "change": None, "already_dismissed": True}
+    before = change_log.snapshot(finding)
+    finding.status = "dismissed"
+    finding.dismissed_reason = (reason or "").strip() or None
+    finding.reviewed_at = datetime.utcnow()
+    change = change_log.record_update(db, finding, before, f"Dismissed: {finding.problem[:70]}")
+    return {**_serialize_finding(finding), "change": change}
 
 
 # ── Entry point ──────────────────────────────────────────────
@@ -379,6 +492,12 @@ def run_market_research(db, objective: str, max_opportunities: int = 3) -> dict:
     db.commit()
     db.refresh(project)
 
+    with change_log.batch_scope(db, "assistant"):
+        return _run_project(db, project, objective, max_opportunities, profile, digest)
+
+
+def _run_project(db, project, objective: str, max_opportunities: int, profile: str,
+                 digest: str) -> dict:
     try:
         plan = _plan(objective, profile, digest)
         project.title = plan["title"]
@@ -398,10 +517,12 @@ def run_market_research(db, objective: str, max_opportunities: int = 3) -> dict:
         if not candidates:
             project.status = "completed"
             project.completed_at = datetime.utcnow()
+            _record_cost(db, project)
             db.commit()
             return {
                 "project_id": project.id, "title": project.title,
                 "opportunities": [], "rejected_count": 0, "lessons_updated": 0,
+                "repeated": [], "cost_usd": project.cost_usd, "llm_calls": project.llm_calls,
                 "note": "No evidence-backed candidates found for this objective.",
             }
 
@@ -412,8 +533,14 @@ def run_market_research(db, objective: str, max_opportunities: int = 3) -> dict:
         accepted.sort(key=lambda c: _finalize_scores(c)["overall"], reverse=True)
         accepted = accepted[:max_opportunities]
 
-        findings = []
+        findings, repeated = [], []
         for c in accepted:
+            existing = _find_duplicate(db, c["problem"], c.get("customer_segment"))
+            if existing is not None:
+                _note_repeat(db, existing, c)
+                if not any(r["finding_id"] == existing.id for r in repeated):
+                    repeated.append({"finding_id": existing.id, "problem": existing.problem})
+                continue
             scores = _finalize_scores(c)
             finding = models.ResearchFinding(
                 project_id=project.id,
@@ -434,8 +561,12 @@ def run_market_research(db, objective: str, max_opportunities: int = 3) -> dict:
                 overall_score=scores["overall"],
                 first_customer_path=c.get("first_customer_path"),
                 status="surfaced",
+                recommendation=scoring.recommendation(scores["overall"]),
+                times_seen=1,
             )
             db.add(finding)
+            change_log.record_create(db, finding, f"Surfaced: {finding.problem[:70]}")
+            _index_finding(db, finding)
             findings.append(finding)
         db.commit()
 
@@ -444,6 +575,7 @@ def run_market_research(db, objective: str, max_opportunities: int = 3) -> dict:
 
         project.status = "completed"
         project.completed_at = datetime.utcnow()
+        _record_cost(db, project)
         db.commit()
 
         return {
@@ -452,6 +584,9 @@ def run_market_research(db, objective: str, max_opportunities: int = 3) -> dict:
             "opportunities": [_serialize_finding(f) for f in findings],
             "rejected_count": len(rejected),
             "lessons_updated": lessons_written,
+            "repeated": repeated,
+            "cost_usd": project.cost_usd,
+            "llm_calls": project.llm_calls,
         }
 
     except Exception as e:                  # noqa: BLE001 — a failed run must not kill the SSE stream

@@ -154,6 +154,8 @@ async def startup():
         run_m012(db)        # m012 — revenue.currency, todos.due_date, embeddings, exam_dates
         from migrations.m013_syllabus_briefing import run as run_m013
         run_m013(db)        # m013 — syllabus_points, briefing_summaries
+        from migrations.m014_market_intel_v2 import run as run_m014
+        run_m014(db)        # m014 — research cost/recommendation/dedup columns, research_objectives
         _validate_schema(engine)   # raises if any ORM column is absent from the live DB
         _seed_non_negotiables_if_empty(db)
         _verify_seed_integrity(db)
@@ -2391,9 +2393,10 @@ def research_promote(payload: schemas.PromoteFindingRequest, db: Session = Depen
     """Explicitly promote a surfaced finding into the pipeline — the 'save this
     opportunity' action. The agent never does this on its own."""
     import orchestrator_tools
-    result, _summary = orchestrator_tools.promote_research_opportunity(
-        db, finding_id=payload.finding_id, notes=payload.notes
-    )
+    with _change_log.batch_scope(db, "ui"):
+        result, _summary = orchestrator_tools.promote_research_opportunity(
+            db, finding_id=payload.finding_id, notes=payload.notes
+        )
     if result.get("error"):
         raise HTTPException(404, result["error"])
     return result
@@ -2408,14 +2411,17 @@ def research_pipeline_update(entry_id: int, payload: schemas.PipelineUpdateReque
     ).first()
     if not entry:
         raise HTTPException(404, "Pipeline entry not found")
-    if payload.stage is not None:
-        if payload.stage not in _PIPELINE_STAGES:
-            raise HTTPException(400, f"Invalid stage. Must be one of: {sorted(_PIPELINE_STAGES)}")
-        entry.stage = payload.stage
-    if payload.notes is not None:
-        entry.notes = payload.notes
-    db.commit()
-    return {"id": entry.id, "stage": entry.stage, "notes": entry.notes}
+    if payload.stage is not None and payload.stage not in _PIPELINE_STAGES:
+        raise HTTPException(400, f"Invalid stage. Must be one of: {sorted(_PIPELINE_STAGES)}")
+    with _change_log.batch_scope(db, "ui"):
+        before = _change_log.snapshot(entry)
+        if payload.stage is not None:
+            entry.stage = payload.stage
+        if payload.notes is not None:
+            entry.notes = payload.notes
+        change = _change_log.record_update(db, entry, before, f"Pipeline entry → {entry.stage}")
+        db.commit()
+    return {"id": entry.id, "stage": entry.stage, "notes": entry.notes, "change": change}
 
 
 @app.get("/research/memory")

@@ -554,6 +554,9 @@ class ResearchProject(Base):
     error        = Column(Text, nullable=True)
     created_at   = Column(DateTime, default=datetime.utcnow)
     completed_at = Column(DateTime, nullable=True)
+    cost_usd     = Column(Float, nullable=True)      # summed from llm_usage after the run
+    llm_calls    = Column(Integer, nullable=True)
+    objective_id = Column(Integer, nullable=True)    # research_objectives.id when a standing objective ran it
 
     findings = relationship("ResearchFinding", back_populates="project",
                             cascade="all, delete-orphan")
@@ -586,6 +589,10 @@ class ResearchFinding(Base):
     status              = Column(String, nullable=False, default="surfaced", index=True)
     notes               = Column(Text, nullable=True)
     created_at          = Column(DateTime, default=datetime.utcnow)
+    recommendation      = Column(String, nullable=True)   # pursue|watch|park
+    times_seen          = Column(Integer, default=1)
+    dismissed_reason    = Column(Text, nullable=True)
+    reviewed_at         = Column(DateTime, nullable=True)  # set on promote or dismiss
 
     project  = relationship("ResearchProject", back_populates="findings")
     pipeline = relationship("OpportunityPipeline", back_populates="finding", uselist=False,
@@ -604,8 +611,25 @@ class OpportunityPipeline(Base):
     notes       = Column(Text, nullable=True)
     promoted_at = Column(DateTime, default=datetime.utcnow)
     updated_at  = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    next_action = Column(Text, nullable=True)
+    due_date    = Column(Date, nullable=True)
 
     finding = relationship("ResearchFinding", back_populates="pipeline")
+
+
+class ResearchObjective(Base):
+    """A standing research objective that recurs every ``cadence_days``."""
+    __tablename__ = "research_objectives"
+
+    id                = Column(Integer, primary_key=True, index=True)
+    objective         = Column(Text, nullable=False)
+    cadence_days      = Column(Integer, nullable=False, default=14)
+    enabled           = Column(Boolean, default=True)
+    max_opportunities = Column(Integer, default=3)
+    last_run_at       = Column(DateTime, nullable=True)
+    last_project_id   = Column(Integer, nullable=True)
+    created_at        = Column(DateTime, default=datetime.utcnow)
+    updated_at        = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 class ResearchMemoryNote(Base):

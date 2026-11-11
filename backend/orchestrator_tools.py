@@ -13,7 +13,7 @@ These tools reuse the existing, audited application logic (``apply_parse_updates
 
 import os
 import json
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from sqlalchemy import func
 
@@ -456,10 +456,18 @@ def promote_research_opportunity(db, finding_id: int, notes: str = None):
             "already_promoted": True,
         }, summary
 
-    entry = models.OpportunityPipeline(finding_id=finding.id, stage="discovered", notes=notes)
-    finding.status = "promoted"
-    db.add(entry)
-    db.commit()
+    import change_log
+    with change_log.batch_scope(db, "assistant"):
+        before = change_log.snapshot(finding)
+        entry = models.OpportunityPipeline(finding_id=finding.id, stage="discovered", notes=notes)
+        finding.status = "promoted"
+        finding.reviewed_at = datetime.utcnow()
+        db.add(entry)
+        changes = [
+            change_log.record_update(db, finding, before, f"Promoted: {finding.problem[:70]}"),
+            change_log.record_create(db, entry, f"Added to the pipeline: {finding.problem[:60]}"),
+        ]
+        db.commit()
     db.refresh(entry)
 
     summary = f"finding {finding.id} promoted to pipeline (discovered)"
@@ -469,6 +477,7 @@ def promote_research_opportunity(db, finding_id: int, notes: str = None):
         "stage": entry.stage,
         "problem": finding.problem,
         "already_promoted": False,
+        "changes": [c for c in changes if c],
     }
     return result, summary
 

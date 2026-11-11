@@ -66,6 +66,12 @@ def assistant_model() -> str:
     )
 
 
+def research_model() -> str:
+    """The model for the market intelligence roles (``RESEARCH_MODEL``); the assistant
+    model when unset."""
+    return os.getenv("RESEARCH_MODEL") or assistant_model()
+
+
 def embedding_model() -> str:
     return os.getenv("EMBEDDING_MODEL") or DEFAULT_EMBEDDING_MODEL
 
