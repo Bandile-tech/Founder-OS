@@ -18,6 +18,7 @@ dropped, and a date he stated himself is never overwritten by a document.
 import json
 import re
 from datetime import date, datetime, timedelta
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -370,10 +371,133 @@ def set_gap_status(db: Session, gap: models.ApplicationGap, status: str) -> dict
     return {**serialize_gap(gap), "change": change}
 
 
-def review_gaps(db: Session, app: models.Application, *, refresh: bool = False) -> dict:
-    """The stored open gaps. (The review that writes them is added in the next session.)"""
+GAPS_MAX = 8
+_PROFILE_PATH = Path(__file__).resolve().parent.parent / "context" / "core" / "founder_profile.md"
+
+# Stable prompt (cached prefix). The assembled context goes in the user message.
+GAPS_PROMPT = (
+    "You review how ready an applicant is for one application. You are given the "
+    "application's requirements with their status, the applicant's profile, his current "
+    "syllabus progress, and notes and memories that mention the application. Name the gaps: "
+    "where the profile or the preparation is weak relative to what this application asks "
+    "for. Use only the facts given; do not assume facts about the institution and do not "
+    "mention dates that are not in the input. Respond as JSON: {\"gaps\": [{\"gap\": \"one "
+    "line\", \"severity\": \"high|medium|low\", \"evidence\": \"what in the input shows it\", "
+    "\"suggested_action\": \"one concrete next step\"}]}. At most 8 gaps, the most serious "
+    "first. An empty list is a valid answer."
+)
+
+
+def _review_context(db: Session, app: models.Application) -> str:
+    """Everything the review may use, assembled without a model."""
+    import assistant_state
+    import memory_service
+
+    lines = [f"APPLICATION: {app.name}"
+             + (f" — {app.institution}" if app.institution else "")
+             + (f", {app.programme}" if app.programme else ""),
+             f"KIND: {app.kind}. STATUS: {app.status}.",
+             "DEADLINE: " + (f"{app.deadline.isoformat()} (source: {app.deadline_source})" if app.deadline else "unknown"),
+             "", "REQUIREMENTS:"]
+    reqs = requirements_of(db, app)
+    for r in reqs:
+        lines.append(f"- [{r.status.replace('_', ' ')}] {r.title} ({r.kind})"
+                     + (f" — {r.details}" if r.details else "")
+                     + (f" — due {r.due_date.isoformat()}" if r.due_date else ""))
+    if not reqs:
+        lines.append("- none listed yet")
+    try:
+        profile = _PROFILE_PATH.read_text(encoding="utf-8").strip()
+    except OSError:
+        profile = ""
+    lines += ["", "PROFILE:", profile or "not written yet", "", "SYLLABUS PROGRESS:"]
+    academics = assistant_state.academics_lines(db)
+    lines += [f"- {line}" for line in academics] or ["- no syllabus imported"]
+    # Notes and memories by keyword, never embeddings: the context costs no model call, so a
+    # review is exactly one call.
+    needle = app.name.lower()
+    hits = [n for n in db.query(models.Note).order_by(models.Note.updated_at.desc()).all()
+            if needle in (n.title or "").lower() or needle in (n.body or "").lower()][:3]
+    lines += ["", "NOTES:"]
+    lines += [f"- {n.title}: {(n.body or '')[-300:]}" for n in hits] or ["- none"]
+    try:
+        memories = [memory_service.format_memory(m) for m in memory_service.recall_keyword(db, app.name, limit=5)
+                    if needle in (m.context_data or "").lower() or needle in (m.tags or "").lower()]
+    except Exception:                       # noqa: BLE001 — context is best effort
+        memories = []
+    lines += ["", "MEMORIES:"]
+    lines += [f"- {m}" for m in memories] or ["- none"]
+    return "\n".join(lines)
+
+
+def _gaps_result(db: Session, app: models.Application, *, cached: bool, stale: bool = False) -> dict:
     return {"application_id": app.id, "application": app.name, "gaps_reviewed_at": app.gaps_reviewed_at,
-            "cached": True, "gaps": [serialize_gap(g) for g in open_gaps(db, app)]}
+            "cached": cached, "stale": stale, "gaps": [serialize_gap(g) for g in open_gaps(db, app)]}
+
+
+def review_is_fresh(app: models.Application) -> bool:
+    """True when a review exists and nothing about the requirements has changed since."""
+    if app.gaps_reviewed_at is None:
+        return False
+    return app.requirements_updated_at is None or app.gaps_reviewed_at >= app.requirements_updated_at
+
+
+def review_gaps(db: Session, app: models.Application, *, refresh: bool = False) -> dict:
+    """Where the profile is weak relative to this application.
+
+    Cached: while the last review is at least as new as the last change to the
+    requirements, the stored open gaps are returned and no model call is made, unless
+    ``refresh`` is set. A new review replaces the previous one: its still-open gaps become
+    ``superseded``. With no AI key the stored gaps are returned (marked ``stale`` when the
+    requirements have changed); ``refresh=True`` then raises ``llm.AIUnavailable``.
+    The caller commits."""
+    if review_is_fresh(app) and not refresh:
+        return _gaps_result(db, app, cached=True)
+    if not llm.is_configured():
+        if refresh:
+            raise llm.AIUnavailable("OPENAI_API_KEY is not set — AI features are disabled.")
+        return _gaps_result(db, app, cached=True, stale=True)
+
+    raw = llm.chat_text(
+        [{"role": "system", "content": GAPS_PROMPT},
+         {"role": "user", "content": _review_context(db, app)}],
+        db=db, purpose="application_gaps", max_tokens=700, response_format={"type": "json_object"})
+    try:
+        parsed = json.loads(raw)
+    except (ValueError, TypeError):
+        parsed = None
+    if not isinstance(parsed, dict) or not isinstance(parsed.get("gaps"), list):
+        raise ValueError("the review could not be read — try again")
+
+    now = datetime.utcnow()
+    batch = f"review-{app.id}-{now.strftime('%Y%m%d%H%M%S')}"
+    for old in open_gaps(db, app):
+        before = change_log.snapshot(old)
+        old.status, old.updated_at = "superseded", now
+        change_log.record_update(db, old, before, f"Gap replaced by a newer review: {old.gap[:40]}")
+    for item in parsed["gaps"][:GAPS_MAX]:
+        if not isinstance(item, dict):
+            continue
+        text = (str(item.get("gap") or "")).strip()[:300]
+        if not text:
+            continue
+        gap = models.ApplicationGap(
+            application_id=app.id, gap=text,
+            severity=item.get("severity") if item.get("severity") in SEVERITIES else "medium",
+            evidence=(str(item.get("evidence") or "")).strip() or None,
+            suggested_action=(str(item.get("suggested_action") or "")).strip() or None,
+            status="open", review_batch=batch, created_at=now, updated_at=now)
+        db.add(gap)
+        change_log.record_create(db, gap, f"{app.name[:30]} gap: {text[:50]}")
+        if llm.current_run_id() is None:        # inside an agent run an embedding would use up its call cap
+            _index(db, "application_gap", gap.id, f"{app.name} gap: {text}\n{gap.evidence or ''}")
+    before = change_log.snapshot(app)
+    app.gaps_reviewed_at = now
+    if app.requirements_updated_at is not None and app.requirements_updated_at > now:
+        app.requirements_updated_at = now
+    change_log.record_update(db, app, before, f"Gap review for {app.name[:50]}")
+    db.flush()
+    return _gaps_result(db, app, cached=False)
 
 
 # ── Endpoints ────────────────────────────────────────────────
@@ -525,10 +649,15 @@ def post_requirement(app_id: int, payload: RequirementCreate, db: Session = Depe
 
 @router.get("/applications/{app_id}/gaps")
 def get_gaps(app_id: int, refresh: int = 0, db: Session = Depends(get_db)):
+    """The gap review. Cached: no model call while the requirements have not changed since
+    the last review, unless ``refresh=1``. 503 on a refresh with no AI key."""
     app = _get(db, app_id)
     with change_log.batch_scope(db, "ui"):
         try:
             result = review_gaps(db, app, refresh=bool(refresh))
+        except ValueError as exc:
+            db.rollback()
+            raise HTTPException(502, str(exc))
         except Exception as exc:                 # noqa: BLE001
             db.rollback()
             import main

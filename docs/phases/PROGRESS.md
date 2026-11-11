@@ -590,6 +590,36 @@ Decisions where the spec was silent:
 - Requirement details are embedded as `source_type="application"`; gap text will use
   `"application_gap"` (two tables cannot share one `(type, id)` key).
 
+### S21 — 6A.2 gap review, briefing, deadline watch, alert (done)
+
+Shipped: `applications.review_gaps` (cached, one `application_gaps` call, supersedes the
+previous review) behind `GET /applications/{id}/gaps?refresh=`; tool `application_gaps`
+and its prompt bullet; briefing `_application_items` and `counts.applications_at_risk` in
+`attention_count`; agent `application_watch` (daily at 05:45); alert `application_at_risk`
+with `_check_application_at_risk`; the `/applications` endpoint shapes in the hand-off doc.
+Tests: acceptance tests 4–6 (and the briefing clause of test 3) in
+`tests/test_phase6a_applications.py`.
+
+Deferred: nothing from §6A. The Applications page is the next session.
+
+Decisions where the spec was silent:
+- The review's context is assembled with no model call: notes and memories that mention
+  the application are found by keyword, not embeddings, so a review is exactly one call
+  and the agent's cap of two calls a run means two reviews.
+- Gap text is embedded for search only outside an agent run (inside one, an embedding
+  would use up the run's call cap).
+- With no AI key, `GET …/gaps` returns the stored gaps marked `stale` when the requirements
+  have changed; `refresh=1` answers 503.
+- `application_watch` treats a mark as reached when the deadline is at or inside it and no
+  event exists yet for that application, mark and deadline. A missed day therefore does
+  not skip a mark, and moving a deadline starts its marks again. The marks come from
+  `notification_settings.deadline_days_json` once S16 adds it, else 30, 14, 7, 3, 1.
+- It only reviews applications that have at least one requirement.
+- Briefing: an application with no requirements yet says "No requirements listed yet";
+  a passed deadline scores 90; a requirement item is capped at 80 and reads "Work the
+  task" once it has a linked task. Applications past `preparing` produce no items.
+- `applications_at_risk` counts applications still in `researching` or `preparing`.
+
 ## Environment variables added so far
 
 | Var | Default | Session | Purpose |

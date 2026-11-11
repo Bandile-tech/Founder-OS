@@ -73,6 +73,16 @@
         "min": 2
       },
       "message": "Two or more projects are blocked. Clear a bottleneck before starting anything new."
+    },
+    {
+      "id": "application_at_risk",
+      "severity": "critical",
+      "enabled": true,
+      "check": "application_at_risk",
+      "params": {
+        "days": 14
+      },
+      "message": "An application deadline is inside 14 days with requirements still missing."
     }
   ]
 }

@@ -382,6 +382,54 @@ is awake (`JOBS_IN_PROCESS`, default on); `POST /jobs/tick` does the same when c
 out (see ADR-0001's amendment). A write by an agent outside its `tables_write` undoes the
 run's whole batch and marks the run `violation`.
 
+### Applications (Phase 6A — `backend/applications.py`)
+
+An application: `{id, name, institution, programme, kind, deadline, deadline_source
+(user|document|unknown), decision_date, status, priority, portal_url, notes,
+requirements_updated_at, gaps_reviewed_at, created_at, updated_at, timeline, gaps_open}`.
+`status` is `researching → preparing → submitted → interview → accepted | rejected |
+withdrawn`. `timeline` is `{days_to_deadline | null, requirements: {missing, in_progress,
+ready, submitted}, requirements_total, next_due: {requirement_id, title, due_date, days,
+from_deadline} | null, at_risk}`.
+
+A requirement: `{id, application_id, title, kind, status (missing|in_progress|ready|
+submitted|not_required), due_date, due_source (user|document|null), details, todo_id,
+note_id, sort_order, created_at, updated_at}`. A gap: `{id, application_id, gap, severity
+(high|medium|low), evidence, suggested_action, status (open|addressed|accepted_risk|
+superseded), review_batch, created_at, updated_at}`.
+
+| Method & path | Body / query | Returns |
+|---|---|---|
+| `GET /applications` | `status?` | `[application]` sorted by deadline (undated last) |
+| `GET /applications/{id}` | | application + `requirements[]` + `gaps[]` (open, high first) |
+| `POST /applications` | `{name, institution?, programme?, kind?, deadline?, priority?, portal_url?}` | 201 application + `change`. A deadline given here is `deadline_source: user` |
+| `PATCH /applications/{id}` | any field incl. `status`, `deadline` (sets the source to `user`), `decision_date`, `notes` | application + `change`; 400 for an unknown status |
+| `POST /applications/{id}/requirements/import` | `{text}` | `{application_id, application, created, updated, deadline_set, deadline, deadline_source, dates_dropped, changes, batch_id}`; 400 when the text is too short or the answer unreadable; 503 with no AI key |
+| `POST /applications/{id}/requirements` | `{title, kind?, due_date?, details?}` | 201 requirement + `change` |
+| `PATCH /requirements/{id}` | `{title?, kind?, status?, due_date?, details?}` | requirement + `change` |
+| `POST /requirements/{id}/advance` | | requirement + `change` (missing → in_progress → ready → submitted → missing) |
+| `POST /requirements/{id}/todo` | | `{todo: {id, text, due_date, done, category}, change, changes, existing}`; while that task is open a repeat returns it with `existing: true` |
+| `GET /applications/{id}/gaps` | `refresh=0\|1` | `{application_id, application, gaps_reviewed_at, cached, stale, gaps[]}`; 503 for `refresh=1` with no AI key; 502 when the review cannot be read |
+| `PATCH /gaps/{id}` | `{status: open\|addressed\|accepted_risk}` | gap + `change` |
+
+Dates: the import keeps a date only when the model also gives the phrase it came from and
+that phrase is in the pasted text; anything else is dropped and counted in
+`dates_dropped`. A deadline or due date Bandile set himself is never overwritten by an
+import. The gap review is one model call and is cached: `GET …/gaps` makes no call while
+the last review is at least as new as the last change to the requirements. A new review
+marks the previous open gaps `superseded`.
+
+Briefing additions: items with category `application` — an application in preparation
+whose deadline is within 60 days (target type `application`, score `max(10, 82 − days)`,
+90 once the deadline has passed); a missing or in-progress requirement with its own due
+date within 14 days (target type `application_requirement`, `60 + (14 − days)`, capped at
+80); open high gaps when the deadline is within 90 days (target type `application_gap`,
+24, at most two). `counts.applications_at_risk` is included in `attention_count`. Alert
+`application_at_risk` (critical): a deadline inside 14 days with requirements not ready.
+Agent `application_watch` (daily at 05:45) emits `application.deadline_near` once per
+application, mark (30, 14, 7, 3, 1 days) and deadline, and refreshes stale gap reviews (at
+most two a run).
+
 ### Tool registry (for the UI's reference)
 `route_brain_dump, get_dashboard_state, detect_off_track, synthesize_weekly_review,
 surface_weakest_topics, query_war_room, add_todos, query_cold_archive,

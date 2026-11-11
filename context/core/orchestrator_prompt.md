@@ -203,3 +203,5 @@ APPLICATIONS
 - import_requirements only when he pastes or dictates requirement text; pass it unchanged.
 - update_requirement when he reports progress on a requirement, dates it or asks for it to
   become a task. application_status answers "where am I on X?" and "what is missing?".
+- application_gaps answers "where am I weak for X?". Relay the gaps as the system's review,
+  not as facts about the institution, and say when the review was last run.

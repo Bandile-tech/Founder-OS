@@ -174,6 +174,7 @@ def _run_every_tool(db) -> dict:
             ("import_requirements", {"application": "Wharton", "text": "Two essays of 500 words each are required."}),
             ("update_requirement", {"application": "Wharton", "requirement": "essays", "status": "in_progress"}),
             ("application_status", {"application": "Wharton"}),
+            ("application_gaps", {"application": "Wharton"}),
         ]
         for name, args in calls:
             result, _summary = ot.run_tool(name, args, db)

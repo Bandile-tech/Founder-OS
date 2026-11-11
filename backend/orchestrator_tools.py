@@ -2602,3 +2602,71 @@ _register(
     "next thing due and open gaps. Read-only. Omit application for all of them.",
     {"application": _str("Application name, part of it, or its id.")},
 )
+
+
+def application_gaps(db, application, refresh: bool = False):
+    """Where the profile is weak relative to an application (a cached review)."""
+    import applications
+    import change_log
+    import llm as _llm
+    app, problem = _pick_application(db, application)
+    if app is None:
+        return problem
+    with change_log.batch_scope(db, "assistant"):
+        try:
+            result = applications.review_gaps(db, app, refresh=bool(refresh))
+        except _llm.AIUnavailable:
+            db.rollback()
+            msg = "the gap review needs the AI key, which is not configured"
+            return {"error": msg}, msg
+        except ValueError as exc:
+            db.rollback()
+            return {"error": str(exc)}, str(exc)
+        db.commit()
+    reviewed = app.gaps_reviewed_at
+    shaped = {
+        "application": app.name,
+        "review_last_run": reviewed.strftime("%d %b %Y %H:%M UTC") if reviewed else "never",
+        "from_cache": result["cached"],
+        "gaps": [{"gap": g["gap"], "severity": g["severity"], "evidence": g["evidence"],
+                  "suggested_action": g["suggested_action"]} for g in result["gaps"]],
+        "note": "This is the system's review, not a fact about the institution. Say when it was last run.",
+    }
+    if result.get("stale"):
+        shaped["note"] += " The requirements have changed since; the review is out of date."
+    high = sum(1 for g in result["gaps"] if g["severity"] == "high")
+    return shaped, f"{app.name}: {len(result['gaps'])} open gap(s), {high} high"
+
+
+_register(
+    "application_gaps",
+    lambda db, a: application_gaps(db, application=a.get("application", ""), refresh=bool(a.get("refresh", False))),
+    "Where Bandile's profile is weak relative to an application, from the system's cached "
+    "review. Relay it as the system's view and say when the review was last run. Set refresh "
+    "true only when he asks for a fresh review.",
+    {"application": _str("Application name, part of it, or its id."),
+     "refresh": {"type": "boolean", "description": "Run the review again now."}},
+    ["application"],
+)
+
+
+def _check_application_at_risk(db, params):
+    """True when an application still being prepared has its deadline inside ``days`` days
+    and requirements that are not ready."""
+    days = int(params.get("days", 14))
+    today = date.today()
+    for app in db.query(models.Application).filter(
+            models.Application.status.in_(("researching", "preparing")),
+            models.Application.deadline.isnot(None)).all():
+        left = (app.deadline - today).days
+        if left > days:
+            continue
+        outstanding = db.query(models.ApplicationRequirement).filter(
+            models.ApplicationRequirement.application_id == app.id,
+            models.ApplicationRequirement.status.in_(("missing", "in_progress"))).count()
+        if outstanding:
+            return True
+    return False
+
+
+_RULE_CHECKS["application_at_risk"] = _check_application_at_risk

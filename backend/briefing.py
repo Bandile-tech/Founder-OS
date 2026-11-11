@@ -26,7 +26,8 @@ Response shape (the target home screen is built against this):
 Phase 5 adds the item categories ``payment``, ``deal``, ``client``, ``project`` (target
 types of the same names), ``outreach`` (target types ``outreach_message`` and ``lead``) and
 ``opportunity`` (target types ``research_finding``, ``opportunity_pipeline`` and
-``research_objective``);
+``research_objective``); Phase 6 adds ``application`` (target types ``application``,
+``application_requirement`` and ``application_gap``);
 none of them is completable from a checkbox. ``progress.projects`` is the share of projects
 delivered or closed in the last 90 days out of those plus the active ones (null with no
 projects).
@@ -251,6 +252,50 @@ def _opportunity_items(db: Session, today: date) -> tuple[list, int]:
                            action="Run it (one tap on Agents)", target_type="research_objective",
                            target_id=o.id, score=12))
     return items, len(fresh)
+
+
+def _application_items(db: Session, today: date) -> tuple[list, int]:
+    """Application deadlines inside 60 days, requirements due inside 14, and high gaps when
+    the deadline is inside 90. Returns the items and how many applications are at risk."""
+    import applications
+    items, gap_items, at_risk = [], [], 0
+    for app in db.query(models.Application).filter(
+            models.Application.status.in_(applications.STATUSES[:2])).all():
+        t = applications.timeline(db, app, today)
+        if t["at_risk"]:
+            at_risk += 1
+        days = t["days_to_deadline"]
+        outstanding = t["requirements"]["missing"] + t["requirements"]["in_progress"]
+        if days is not None and days <= 60:
+            if not t["requirements_total"]:
+                reason, action = "No requirements listed yet", "Paste the requirements page"
+            elif outstanding:
+                reason, action = f"{outstanding} requirement(s) still missing", "Work the next missing item"
+            else:
+                reason, action = "All requirements ready — submit", "Submit"
+            late = days < 0
+            items.append(_item(title=f"{app.name} application", category="application", due=app.deadline, today=today,
+                               due_label=f"{-days}d overdue" if late else f"{days} days",
+                               reason=reason, action=action, target_type="application", target_id=app.id,
+                               score=90 if late else max(10, 82 - days)))
+        for r in applications.requirements_of(db, app):
+            if r.status not in applications.REQ_OPEN or r.due_date is None:
+                continue
+            left = (r.due_date - today).days
+            if left <= 14:
+                items.append(_item(title=f"{app.name}: {r.title}", category="application", due=r.due_date, today=today,
+                                   reason="Requirement due soon" if left >= 0 else "Requirement overdue",
+                                   action="Make it a task" if r.todo_id is None else "Work the task",
+                                   target_type="application_requirement", target_id=r.id,
+                                   score=min(80, 60 + (14 - left))))
+        if days is not None and 0 <= days <= 90:
+            for g in applications.open_gaps(db, app):
+                if g.severity == "high":
+                    gap_items.append(_item(title=f"{app.name}: {g.gap[:80]}", category="application", today=today,
+                                           due_label="GAP", reason=g.evidence or "Weak relative to this application",
+                                           action="Address or accept the risk", target_type="application_gap",
+                                           target_id=g.id, score=24))
+    return items + gap_items[:2], at_risk
 
 
 def _portfolio_items(db: Session, today: date) -> tuple[list, int | None]:
@@ -488,18 +533,20 @@ def build_briefing(db: Session, *, refresh: bool = False, now: datetime | None =
     outreach_items, drafts_waiting = _outreach_items(db, today)
     portfolio_items, projects_pct = _portfolio_items(db, today)
     opportunity_items, opportunities_new = _opportunity_items(db, today)
+    application_items, applications_at_risk = _application_items(db, today)
     alerts, alert_items = _alert_items(db, today)
 
     items = (task_items + nn_items + exam_items + syl_items + target_items + alert_items
-             + crm_items + outreach_items + portfolio_items + opportunity_items)
+             + crm_items + outreach_items + portfolio_items + opportunity_items + application_items)
     items.sort(key=lambda i: i["score"], reverse=True)
 
     counts["payments_overdue"] = business_detail["overdue_count"]
     counts["drafts_waiting"] = drafts_waiting
     counts["opportunities_new"] = opportunities_new          # informational: not in attention_count
+    counts["applications_at_risk"] = applications_at_risk
     attention = (counts["overdue"] + len(target_items)
                  + sum(1 for a in alerts if a.get("severity") == "critical")
-                 + counts["payments_overdue"])
+                 + counts["payments_overdue"] + counts["applications_at_risk"])
 
     core = {
         "date": today.isoformat(), "today_date": today, "weekday": today.strftime("%A"), "badge": _badge(today),
