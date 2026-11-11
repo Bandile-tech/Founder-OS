@@ -36,7 +36,7 @@ const VIEWPORTS = [
 ];
 // "page:state" opens a page and then one of its sub-views (see show()).
 const PAGES = ["home", "timetable", "health", "syllabus", "history", "agents", "business", "business:clients", "business:client",
-  "warroom", "annual", "guide", "settings"];
+  "business:portfolio", "warroom", "annual", "guide", "settings"];
 // Extra states worth seeing on the sheet (not part of the per-page consistency checks).
 const EXTRAS = ["stage", "menu"];
 
@@ -114,6 +114,13 @@ async function seedBusiness() {
   await api("POST", "/recurring", { client_id: c.id, title: "Hosting retainer", amount: 600, currency: "ZMW", interval: "monthly", start: day(12) });
   await api("POST", "/communications", { client_id: c.id, channel: "call", direction: "out", summary: "Agreed the gallery page and the order form" });
   await api("POST", "/clients", { name: "Hope Clinic", status: "prospect" });
+  // Projects: one for the client (blocked), one in focus, a stale one and a paused one.
+  const ordering = (await api("POST", "/projects", { title: "Online ordering", client_id: c.id, expected_value: 8000, currency: "ZMW", due_date: day(5), priority: 2 })).json;
+  await api("PATCH", `/projects/${ordering.id}`, { blocked_reason: "waiting on the product photos" });
+  await api("POST", "/projects", { title: "Founder OS Phase 5", priority: 1, due_date: day(21), next_action: "Ship the leads importer" });
+  await api("POST", "/projects", { title: "Newsletter", priority: 4, expected_value: 1500, currency: "ZMW" });
+  const side = (await api("POST", "/projects", { title: "Study planner app", priority: 3 })).json;
+  await api("POST", `/projects/${side.id}/status`, { status: "paused" });
   return { leadId: ids[0], clientId: c.id };
 }
 
@@ -126,6 +133,9 @@ function seedDraft(env) {
     "lead = db.query(models.Lead).filter(models.Lead.name == 'Mercy Banda').first()",
     "db.add(models.OutreachMessage(lead_id=lead.id, channel='whatsapp', status='draft', brief='intro', " +
       "body='Hi Mercy, I am Bandile. I build small stock-alert tools for pharmacies in Lusaka.\\n\\nCould I show you a two-minute demo this week?'))",
+    "from datetime import datetime, timedelta",
+    "stale = db.query(models.Project).filter(models.Project.title == 'Newsletter').first()",
+    "stale.last_activity_at = datetime.utcnow() - timedelta(days=20)",
     "db.commit()",
   ].join("\n");
   const r = spawnSync(PYTHON, ["-c", code], { cwd: path.join(ROOT, "backend"), env, encoding: "utf8" });
@@ -182,7 +192,8 @@ async function show(page, name) {
     closeSidebar();
     if (base === "business") {
       BIZ.clientId = null;
-      BIZ.tab = state === "clients" || state === "client" ? "clients" : "pipeline";
+      BIZ.tab = state === "clients" || state === "client" ? "clients" : (state || "pipeline");
+      BIZ.showPaused = true;
     }
     const el = document.querySelector(`.nav-item[onclick*="nav('${base}'"]`);
     nav(base, el);

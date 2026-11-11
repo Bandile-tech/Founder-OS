@@ -12,6 +12,7 @@
  *      Esc closes it, the close directive closes it
  *   5. Business page: the Clients tab lists a client, a tap opens it, and Paid on a due
  *      payment marks it paid and logs the revenue
+ *   6. Portfolio tab: Focus makes a project priority 1 and demotes the previous one
  *
  * Run from the repo root:
  *     node tests/e2e/smoke.js
@@ -195,6 +196,19 @@ async function api(token, method, p, body, isForm) {
     const rev = (await api(token, "GET", "/revenue")).json.records.find((r) => r.id === paid.revenue_id);
     check(rev && rev.amount === 1200 && rev.currency === "ZMW", "the revenue row was written in Kwacha");
     check((await page.locator("#ucmd-changes .chg-row").count()) >= 1, "the change is shown with Undo in the dock");
+
+    // ── 6. Portfolio: Focus ──
+    console.log("6. portfolio: focus a project");
+    const projA = await api(token, "POST", "/projects", { title: "Smoke project one", priority: 1 });
+    const projB = await api(token, "POST", "/projects", { title: "Smoke project two", priority: 3 });
+    await page.evaluate(() => businessTab("portfolio"));
+    await page.waitForSelector("#biz-body .row", { timeout: 15000 });
+    await page.locator("#biz-body .row", { hasText: "Smoke project two" }).locator("button:has-text('Focus')").click();
+    await page.waitForTimeout(1200);
+    const projects = (await api(token, "GET", "/projects")).json;
+    const pr = (id) => projects.find((p) => p.id === id).priority;
+    check(pr(projB.json.id) === 1 && pr(projA.json.id) === 2, "Focus made the project priority 1 and demoted the other");
+    check((await page.locator("#biz-body .row", { hasText: "Smoke project two" }).locator("text=In focus").count()) === 1, "the row shows it is in focus");
 
     check(pageErrors.length === 0, `no page errors (${pageErrors.join("; ") || "none"})`);
   } catch (e) {

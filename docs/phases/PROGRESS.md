@@ -339,6 +339,37 @@ Decisions where the spec was silent:
 - An overdue payment counts as a project's bottleneck when it is tied to the project, or to
   the project's client with no project named.
 
+### Portfolio UI (split from S12) (done)
+
+Shipped (`frontend/index.html`): the Portfolio tab of the Business page, from
+`GET /portfolio` — a totals strip (active, blocked, overdue, active value); the ranked list
+with rank, a health dot, title and client, the bottleneck (or the next action) and due
+label, the recommendation badge, and the score with the six components in its `title`;
+taps Focus (`POST /projects/{id}/focus`), Delivered and Pause (`POST /projects/{id}/status`),
+Start on a planned project, Close on a delivered one; paused projects in a collapsed list
+with Resume. A pause suggestion filed by the review shows in the existing suggestions chip
+above the talk bar (labelled "Pause project"). The home screen's Projects tile is now a
+live link to this tab.
+
+Also: `showChanges()` makes sure the dock's change strip exists before a tap's changes are
+rendered, so Undo is always offered (before, a tap made before any assistant reply showed
+only a toast). `tests/e2e/screens.js` seeds four projects and checks the tab at all four
+sizes; `tests/e2e/smoke.js` gained a sixth flow (Focus makes a project priority 1 and
+demotes the previous one).
+
+Checked in headless Chrome at the four sizes. What the screenshots showed: the totals strip
+and the ranked card match the Clients tab; the blocked project is ranked first with a red
+dot and "Blocked: waiting on the product photos"; the stale project carries the amber
+Pause badge and the "1 suggestion" chip is lit above the talk bar; on the phone each row
+wraps to title, then badge and score, then the buttons, with no horizontal scroll.
+
+Decisions where the spec was silent:
+- §0.7 asks for at most one tap per row, while this session's task lists Focus, Pause,
+  Resume and Delivered. An active row offers Focus (unless it is already the priority-1
+  project), Delivered and Pause; the one that matches the recommendation is the lit button.
+- The rest of S12 (Brand tab, Agents page additions, docs) is built in its own sessions,
+  in the order given for this run.
+
 ## Environment variables added so far
 
 | Var | Default | Session | Purpose |
