@@ -52,6 +52,7 @@ DELETABLE = {
     "payments": (models.Payment, "title"),
     "recurring_revenue": (models.RecurringRevenue, "title"),
     "communications": (models.Communication, "summary"),
+    "project_updates": (models.ProjectUpdate, "text"),
 }
 
 
@@ -242,6 +243,8 @@ def accept_suggestion(db: Session, sid: int) -> dict:
         parsed["ideas"] = [{**payload, "confidence": 1.0}]
     elif s.kind == "todo_complete":
         parsed["todos_complete_ids"] = [payload.get("todo_id")]
+    elif s.kind == "project_pause":
+        parsed["project_updates"] = [{"project_id": payload.get("project_id"), "status": "paused"}]
     else:
         raise HTTPException(400, f"Cannot apply suggestion kind '{s.kind}'")
 

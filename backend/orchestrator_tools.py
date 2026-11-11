@@ -1203,7 +1203,8 @@ TOOL_SCHEMAS = [
                         "enum": ["todos", "notes", "revenue", "ai_memory", "books",
                                  "daily_bible_log", "clients", "lift_logs", "daily_logs",
                                  "leads", "outreach_messages", "contacts", "deals", "projects",
-                                 "payments", "recurring_revenue", "communications"],
+                                 "payments", "recurring_revenue", "communications",
+                                 "project_updates"],
                         "description": "Which table the record lives in.",
                     },
                     "record_id": {"type": "integer", "description": "The record's id."},
@@ -2048,3 +2049,164 @@ def _check_no_outreach_sent(db, params):
 
 
 _RULE_CHECKS["no_outreach_sent"] = _check_no_outreach_sent
+
+
+# ── 5E: project portfolio ────────────────────────────────────
+
+def _pick_project(db, ref):
+    import crm
+    project, scored = crm.find_project(db, ref)
+    if project is not None:
+        return project, None
+    if scored:
+        return None, _ambiguous("project", str(ref), scored, lambda p: p.title)
+    return None, ({"error": f"no project matches '{ref}'"}, f"no project matches '{ref}'")
+
+
+def portfolio_review(db, include_paused: bool = True):
+    """The ranked portfolio. Read-only, except that it files pause suggestions."""
+    import change_log
+    import portfolio
+    with change_log.batch_scope(db, "assistant"):
+        result = portfolio.full_review(db, include_paused=bool(include_paused))
+
+    def line(e):
+        p = e["project"]
+        return {"project_id": p["id"], "title": p["title"], "client": p["client_name"],
+                "status": p["status"], "rank": e["rank"], "recommendation": e["recommendation"],
+                "attention_score": e["attention"]["score"], "bottleneck": e["bottleneck"],
+                "due_date": p["due_date"], "next_action": p["next_action"]}
+
+    shaped = {
+        "ranked": [line(e) for e in result["ranked"]],
+        "paused": [line(e) for e in result["paused"]],
+        "pause_suggestions_waiting": [s["payload"].get("title") for s in result["pause_suggestions"]],
+        "totals": result["totals"],
+        "note": "Recommendations are advice. Nothing is paused until Bandile taps or says so.",
+    }
+    focus_n = sum(1 for e in result["ranked"] if e["recommendation"] == "focus")
+    return shaped, (f"{focus_n} focus, {result['totals']['blocked']} blocked, "
+                    f"{len(result['pause_suggestions'])} pause suggestion(s) waiting")
+
+
+def update_project(db, project=None, create: bool = False, title: str | None = None,
+                   kind: str | None = None, client: str | None = None, status: str | None = None,
+                   priority: int | None = None, expected_value: float | None = None,
+                   currency: str | None = None, due_date: str | None = None,
+                   effort_hours_week: float | None = None, next_action: str | None = None,
+                   blocked_reason: str | None = None, explicit: bool = False):
+    """Create or change a project. Pausing needs ``explicit`` (Bandile literally said pause)."""
+    import business_common
+    import change_log
+    import crm
+    import portfolio
+    if status == "paused" and not explicit:
+        msg = "pausing needs a tap or an explicit 'pause X'"
+        return {"error": msg}, msg
+    due = None
+    if due_date:
+        due = business_common.parse_day(due_date)
+        if due is None:
+            msg = f"could not read the date '{due_date}'"
+            return {"error": msg}, msg
+    owner = None
+    if client:
+        owner, scored = crm.find_client(db, client)
+        if owner is None:
+            if scored:
+                return _ambiguous("client", client, scored, _client_label)
+            return {"error": f"no client matches '{client}'"}, f"no client matches '{client}'"
+    fields = dict(kind=kind, priority=priority, expected_value=expected_value, currency=currency,
+                  due_date=due, effort_hours_week=effort_hours_week, next_action=next_action)
+    with change_log.batch_scope(db, "assistant"):
+        try:
+            if create:
+                name = (title or (project if isinstance(project, str) else "") or "").strip()
+                result = portfolio.create_project(
+                    db, title=name, client=owner, status=status or "active",
+                    **{**fields, "kind": kind or ("client" if owner else "internal")})
+                verb = "created"
+            else:
+                target, problem = _pick_project(db, project or "")
+                if target is None:
+                    return problem
+                result = portfolio.update_project(db, target, title=title, client=owner, status=status,
+                                                  blocked_reason=blocked_reason, **fields)
+                verb = "updated"
+        except ValueError as exc:
+            return {"error": str(exc)}, str(exc)
+        db.commit()
+    return result, f"project '{result['title']}' {verb} — {result['status']}"
+
+
+def log_project_update(db, project, text: str, kind: str = "note"):
+    import change_log
+    import portfolio
+    target, problem = _pick_project(db, project)
+    if target is None:
+        return problem
+    with change_log.batch_scope(db, "assistant"):
+        try:
+            result = portfolio.log_update(db, target, text, kind or "note")
+        except ValueError as exc:
+            return {"error": str(exc)}, str(exc)
+        db.commit()
+    return result, f"logged {result['kind']} on {target.title}"
+
+
+_register(
+    "portfolio_review",
+    lambda db, a: portfolio_review(db, include_paused=bool(a.get("include_paused", True))),
+    "Rank every live project by how much attention it deserves, with the bottleneck on each "
+    "and which to focus on, maintain, pause or close. Use it for 'what should I work on this "
+    "week' and 'what should I pause'.",
+    {"include_paused": {"type": "boolean", "description": "Also list paused projects (default true)."}},
+)
+
+_register(
+    "update_project",
+    lambda db, a: update_project(
+        db, project=a.get("project"), create=bool(a.get("create", False)), title=a.get("title"),
+        kind=a.get("kind"), client=a.get("client"), status=a.get("status"), priority=a.get("priority"),
+        expected_value=a.get("expected_value"), currency=a.get("currency"), due_date=a.get("due_date"),
+        effort_hours_week=a.get("effort_hours_week"), next_action=a.get("next_action"),
+        blocked_reason=a.get("blocked_reason"), explicit=bool(a.get("explicit", False))),
+    "Change a project, or create one when create is true. ONLY when Bandile states the "
+    "change or announces a new project. Status 'paused' is refused unless explicit is true, "
+    "and explicit may be true only when he literally said to pause that project.",
+    {"project": _str("Project title, part of it, or its id."),
+     "create": {"type": "boolean", "description": "Create a new project (give title)."},
+     "title": _str("Title (for a new project, or to rename)."),
+     "kind": _str("client or internal.", ["client", "internal"]),
+     "client": _str("Client the project is for."),
+     "status": _str("New status.", ["planned", "active", "paused", "delivered", "closed", "cancelled"]),
+     "priority": _int("1 (highest) to 5."),
+     "expected_value": _num("What it is worth."),
+     "currency": _str("ZMW or USD (default ZMW)."),
+     "due_date": _str("Due date as he said it."),
+     "effort_hours_week": _num("Hours a week it takes."),
+     "next_action": _str("The next concrete step."),
+     "blocked_reason": _str("What it is blocked on. An empty string clears the block."),
+     "explicit": {"type": "boolean", "description": "True only if he literally said to pause it."}},
+)
+
+_register(
+    "log_project_update",
+    lambda db, a: log_project_update(db, project=a.get("project", ""), text=a.get("text", ""), kind=a.get("kind", "note")),
+    "Log progress on a project: what shipped, a milestone, a blocker or that it is unblocked. "
+    "ONLY when Bandile reports it.",
+    {"project": _str("Project title, part of it, or its id."),
+     "text": _str("What happened, in a line."),
+     "kind": _str("note (default), milestone, blocker or unblocked.", ["note", "milestone", "blocker", "unblocked"])},
+    ["project", "text"],
+)
+
+
+def _check_projects_blocked(db, params):
+    """True when at least ``min`` active projects have a blocked reason."""
+    minimum = int(params.get("min", 2))
+    rows = db.query(models.Project).filter(models.Project.status == "active").all()
+    return sum(1 for p in rows if (p.blocked_reason or "").strip()) >= minimum
+
+
+_RULE_CHECKS["projects_blocked"] = _check_projects_blocked

@@ -274,6 +274,46 @@ due within 7 days: 42), `deal` (40) and `client` (26, at most three); `counts.pa
 (included in `attention_count`); a new top-level `business_detail: {revenue_pct, mrr_usd,
 outstanding_usd, overdue_count}`. `progress.business` is unchanged.
 
+### Project portfolio (Phase 5E — `backend/portfolio.py`)
+
+A project: `{id, title, kind (client|internal), client_id, client_name, deal_id, status,
+priority (1 high … 5 low), expected_value, currency, expected_value_usd, effort_hours_week,
+start_date, due_date, delivered_at, next_action, blocked_reason, last_activity_at, health,
+notes, created_at, updated_at}`. `status` is `planned | active | paused | delivered |
+closed | cancelled`.
+
+`attention`: `{score, components: {value 0–3, urgency 0–4, staleness 0–2, blocked 0|2,
+priority 0.4–2, waiting 0|1}, bottleneck, overdue_days, idle_days, waiting_days}`. The
+bottleneck is the first that applies of: `blocked: <reason>`, `overdue by N days`,
+`waiting on client for N days`, `no activity for N days`, `payment overdue (K…)`, or null.
+
+| Method & path | Body / query | Returns |
+|---|---|---|
+| `GET /portfolio` | `include_paused=1` | `{ranked: [entry], paused: [entry], pause_suggestions: [suggestion], bottlenecks: [{project_id, title, bottleneck}], totals: {active, paused, blocked, overdue, value_usd_active}}`; an entry is `{project, attention, bottleneck, recommendation, rank}` |
+| `GET /projects` | `status?`, `kind?`, `client_id?` | `[project + attention]` |
+| `GET /projects/{id}` | | project + `attention`, `updates[]`, `payments[]`, `communications[]` (the client's last 20) |
+| `POST /projects` | `{title, kind?, client_id?, priority?, expected_value?, currency?, due_date?, effort_hours_week?, next_action?}` | 201 project + `change`, `changes` |
+| `PATCH /projects/{id}` | any of the above plus `status?`, `blocked_reason?`, `notes?` | project + `change`, `changes`. An empty `blocked_reason` clears the block and writes an `unblocked` update; a new reason writes a `blocker` update |
+| `POST /projects/{id}/status` | `{status}`: `paused`, `active`, `delivered` or `closed` | project + `change`, `changes` (the project and a `status` update row); 400 for any other status |
+| `POST /projects/{id}/focus` | | project (now priority 1) + `changes`; every other active priority-1 project drops to 2, all in one batch |
+| `POST /projects/{id}/updates` | `{text, kind?: note\|milestone\|blocker\|unblocked, occurred_at?}` | 201 `{id, project_id, project, kind, text, occurred_at, blocked_reason, health, change, changes}` |
+
+`ranked` holds active, planned and delivered projects, highest score first; `rank` is set
+for active projects only. `recommendation` is checked in this order: `close` (delivered
+more than 30 days ago), `pause` (active, no activity for more than 14 days, nothing due
+within 30 days, value under a third of the $5,000 cap), `focus` (one of the three
+highest-scoring active projects that are not recommended for a pause), else `maintain`.
+`GET /portfolio` stores each project's `health` and files one `project_pause` suggestion
+per pause recommendation (none while one is already open), so it can write. Accepting the
+suggestion (`POST /suggestions/{id}/accept`) pauses the project; nothing is paused
+otherwise.
+
+Briefing additions: items with category `project` — blocked (62), overdue (70 + min(days,
+9)), waiting on the client for more than seven days (36) and the rank-1 focus project (45,
+`due_label` `FOCUS`); `progress.projects` (delivered or closed in 90 days ÷ that plus
+active, null with no projects). Alert `projects_blocked` (warn) at two blocked active
+projects.
+
 ### Tool registry (for the UI's reference)
 `route_brain_dump, get_dashboard_state, detect_off_track, synthesize_weekly_review,
 surface_weakest_topics, query_war_room, add_todos, query_cold_archive,

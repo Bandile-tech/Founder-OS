@@ -297,6 +297,48 @@ Deferred / not built here:
   rules allow no input beyond the dock and the segment chips). Leads arrive by
   conversation; a CSV import needs the API until a button is added. See follow-ups.
 
+### S8 — 5E project portfolio (done)
+
+Shipped: `ProjectUpdate` and m018; `portfolio.py` (`attention`, `recommendation`,
+`health_of`, `review`, `propose_pauses`, `create_project`, `update_project`, `set_status`,
+`focus`, `log_update`, `project_detail`; `GET /portfolio`, `GET/POST /projects`,
+`GET/PATCH /projects/{id}`, `POST /projects/{id}/status`, `/focus`, `/updates`); suggestion
+kind `project_pause` and the `project_updates` key in `_apply_parse_updates_inner` (not in
+the parser's schema or prompt); tools `portfolio_review`, `update_project`,
+`log_project_update`; briefing `_portfolio_items` and `progress.projects`; alert
+`projects_blocked`; `project_updates` deletable; the prompt section; endpoint shapes in the
+hand-off doc. Tests: `tests/test_phase5e_portfolio.py` (acceptance tests 1–7).
+
+Deferred: nothing from §5E. The Portfolio tab is the next session.
+
+Where the spec contradicts itself (ruling):
+- Acceptance test 1 expects `focus ×3, pause ×1, close ×1` from five projects of which only
+  three are active, one is paused and one was delivered 40 days ago. With the rules as
+  written that cannot happen: either the stale project is `pause` and only two active
+  projects are left to `focus`, or all three active projects are `focus` and nothing is
+  ever `pause` (which would also make test 2 impossible). Built: recommendations are
+  checked in the order close → pause → focus → maintain; a project recommended for a pause
+  does not take a focus place; a project that is already paused stays `maintain`. The
+  fixture therefore yields `focus ×2, pause ×1, maintain ×1, close ×1`, and the test
+  asserts that. If the intent was that a paused project can be recommended `focus`
+  ("resume it"), the change is one line in `portfolio.recommendation`.
+
+Decisions where the spec was silent:
+- `ranked` contains active, planned and delivered projects; `rank` is given to active
+  projects only; closed and cancelled projects are not in the review.
+- "Nothing due within 30 days" means no due date, or one more than 30 days away; an overdue
+  project is never recommended for a pause.
+- `last_activity_at` moves on every update, status change and field change of a project.
+- A project that is both blocked and overdue appears in the briefing once, as blocked (62).
+  The focus item (45) is shown only when the rank-1 project is not already listed as
+  blocked, overdue or waiting.
+- `GET /portfolio`, the `portfolio_review` tool and `GET /briefing/today` store health and
+  file pause suggestions, so all three can write. Health is derived and not logged.
+- The one-tap `POST /projects/{id}/status` accepts `paused`, `active`, `delivered` and
+  `closed`; `planned` and `cancelled` go through `PATCH` or conversation.
+- An overdue payment counts as a project's bottleneck when it is tied to the project, or to
+  the project's client with no project named.
+
 ## Environment variables added so far
 
 | Var | Default | Session | Purpose |

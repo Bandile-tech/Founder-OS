@@ -79,6 +79,8 @@ import outreach as _outreach
 app.include_router(_outreach.router)
 import crm as _crm
 app.include_router(_crm.router)
+import portfolio as _portfolio
+app.include_router(_portfolio.router)
 
 # Serve frontend from ../frontend if it exists
 FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend")
@@ -166,6 +168,8 @@ async def startup():
         run_m015(db)        # m015 — leads, lead_imports, outreach_messages, todos.lead_id/client_id
         from migrations.m016_crm import run as run_m016
         run_m016(db)        # m016 — contacts, deals, projects, payments, recurring_revenue, communications
+        from migrations.m018_portfolio import run as run_m018
+        run_m018(db)        # m018 — project_updates
         _validate_schema(engine)   # raises if any ORM column is absent from the live DB
         _seed_non_negotiables_if_empty(db)
         _verify_seed_integrity(db)
@@ -1572,6 +1576,20 @@ def _apply_parse_updates_inner(db: Session, parsed: dict, today: date) -> dict:
         db.add(rev)
         change_log.record_create(db, rev, f"Revenue {currency} {float(amount):g} from {source or 'unknown'}")
         result["revenue_logged"].append({"amount": float(amount), "currency": currency, "source": source})
+
+    # ── Project status changes (accepted suggestions only; not in the parser schema) ──
+    for pu in parsed.get("project_updates") or []:
+        import portfolio as portfolio_mod
+        try:
+            project_id = int(pu.get("project_id"))
+        except (TypeError, ValueError):
+            continue
+        project = db.query(models.Project).filter(models.Project.id == project_id).first()
+        status = pu.get("status")
+        if project is None or not status or status == project.status:
+            continue
+        portfolio_mod.set_status(db, project, status, source="suggestion")
+        result.setdefault("projects_updated", []).append({"id": project.id, "status": status})
 
     # ── DailyLog entry ────────────────────────────────────────
     if parsed.get("log_entry"):

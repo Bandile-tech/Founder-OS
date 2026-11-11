@@ -983,3 +983,18 @@ class Communication(Base):
     outreach_message_id = Column(Integer, nullable=True)
     source              = Column(String, default="conversation")
     created_at          = Column(DateTime, default=datetime.utcnow)
+
+
+# ── PHASE 5E: PROJECT PORTFOLIO ──────────────────────────────
+
+class ProjectUpdate(Base):
+    """A dated line on a project: a note, a milestone, a blocker, an unblock or a status change."""
+    __tablename__ = "project_updates"
+
+    id          = Column(Integer, primary_key=True, index=True)
+    project_id  = Column(Integer, nullable=False)
+    kind        = Column(String, nullable=False, default="note")   # note|milestone|blocker|unblocked|status
+    text        = Column(Text, nullable=False)
+    occurred_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    source      = Column(String, default="conversation")
+    created_at  = Column(DateTime, default=datetime.utcnow)

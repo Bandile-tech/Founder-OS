@@ -160,6 +160,9 @@ def _run_every_tool(db) -> dict:
             ("set_follow_up", {"lead": "Mercy Banda", "date": "in 3 days"}),
             ("log_lead_reply", {"lead": "Mercy Banda", "summary": "Wants a demo on Friday"}),
             ("convert_lead", {"lead": "Mercy Banda"}),
+            ("update_project", {"create": True, "title": "Founder OS Phase 5", "priority": 1, "due_date": "in 3 weeks"}),
+            ("log_project_update", {"project": "Founder OS Phase 5", "text": "Shipped the leads importer", "kind": "milestone"}),
+            ("portfolio_review", {}),
         ]
         for name, args in calls:
             result, _summary = ot.run_tool(name, args, db)

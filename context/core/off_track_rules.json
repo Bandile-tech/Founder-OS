@@ -63,6 +63,16 @@
         "min_qualified": 3
       },
       "message": "At least 3 qualified leads but nothing sent in 7 days. Prospecting is stalling."
+    },
+    {
+      "id": "projects_blocked",
+      "severity": "warn",
+      "enabled": true,
+      "check": "projects_blocked",
+      "params": {
+        "min": 2
+      },
+      "message": "Two or more projects are blocked. Clear a bottleneck before starting anything new."
     }
   ]
 }

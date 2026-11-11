@@ -23,9 +23,11 @@ Response shape (the target home screen is built against this):
   "counts": {...}, "exams": [...], "non_negotiables": [...], "weakness_notes": [...]
 }
 
-Phase 5 adds the item categories ``payment``, ``deal``, ``client`` (target types of the
-same names) and ``outreach`` (target types ``outreach_message`` and ``lead``); none of them
-is completable from a checkbox.
+Phase 5 adds the item categories ``payment``, ``deal``, ``client``, ``project`` (target
+types of the same names) and ``outreach`` (target types ``outreach_message`` and ``lead``);
+none of them is completable from a checkbox. ``progress.projects`` is the share of projects
+delivered or closed in the last 90 days out of those plus the active ones (null with no
+projects).
 """
 
 import re
@@ -204,6 +206,58 @@ def _alert_items(db: Session, today: date) -> tuple[list, list]:
                            score={"critical": 65, "warn": 45, "info": 15}.get(sev, 15),
                            extra={"alert_check": a.get("check")}))
     return alerts, items
+
+
+def _portfolio_items(db: Session, today: date) -> tuple[list, int | None]:
+    """Blocked, overdue and waiting projects, plus the one project to focus on. Returns the
+    items and the delivery progress (delivered or closed in 90 days ÷ that plus active)."""
+    import portfolio
+    try:
+        result = portfolio.full_review(db)
+    except Exception as exc:  # noqa: BLE001 — the briefing must still render
+        db.rollback()
+        print(f"[briefing] portfolio review failed: {exc}")
+        return [], None
+    items = []
+    focus_done = False
+    for e in result["ranked"]:
+        p, att = e["project"], e["attention"]
+        if p["status"] != "active":
+            continue
+        pid, who = p["id"], p["client_name"]
+        title = p["title"] + (f" — {who}" if who else "")
+        due = date.fromisoformat(str(p["due_date"])[:10]) if p["due_date"] else None
+        if att["components"]["blocked"]:
+            items.append(_item(title=title, category="project", due=due, today=today, due_label="BLOCKED",
+                               reason=f"Blocked: {p['blocked_reason']}", action="Unblock or re-plan",
+                               target_type="project", target_id=pid, score=62))
+        elif att["overdue_days"]:
+            days = att["overdue_days"]
+            items.append(_item(title=title, category="project", due=due, today=today, due_label=f"{days}d overdue",
+                               reason=f"Due {days} day{'s' if days != 1 else ''} ago", action="Deliver or re-date",
+                               target_type="project", target_id=pid, score=70 + min(days, 9)))
+        elif att["components"]["waiting"]:
+            items.append(_item(title=title, category="project", due=due, today=today, due_label="",
+                               reason=f"Waiting on {who or 'the client'} for {att['waiting_days']} days",
+                               action=f"Nudge {who or 'the client'}", target_type="project", target_id=pid,
+                               score=36))
+        elif e["rank"] == 1 and e["recommendation"] == "focus" and not focus_done:
+            items.append(_item(title=title, category="project", due=due, today=today, due_label="FOCUS",
+                               reason=_cap_first(e["bottleneck"]) if e["bottleneck"] else "Highest attention score",
+                               action=p["next_action"] or "Decide the next action", target_type="project",
+                               target_id=pid, score=45))
+        if e["rank"] == 1:
+            focus_done = True
+    since = datetime.utcnow() - timedelta(days=90)
+    done = db.query(models.Project).filter(
+        models.Project.status.in_(("delivered", "closed")), models.Project.delivered_at >= since).count()
+    active = result["totals"]["active"]
+    progress = round(100 * done / max(1, done + active)) if (done or active) else None
+    return items, progress
+
+
+def _cap_first(text: str) -> str:
+    return text[:1].upper() + text[1:] if text else text
 
 
 def _outreach_items(db: Session, today: date) -> tuple[list, int]:
@@ -387,10 +441,11 @@ def build_briefing(db: Session, *, refresh: bool = False, now: datetime | None =
     target_items, targets_pct = _target_items(db, today)
     crm_items, business_detail = _crm_items(db, today)
     outreach_items, drafts_waiting = _outreach_items(db, today)
+    portfolio_items, projects_pct = _portfolio_items(db, today)
     alerts, alert_items = _alert_items(db, today)
 
     items = (task_items + nn_items + exam_items + syl_items + target_items + alert_items
-             + crm_items + outreach_items)
+             + crm_items + outreach_items + portfolio_items)
     items.sort(key=lambda i: i["score"], reverse=True)
 
     counts["payments_overdue"] = business_detail["overdue_count"]
@@ -411,6 +466,7 @@ def build_briefing(db: Session, *, refresh: bool = False, now: datetime | None =
             "business": _business_pct(db),
             "targets": targets_pct,
             "habits": habits_pct,
+            "projects": projects_pct,
         },
         "business_detail": business_detail,
         "counts": {**counts, "items": len(items), "non_negotiables_done": sum(1 for r in nn_rows if r["done"]),
