@@ -309,7 +309,8 @@ class TestHistoryBudget:
         _seed_turns(db, 6)
         db.close()
         captured = []
-        with patch("conversation.summarise", return_value="Earlier we agreed X."):
+        # A key is set, so memory recall embeds the query: stub the embedder (no network).
+        with patch("conversation.summarise", return_value="Earlier we agreed X."),              patch("llm.embed_texts", side_effect=lambda texts, **_: [[1.0, 0.0] for _t in texts]):
             _post_orchestrator("next", captured=captured)
         convo = captured[0]
         assert convo[0]["role"] == "system"                       # stable prompt first

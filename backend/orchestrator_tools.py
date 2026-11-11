@@ -419,10 +419,12 @@ def run_market_research_agent(db, objective: str, max_opportunities: int = 3):
     if result.get("error"):
         return result, result["error"]
     n = len(result.get("opportunities", []))
+    repeated = len(result.get("repeated") or [])
     summary = (
         f"{n} opportunit{'y' if n == 1 else 'ies'} surfaced "
-        f"({result.get('rejected_count', 0)} rejected by verifier) — "
-        f"project #{result.get('project_id')}"
+        f"({result.get('rejected_count', 0)} rejected by verifier"
+        + (f", {repeated} seen before" if repeated else "")
+        + f") — project #{result.get('project_id')}"
     )
     return result, summary
 
@@ -2210,3 +2212,60 @@ def _check_projects_blocked(db, params):
 
 
 _RULE_CHECKS["projects_blocked"] = _check_projects_blocked
+
+
+# ── 5A: standing research objectives and dismissing findings ─
+
+def schedule_research(db, objective: str, cadence_days: int = 14, max_opportunities: int = 3):
+    """Make research on an objective recur (or change how often it does)."""
+    import change_log
+    from market_intel import objectives
+    with change_log.batch_scope(db, "assistant"):
+        try:
+            result = objectives.schedule(db, objective, cadence_days, max_opportunities)
+        except ValueError as exc:
+            return {"error": str(exc)}, str(exc)
+        db.commit()
+    return result, f"research scheduled every {result['cadence_days']} days"
+
+
+def dismiss_research_finding(db, finding_id: int, reason: str | None = None):
+    """Mark a surfaced finding as not worth pursuing."""
+    import change_log
+    from market_intel.agent import dismiss_finding
+    with change_log.batch_scope(db, "assistant"):
+        result = dismiss_finding(db, int(finding_id or 0), reason)
+        if result.get("error"):
+            return result, result["error"]
+        db.commit()
+    out = {"finding_id": result["id"], "problem": result["problem"], "status": result["status"],
+           "reason": result.get("dismissed_reason"), "change": result.get("change")}
+    if result.get("already_dismissed"):
+        return out, f"finding {result['id']} was already dismissed"
+    return out, f"finding {result['id']} dismissed"
+
+
+_register(
+    "schedule_research",
+    lambda db, a: schedule_research(db, objective=a.get("objective", ""),
+                                    cadence_days=int(a.get("cadence_days", 14) or 14),
+                                    max_opportunities=int(a.get("max_opportunities", 3) or 3)),
+    "Make research on an objective recur every cadence_days. ONLY when Bandile explicitly "
+    "asks for research to repeat (e.g. 'keep researching X every two weeks'). NEVER on your "
+    "own initiative and never as a side effect of a one-off research run.",
+    {"objective": _str("The research objective, as a full question."),
+     "cadence_days": _int("How often, in days (default 14)."),
+     "max_opportunities": _int("How many opportunities to surface per run (default 3).")},
+    ["objective"],
+)
+
+_register(
+    "dismiss_research_finding",
+    lambda db, a: dismiss_research_finding(db, finding_id=a.get("finding_id"), reason=a.get("reason")),
+    "Mark a surfaced research finding as not worth pursuing. ONLY when Bandile explicitly "
+    "says a specific finding is not worth it (e.g. 'drop finding 12', 'that one is not for "
+    "me'). NEVER on your own judgement of the finding.",
+    {"finding_id": _int("The id of the finding to dismiss."),
+     "reason": _str("Why, in his words. Optional.")},
+    ["finding_id"],
+)

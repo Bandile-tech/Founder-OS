@@ -186,6 +186,36 @@ All responses are JSON. Dates are ISO strings. `changes` entries have the shape
 ### Usage
 - `GET /usage/summary?days=90` → `{days, total{calls,input_tokens,cached_input_tokens,output_tokens,estimated_cost_usd}, by_day[], by_month[], by_model[]}`
 
+### Market intelligence v2 (Phase 5A — `backend/market_intel/`)
+
+A finding now also carries `recommendation` (`pursue` at 7.5 and above, `watch` at 6.0 and
+above, else `park`), `times_seen`, `dismissed_reason` and `reviewed_at`. `overall` is a
+weighted mean (weights in `context/core/opportunity_weights.json`).
+
+| Method & path | Body / query | Returns |
+|---|---|---|
+| `POST /research/findings/{id}/dismiss` | `{reason?}` | the finding + `change`; a repeat returns `already_dismissed: true` and `change: null`; 404 for an unknown id |
+| `GET /research/objectives` | | `[{id, objective, cadence_days, enabled, max_opportunities, last_run_at, last_project_id, due}]` |
+| `POST /research/objectives` | `{objective, cadence_days?, max_opportunities?}` | 201 objective + `created`, `change`. Text that restates an existing objective updates that one (`created: false`) |
+| `PATCH /research/objectives/{id}` | `{objective?, cadence_days?, enabled?, max_opportunities?}` | objective + `change` |
+| `POST /research/objectives/{id}/run` | | the research run's result (`project_id, title, opportunities[], rejected_count, lessons_updated, repeated[], cost_usd, llm_calls`) plus `objective_id`, `objective`, `changes`; 503 with no AI key. Slow: a full run |
+| `GET /research/projects/{id}` | | existing fields plus `cost_usd`, `llm_calls`, `objective_id`, `repeated: [{finding_id, problem}]` |
+| `GET /research/pipeline` | | existing fields plus `next_action`, `due_date`; each `finding` carries `recommendation` |
+| `PATCH /research/pipeline/{id}` | existing `stage?`, `notes?` plus `next_action?`, `due_date?` | `{id, stage, notes, next_action, due_date, change}` |
+| `POST /research/promote` | unchanged | existing fields plus `changes` |
+
+`due` is `enabled and (never run, or last run at least cadence_days ago)`. A research
+run's result lists findings it came across again under `repeated` instead of surfacing them
+twice; the existing finding's `times_seen` goes up and it gains the new evidence.
+
+Briefing additions: items with category `opportunity` — a `pursue` finding surfaced in the
+last 14 days and not yet promoted or dismissed (target type `research_finding`, score 35,
+`due_label` its score out of ten, at most three); a pipeline entry in `discovered` or
+`researching` that is past its `due_date` (48) or untouched for 14 days (30) (target type
+`opportunity_pipeline`); a standing objective that is due (target type
+`research_objective`, 12). `counts.opportunities_new` is the number of such findings; it is
+not part of `attention_count`.
+
 ### Leads and outreach (Phase 5B — `backend/leads.py`, `backend/outreach.py`)
 
 A lead: `{id, name, company, role, email, phone, whatsapp, linkedin_url, website, location,

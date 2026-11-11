@@ -122,3 +122,41 @@ def fresh_db():
     except Exception:
         pass
     yield
+
+
+# ── No network, ever ─────────────────────────────────────────────────────────
+# Tests must not reach OpenAI or any other host. A test that forgets to patch an HTTP
+# seam fails here, loudly, instead of quietly making a request. Loopback stays open
+# (the in-process test client does not use sockets; a local Postgres does).
+_LOOPBACK = {"127.0.0.1", "::1", "localhost", "0.0.0.0", ""}
+
+
+class NetworkAccessInTest(RuntimeError):
+    pass
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _no_network():
+    import socket
+
+    real_connect = socket.socket.connect
+    real_getaddrinfo = socket.getaddrinfo
+
+    def guarded_connect(self, address):
+        host = address[0] if isinstance(address, tuple) else None
+        if isinstance(host, str) and host not in _LOOPBACK:
+            raise NetworkAccessInTest(f"a test tried to connect to {host}")
+        return real_connect(self, address)
+
+    def guarded_getaddrinfo(host, *args, **kwargs):
+        if isinstance(host, bytes):
+            host = host.decode("ascii", "ignore")
+        if isinstance(host, str) and host not in _LOOPBACK:
+            raise NetworkAccessInTest(f"a test tried to resolve {host}")
+        return real_getaddrinfo(host, *args, **kwargs)
+
+    socket.socket.connect = guarded_connect
+    socket.getaddrinfo = guarded_getaddrinfo
+    yield
+    socket.socket.connect = real_connect
+    socket.getaddrinfo = real_getaddrinfo

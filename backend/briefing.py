@@ -24,7 +24,9 @@ Response shape (the target home screen is built against this):
 }
 
 Phase 5 adds the item categories ``payment``, ``deal``, ``client``, ``project`` (target
-types of the same names) and ``outreach`` (target types ``outreach_message`` and ``lead``);
+types of the same names), ``outreach`` (target types ``outreach_message`` and ``lead``) and
+``opportunity`` (target types ``research_finding``, ``opportunity_pipeline`` and
+``research_objective``);
 none of them is completable from a checkbox. ``progress.projects`` is the share of projects
 delivered or closed in the last 90 days out of those plus the active ones (null with no
 projects).
@@ -206,6 +208,45 @@ def _alert_items(db: Session, today: date) -> tuple[list, list]:
                            score={"critical": 65, "warn": 45, "info": 15}.get(sev, 15),
                            extra={"alert_check": a.get("check")}))
     return alerts, items
+
+
+def _opportunity_items(db: Session, today: date) -> tuple[list, int]:
+    """Research output that is waiting on a decision: fresh `pursue` findings, pipeline
+    entries that have gone stale or missed their date, and standing objectives that are due.
+    Returns the items and the number of new findings (not capped)."""
+    from market_intel import objectives
+    now = datetime.utcnow()
+    since = now - timedelta(days=14)
+    fresh = db.query(models.ResearchFinding).filter(
+        models.ResearchFinding.status == "surfaced", models.ResearchFinding.recommendation == "pursue",
+        models.ResearchFinding.reviewed_at.is_(None), models.ResearchFinding.created_at >= since,
+    ).order_by(models.ResearchFinding.overall_score.desc(), models.ResearchFinding.id.desc()).all()
+    items = []
+    for f in fresh[:3]:
+        items.append(_item(title=f.problem[:90], category="opportunity", today=today,
+                           due_label=f"{f.overall_score}/10", reason="Verified opportunity, not yet reviewed",
+                           action="Promote or dismiss", target_type="research_finding", target_id=f.id,
+                           score=35))
+    for e in db.query(models.OpportunityPipeline).filter(
+            models.OpportunityPipeline.stage.in_(("discovered", "researching"))).all():
+        title = (e.finding.problem if e.finding else f"Pipeline entry {e.id}")[:90]
+        overdue = e.due_date is not None and e.due_date < today
+        idle = (now - e.updated_at).days if e.updated_at else 0
+        if overdue:
+            items.append(_item(title=title, category="opportunity", due=e.due_date, today=today,
+                               reason="Next action overdue", action=e.next_action or "Decide: validate or reject",
+                               target_type="opportunity_pipeline", target_id=e.id, score=48))
+        elif idle >= 14:
+            items.append(_item(title=title, category="opportunity", today=today, due_label="",
+                               reason=f"Pipeline entry stale for {idle} days",
+                               action=e.next_action or "Decide: validate or reject",
+                               target_type="opportunity_pipeline", target_id=e.id, score=30))
+    for o in objectives.due_objectives(db, now):
+        items.append(_item(title=f"Research due: {o.objective[:70]}", category="opportunity", today=today,
+                           due_label="", reason=f"Runs every {o.cadence_days} days and is due",
+                           action="Run it (one tap on Agents)", target_type="research_objective",
+                           target_id=o.id, score=12))
+    return items, len(fresh)
 
 
 def _portfolio_items(db: Session, today: date) -> tuple[list, int | None]:
@@ -442,14 +483,16 @@ def build_briefing(db: Session, *, refresh: bool = False, now: datetime | None =
     crm_items, business_detail = _crm_items(db, today)
     outreach_items, drafts_waiting = _outreach_items(db, today)
     portfolio_items, projects_pct = _portfolio_items(db, today)
+    opportunity_items, opportunities_new = _opportunity_items(db, today)
     alerts, alert_items = _alert_items(db, today)
 
     items = (task_items + nn_items + exam_items + syl_items + target_items + alert_items
-             + crm_items + outreach_items + portfolio_items)
+             + crm_items + outreach_items + portfolio_items + opportunity_items)
     items.sort(key=lambda i: i["score"], reverse=True)
 
     counts["payments_overdue"] = business_detail["overdue_count"]
     counts["drafts_waiting"] = drafts_waiting
+    counts["opportunities_new"] = opportunities_new          # informational: not in attention_count
     attention = (counts["overdue"] + len(target_items)
                  + sum(1 for a in alerts if a.get("severity") == "critical")
                  + counts["payments_overdue"])

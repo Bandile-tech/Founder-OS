@@ -370,6 +370,38 @@ Decisions where the spec was silent:
 - The rest of S12 (Brand tab, Agents page additions, docs) is built in its own sessions,
   in the order given for this run.
 
+### S2 — 5A.2 standing objectives, dismiss, tools, briefing items (done)
+
+Shipped: `market_intel/objectives.py` (`schedule`, `run_objective`, `due_objectives`;
+`GET/POST /research/objectives`, `PATCH /research/objectives/{id}`,
+`POST /research/objectives/{id}/run`); `POST /research/findings/{id}/dismiss`;
+`GET /research/projects/{id}` with `cost_usd`, `llm_calls`, `objective_id`, `repeated`;
+`GET` and `PATCH /research/pipeline` with `next_action` and `due_date`; tools
+`schedule_research` and `dismiss_research_finding`; the research tool's summary now counts
+repeats; the prompt additions; briefing `_opportunity_items` and
+`counts.opportunities_new`; endpoint shapes in the hand-off doc. Tests: acceptance tests
+6–7 (and the dismiss endpoint and tool for test 5) in `tests/test_phase5a_market_intel.py`.
+
+Deferred: nothing from §5A. The Agents page controls (Dismiss, Standing objectives with
+Run) come with the Agents UI session.
+
+Test safety (found while writing these tests):
+- `tests/conftest.py` now has a session-wide guard that fails any test which tries to open
+  a non-loopback connection or resolve a hostname. It caught one test that predates this
+  work: `test_stage1_assistant.py::test_summary_lands_in_context_message` set a fake key
+  and let memory recall call the real embeddings endpoint (it got a 401 and carried on).
+  That test now stubs `llm.embed_texts`. No other test tripped the guard.
+
+Decisions where the spec was silent:
+- `POST /research/objectives/{id}/run` answers 503 when no AI key is configured, instead of
+  running a research pass that cannot think (it would still query the web and find nothing).
+- `repeated` on a project is read back from the change log: the "Seen again" entries
+  written while that run was in progress. No new column.
+- An objective must be at least ten characters (the same floor as a research run).
+  Rescheduling re-enables an objective that had been switched off.
+- A pipeline entry is "stale" when its `updated_at` is 14 or more days old; the overdue
+  rule (48) takes precedence over the stale rule (30).
+
 ## Environment variables added so far
 
 | Var | Default | Session | Purpose |

@@ -437,4 +437,10 @@ class PromoteFindingRequest(BaseModel):
 class PipelineUpdateRequest(BaseModel):
     stage: Optional[str] = None      # discovered|researching|validating|building|rejected
     notes: Optional[str] = None
+    next_action: Optional[str] = None
+    due_date: Optional[date] = None
+
+
+class DismissFindingRequest(BaseModel):
+    reason: Optional[str] = None
 

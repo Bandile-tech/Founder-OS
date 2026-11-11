@@ -81,6 +81,8 @@ import crm as _crm
 app.include_router(_crm.router)
 import portfolio as _portfolio
 app.include_router(_portfolio.router)
+from market_intel import objectives as _research_objectives
+app.include_router(_research_objectives.router)
 
 # Serve frontend from ../frontend if it exists
 FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend")
@@ -2396,7 +2398,33 @@ def research_project_detail(project_id: int, db: Session = Depends(get_db)):
         "created_at": str(project.created_at) if project.created_at else None,
         "completed_at": str(project.completed_at) if project.completed_at else None,
         "findings": [_serialize_finding(f) for f in project.findings],
+        "cost_usd": project.cost_usd,
+        "llm_calls": project.llm_calls,
+        "objective_id": project.objective_id,
+        "repeated": _research_repeated(db, project),
     }
+
+
+def _research_repeated(db: Session, project) -> list:
+    """Findings from earlier runs that this run came across again (they were counted on the
+    existing finding instead of being surfaced twice)."""
+    if project.completed_at is None:
+        return []
+    rows = db.query(models.ChangeLog).filter(
+        models.ChangeLog.table_name == "research_findings", models.ChangeLog.action == "update",
+        models.ChangeLog.summary.like("Seen again:%"),
+        models.ChangeLog.created_at >= project.created_at,
+        models.ChangeLog.created_at <= project.completed_at,
+    ).all()
+    out, seen = [], set()
+    for row in rows:
+        if row.record_id in seen:
+            continue
+        finding = db.query(models.ResearchFinding).filter(models.ResearchFinding.id == row.record_id).first()
+        if finding is not None and finding.project_id != project.id:
+            seen.add(row.record_id)
+            out.append({"finding_id": finding.id, "problem": finding.problem})
+    return out
 
 
 @app.get("/research/pipeline")
@@ -2412,8 +2440,23 @@ def research_pipeline(db: Session = Depends(get_db)):
         "notes": e.notes,
         "promoted_at": str(e.promoted_at) if e.promoted_at else None,
         "updated_at": str(e.updated_at) if e.updated_at else None,
+        "next_action": e.next_action,
+        "due_date": str(e.due_date) if e.due_date else None,
         "finding": _serialize_finding(e.finding) if e.finding else None,
     } for e in entries]
+
+
+@app.post("/research/findings/{finding_id}/dismiss")
+def research_dismiss(finding_id: int, payload: Optional[schemas.DismissFindingRequest] = None,
+                     db: Session = Depends(get_db)):
+    """One tap Dismiss: the finding is not worth pursuing. Idempotent, logged, undoable."""
+    from market_intel.agent import dismiss_finding
+    with _change_log.batch_scope(db, "ui"):
+        result = dismiss_finding(db, finding_id, payload.reason if payload else None)
+        if result.get("error"):
+            raise HTTPException(404, result["error"])
+        db.commit()
+    return result
 
 
 @app.post("/research/promote")
@@ -2447,9 +2490,14 @@ def research_pipeline_update(entry_id: int, payload: schemas.PipelineUpdateReque
             entry.stage = payload.stage
         if payload.notes is not None:
             entry.notes = payload.notes
+        if payload.next_action is not None:
+            entry.next_action = payload.next_action.strip() or None
+        if payload.due_date is not None:
+            entry.due_date = payload.due_date
         change = _change_log.record_update(db, entry, before, f"Pipeline entry → {entry.stage}")
         db.commit()
-    return {"id": entry.id, "stage": entry.stage, "notes": entry.notes, "change": change}
+    return {"id": entry.id, "stage": entry.stage, "notes": entry.notes, "next_action": entry.next_action,
+            "due_date": str(entry.due_date) if entry.due_date else None, "change": change}
 
 
 @app.get("/research/memory")

@@ -6,7 +6,11 @@ Phase 5A — market intelligence v2 acceptance tests.
   2. weighted scoring and the recommendation bands
   3. a repeated finding is not inserted twice (keyword fallback, no key)
   4. with embeddings, paraphrases dedupe at cosine >= 0.9 and not below
-  5. dismiss: status, change recorded, undo restores `surfaced`
+  5. dismiss (primitive, endpoint and tool): status, change recorded, undo restores `surfaced`
+  6. standing objectives: create by tool, due on creation, Run stamps the objective and
+     the project, due becomes false
+  7. briefing: a fresh `pursue` finding at 35 until promoted or dismissed; stale and
+     overdue pipeline entries; due objectives
   8. the pre-existing suite still passes (tests/test_market_intel.py)
 
 No network and no OpenAI: the SDK client and the embedder are fakes.
@@ -320,3 +324,200 @@ def test_m014_backfills_recommendation_without_touching_overall():
     assert rows[old_id] == scoring.recommendation(scoring.overall(SCORES))
     assert rows[unscored_id] is None
     assert overall == 7.6
+
+
+# ════════════════════════════════════════════════════════════════
+# 5A.2 — dismiss endpoint and tool, standing objectives, briefing
+# ════════════════════════════════════════════════════════════════
+
+from datetime import date, datetime, timedelta
+
+import orchestrator_tools as ot
+
+
+def test_dismiss_endpoint_and_tool_log_and_undo():
+    db = _db()
+    first = _run(db)["opportunities"][0]["id"]
+    other = models.ResearchFinding(project_id=1, problem="A second finding", status="surfaced")
+    db.add(other)
+    db.commit()
+    second = other.id
+    db.close()
+
+    tapped = client.post(f"/research/findings/{first}/dismiss", json={"reason": "too crowded"})
+    assert tapped.status_code == 200
+    body = tapped.json()
+    assert body["status"] == "dismissed" and body["dismissed_reason"] == "too crowded"
+    assert body["change"]["table"] == "research_findings"
+    assert client.post(f"/research/findings/{first}/dismiss").json()["already_dismissed"] is True
+    assert client.post("/research/findings/9999/dismiss").status_code == 404
+
+    db = _db()
+    result, summary = ot.run_tool("dismiss_research_finding", {"finding_id": second, "reason": "not for me"}, db)
+    assert (result["status"], result["reason"], summary) == ("dismissed", "not for me", f"finding {second} dismissed")
+    again, summary = ot.run_tool("dismiss_research_finding", {"finding_id": second}, db)
+    assert "already dismissed" in summary
+    missing, _ = ot.run_tool("dismiss_research_finding", {"finding_id": 9999}, db)
+    assert "error" in missing
+    db.close()
+
+    assert client.post(f"/changes/{result['change']['id']}/undo").status_code == 200
+    assert client.post(f"/changes/{body['change']['id']}/undo").status_code == 200
+    db = _db()
+    assert {f.status for f in db.query(models.ResearchFinding).all()} == {"surfaced"}
+    db.close()
+
+
+# ── 6. standing objectives ────────────────────────────────────
+
+def test_objectives_schedule_run_and_due(monkeypatch):
+    db = _db()
+    made, summary = ot.run_tool("schedule_research", {"objective": "painful admin problems in Lusaka pharmacies",
+                                                      "cadence_days": 14}, db)
+    assert summary == "research scheduled every 14 days"
+    assert made["created"] is True and made["due"] is True and made["max_opportunities"] == 3
+    oid = made["id"]
+
+    again, summary = ot.run_tool("schedule_research", {"objective": "Painful admin problems in Lusaka pharmacies",
+                                                       "cadence_days": 7, "max_opportunities": 2}, db)
+    assert again["created"] is False and again["id"] == oid and summary == "research scheduled every 7 days"
+    assert db.query(models.ResearchObjective).count() == 1
+    short, _ = ot.run_tool("schedule_research", {"objective": "SMEs"}, db)
+    assert "error" in short
+    db.close()
+
+    assert client.post(f"/research/objectives/{oid}/run").status_code == 503      # no AI key
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    with patch("market_intel.agent._llm_json", side_effect=_fake_llm), \
+         patch("llm.embed_texts", side_effect=lambda texts, **_: [[1.0, 0.0] for _t in texts]), \
+         patch("market_intel.adapters.search_all", return_value=list(FAKE_EVIDENCE)):
+        ran = client.post(f"/research/objectives/{oid}/run")
+    assert ran.status_code == 200, ran.text
+    out = ran.json()
+    assert len(out["opportunities"]) == 1 and out["objective_id"] == oid
+    assert out["objective"]["due"] is False and out["objective"]["last_project_id"] == out["project_id"]
+    assert any(c["table"] == "research_findings" for c in out["changes"])
+
+    db = _db()
+    project = db.query(models.ResearchProject).filter(models.ResearchProject.id == out["project_id"]).one()
+    objective = db.query(models.ResearchObjective).one()
+    assert project.objective_id == oid and objective.last_run_at is not None
+    objective.last_run_at = datetime.utcnow() - timedelta(days=8)                  # a week and a day ago
+    db.commit()
+    db.close()
+
+    listed = client.get("/research/objectives").json()
+    assert listed[0]["due"] is True and listed[0]["cadence_days"] == 7
+    off = client.patch(f"/research/objectives/{oid}", json={"enabled": False}).json()
+    assert off["enabled"] is False and off["due"] is False and off["change"]["table"] == "research_objectives"
+    assert client.patch(f"/research/objectives/{oid}", json={"objective": "x"}).status_code == 400
+    assert client.patch("/research/objectives/9999", json={"enabled": True}).status_code == 404
+    created = client.post("/research/objectives", json={"objective": "what bakeries in Kitwe struggle with every week"})
+    assert created.status_code == 201 and created.json()["cadence_days"] == 14
+
+    detail = client.get(f"/research/projects/{out['project_id']}").json()
+    assert detail["llm_calls"] == 0 and detail["objective_id"] == oid and detail["repeated"] == []
+
+
+def test_project_detail_lists_findings_seen_again():
+    db = _db()
+    first = _run(db)
+    second = _run(db)
+    db.close()
+    detail = client.get(f"/research/projects/{second['project_id']}").json()
+    assert detail["repeated"] == [{"finding_id": first["opportunities"][0]["id"],
+                                   "problem": first["opportunities"][0]["problem"]}]
+    assert client.get(f"/research/projects/{first['project_id']}").json()["repeated"] == []
+
+
+def test_run_tool_summary_mentions_repeats():
+    db = _db()
+    _run(db)
+    with patch("market_intel.agent._llm_json", side_effect=_fake_llm), \
+         patch("market_intel.adapters.search_all", return_value=list(FAKE_EVIDENCE)):
+        result, summary = ot.run_tool("run_market_research_agent",
+                                      {"objective": "find painful problems in Zambian SMEs where AI helps"}, db)
+    assert len(result["repeated"]) == 1 and "1 seen before" in summary and "0 opportunities surfaced" in summary
+    db.close()
+
+
+# ── 7. briefing ───────────────────────────────────────────────
+
+def test_briefing_shows_new_opportunities_stale_pipeline_and_due_objectives():
+    import briefing
+    db = _db()
+    result = _run(db)
+    fid = result["opportunities"][0]["id"]
+    finding = db.query(models.ResearchFinding).filter(models.ResearchFinding.id == fid).one()
+    finding.recommendation, finding.overall_score = "pursue", 8.1
+    watch = models.ResearchFinding(project_id=result["project_id"], problem="A watch-grade finding",
+                                   status="surfaced", recommendation="watch", overall_score=6.5)
+    old = models.ResearchFinding(project_id=result["project_id"], problem="An old pursue finding",
+                                 status="surfaced", recommendation="pursue", overall_score=9.0,
+                                 created_at=datetime.utcnow() - timedelta(days=20))
+    db.add_all([watch, old])
+    db.commit()
+    db.close()
+
+    def items():
+        b = briefing.build_briefing(_db(), with_summary=False)
+        return b, {i["id"]: i for i in b["items"]}
+
+    b, by_id = items()
+    item = by_id[f"opportunity:research_finding:{fid}"]
+    assert item["score"] == 35 and item["due_label"] == "8.1/10"
+    assert item["reason"] == "Verified opportunity, not yet reviewed" and item["suggested_action"] == "Promote or dismiss"
+    assert sum(1 for i in b["items"] if i["target_type"] == "research_finding") == 1   # not watch, not 20 days old
+    assert b["counts"]["opportunities_new"] == 1
+    base_attention = b["attention_count"]
+
+    promoted = client.post("/research/promote", json={"finding_id": fid}).json()
+    b, by_id = items()
+    assert f"opportunity:research_finding:{fid}" not in by_id            # reviewed: gone
+    assert b["counts"]["opportunities_new"] == 0 and b["attention_count"] == base_attention
+    assert f"opportunity:opportunity_pipeline:{promoted['pipeline_id']}" not in by_id   # fresh pipeline entry
+
+    db = _db()
+    entry = db.query(models.OpportunityPipeline).filter(models.OpportunityPipeline.id == promoted["pipeline_id"]).one()
+    entry.updated_at = datetime.utcnow() - timedelta(days=16)
+    db.commit()
+    db.close()
+    b, by_id = items()
+    stale = by_id[f"opportunity:opportunity_pipeline:{promoted['pipeline_id']}"]
+    assert stale["score"] == 30 and stale["reason"] == "Pipeline entry stale for 16 days"
+    assert stale["suggested_action"] == "Decide: validate or reject"
+
+    yesterday = (date.today() - timedelta(days=1)).isoformat()
+    patched = client.patch(f"/research/pipeline/{promoted['pipeline_id']}",
+                           json={"next_action": "Call three pharmacies", "due_date": yesterday}).json()
+    assert patched["next_action"] == "Call three pharmacies" and patched["due_date"] == yesterday
+    b, by_id = items()
+    late = by_id[f"opportunity:opportunity_pipeline:{promoted['pipeline_id']}"]
+    assert late["score"] == 48 and late["reason"] == "Next action overdue"
+    assert late["suggested_action"] == "Call three pharmacies"
+    listed = client.get("/research/pipeline").json()[0]
+    assert listed["next_action"] == "Call three pharmacies" and listed["finding"]["recommendation"] == "pursue"
+
+    client.patch(f"/research/pipeline/{promoted['pipeline_id']}", json={"stage": "validating"})
+    b, by_id = items()
+    assert f"opportunity:opportunity_pipeline:{promoted['pipeline_id']}" not in by_id   # past the early stages
+
+    made = client.post("/research/objectives", json={"objective": "painful admin problems in Lusaka pharmacies"}).json()
+    b, by_id = items()
+    due = by_id[f"opportunity:research_objective:{made['id']}"]
+    assert due["score"] == 12 and due["suggested_action"] == "Run it (one tap on Agents)"
+
+
+def test_briefing_drops_a_dismissed_finding():
+    import briefing
+    db = _db()
+    fid = _run(db)["opportunities"][0]["id"]
+    finding = db.query(models.ResearchFinding).filter(models.ResearchFinding.id == fid).one()
+    finding.recommendation = "pursue"
+    db.commit()
+    db.close()
+    key = f"opportunity:research_finding:{fid}"
+    assert key in {i["id"] for i in briefing.build_briefing(_db(), with_summary=False)["items"]}
+    client.post(f"/research/findings/{fid}/dismiss")
+    assert key not in {i["id"] for i in briefing.build_briefing(_db(), with_summary=False)["items"]}
