@@ -996,11 +996,10 @@ button.home-tile:active{transform:scale(0.98)}
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 9 4.5-9 4.5-9-4.5L12 3Z"/><path d="m3 12 9 4.5 9-4.5"/><path d="m3 16.5 9 4.5 9-4.5"/></svg>
             <div class="tt">Projects</div><div class="ts">Focus · Bottlenecks · Delivery</div>
           </button>
-          <div class="home-tile c-content soon" aria-disabled="true">
-            <span class="soon-tag">Soon</span>
+          <button class="home-tile c-content" onclick="openBusinessTile('brand')">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="m10 9 5 3-5 3V9Z" fill="currentColor" stroke="none"/></svg>
             <div class="tt">Content</div><div class="ts">Ideas · Performance · Plan</div>
-          </div>
+          </button>
           <button class="home-tile c-applications" onclick="openApplicationsTile()">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18M5 21V10M19 21V10M9 21v-7h6v7M2 10 12 4l10 6"/></svg>
             <div class="tt">Applications</div><div class="ts">Wharton · Deadlines · Gaps</div>
@@ -3783,7 +3782,7 @@ async function renderBusiness(){
     if(tab==="pipeline")html=await renderPipeline();
     else if(tab==="clients")html=await renderClients();
     else if(tab==="portfolio")html=await renderPortfolio();
-    else html=`<div class="card"><div class="empty">Brand — coming in a later session.</div></div>`;
+    else html=await renderBrand();
   }catch(e){
     html=`<div class="card"><div class="empty">Waiting for the backend…</div></div>`;
   }
@@ -3943,6 +3942,164 @@ function _projectRow(e){
     <span class="row-meta" title="${escHtml(why)}">${Number(a.score||0).toFixed(1)}</span>
     ${actions?`<div class="row-actions">${actions}</div>`:""}
   </div>`;
+}
+
+/* ── Brand ── real platform numbers only: a value that was not measured shows as a dash */
+function _num(v){return v==null?"—":Number(v).toLocaleString("en-GB");}
+function _rate(v){return v==null?"—":(Number(v)*100).toFixed(1)+"%";}
+const IDEA_NEXT={idea:"Mark drafted",drafted:"Schedule",scheduled:"Mark posted"};
+const PLATFORM_NAME={youtube:"YouTube",linkedin:"LinkedIn",x:"X",instagram:"Instagram",tiktok:"TikTok"};
+function _platform(p){return PLATFORM_NAME[p]||_cap(p);}
+
+async function renderBrand(){
+  const [accounts,perf,cal]=await Promise.all([_bizGet("/brand/accounts"),_bizGet("/brand/performance"),_bizGet("/brand/calendar")]);
+  const live=accounts.filter(a=>a.status!=="disconnected");
+  const hasYouTube=live.some(a=>a.platform==="youtube");
+  const insight=perf.insight?`<div class="insight"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0-3.6 10.8c.6.5 1 1.2 1 2v.7h5.2v-.7c0-.8.4-1.5 1-2A6 6 0 0 0 12 3Z"/><path d="M9.6 20h4.8"/></svg><span>${escHtml(perf.insight)}</span></div>`:"";
+
+  const tiles=live.map(a=>{
+    const delta=a.followers_delta_30d;
+    const name=`${_platform(a.platform)}${a.handle?" · "+a.handle:""}`;
+    const when=a.last_synced_at?`${a.access==="export"?"imported":"synced"} ${_ago(a.last_synced_at)}`:"not synced yet";
+    return `<div class="kpi">
+      <div class="kpi-label">${escHtml(name)}</div>
+      <div class="kpi-value">${_num(a.followers)}${a.followers!=null?`<small>followers</small>`:""}</div>
+      <div class="kpi-sub wrap">${a.status==="error"?`<span class="cmd-err">${escHtml(a.last_error||"The last sync failed")}</span>`:
+        escHtml([a.followers==null?"Followers not reported":(delta==null?"":`${delta>=0?"+":""}${_num(delta)} in 30 days`),`${_num(a.posts_stored)} posts`,when].filter(Boolean).join(" · "))}</div>
+      <div class="cluster mt-3">
+        <span class="badge ${a.status==="error"?"badge--danger":"badge--success"}">${a.status==="error"?"Error":"Connected"}</span>
+        ${a.access==="export"?`<span class="badge badge--muted">From export</span>`:`<button class="btn btn--sm" onclick="brandSync(${Number(a.id)},this)">Sync</button>`}
+      </div>
+    </div>`;}).join("");
+  const connect=hasYouTube?"":`<div class="kpi">
+      <div class="kpi-label">YouTube</div>
+      <div class="kpi-sub wrap">Not connected. Enter the channel's handle to read its public numbers.</div>
+      <div class="form-row mt-3"><input class="input" id="brand-yt-handle" placeholder="@handle" aria-label="YouTube handle" autocomplete="off"><button class="btn btn--sm" onclick="brandConnect(this)">Connect</button></div>
+    </div>`;
+  const accountsCard=`<div class="card">
+    <div class="card-head"><div class="card-title"><span>Accounts</span></div><span class="badge ${live.length?"badge--glow":"badge--muted"}">${live.length?`${live.length} connected`:"Not connected"}</span></div>
+    ${live.length?"":`<p class="hint">No account is connected, so there are no numbers to show. Nothing here is ever estimated.</p>`}
+    <div class="kpis mt-3">${tiles}${connect}</div>
+    <div class="section-label mt-5">Import an analytics export</div>
+    <div class="form-row">
+      <select class="select input--narrow" id="brand-import-platform" aria-label="Platform"><option value="linkedin">LinkedIn</option></select>
+      <button class="btn btn--sm" onclick="document.getElementById('brand-import-file').click()">Import CSV</button>
+      <input type="file" id="brand-import-file" accept=".csv,text/csv" class="hidden" onchange="brandImport(this)">
+      <span class="hint">The CSV saved from the platform's own export.</span>
+    </div>
+  </div>`;
+
+  const top=perf.top_posts||[];
+  const formats=Object.entries(perf.by_format||{});
+  const cad=perf.cadence||{};
+  const perfCard=`<div class="card">
+    <div class="card-head"><div class="card-title"><span>What is working, last ${Number(perf.days||90)} days</span></div><span class="badge badge--muted">${_num(cad.posts_in_window)} posts</span></div>
+    ${perf.connected?`<div class="cluster">
+        <span class="badge badge--muted">${cad.per_week==null?"—":Number(cad.per_week)} a week</span>
+        <span class="badge ${cad.gap_days_since_last!=null&&cad.gap_days_since_last>14?"badge--warn":"badge--muted"}">${cad.gap_days_since_last==null?"No posts yet":`last post ${Number(cad.gap_days_since_last)} day${cad.gap_days_since_last===1?"":"s"} ago`}</span>
+        <span class="badge badge--muted">${_num(perf.posts_last_30d)} of ${Number(perf.brand_target_posts_30d||8)} this month</span>
+      </div>
+      <div class="section-label mt-5">Top posts</div>
+      ${top.length?`<div class="list">${top.map(t=>`<div class="row row--wrap">
+          <div class="row-main"><div class="row-title wrap">${t.post.url?`<a href="${escHtml(t.post.url)}" target="_blank" rel="noopener">${escHtml(t.post.title||t.post.url)}</a>`:escHtml(t.post.title||"Untitled")}</div>
+            <div class="row-sub">${escHtml([_platform(t.post.platform),t.post.kind,_day(t.posted_at)].filter(Boolean).join(" · "))}</div></div>
+          <span class="row-meta" title="Views (or impressions)">${_num(t.views!=null?t.views:t.impressions)} ${t.views!=null?"views":t.impressions!=null?"impressions":""}</span>
+          <span class="badge badge--glow" title="Engagement rate">${_rate(t.engagement_rate)}</span>
+        </div>`).join("")}</div>`:`<div class="empty">No measured posts in this window.</div>`}
+      ${formats.length?`<div class="section-label mt-5">By format</div><div class="chips">${formats.map(([k,v])=>`<span class="chip">${escHtml(_cap(k))} · ${Number(v.count)} · ${_num(v.median_views==null?null:Math.round(v.median_views))} median views · ${_rate(v.median_engagement_rate)}</span>`).join("")}</div>`:""}`
+      :`<div class="empty">Not connected. Connect YouTube or import a LinkedIn export to see what is working.</div>`}
+  </div>`;
+
+  const ideaRow=i=>`<div class="row row--wrap" id="idea-${Number(i.id)}">
+      <div class="row-main"><div class="row-title wrap">${escHtml(i.title)}</div><div class="row-sub">${escHtml([i.platform?_platform(i.platform):"",i.format||"",_cap(i.status)].filter(Boolean).join(" · "))}</div></div>
+      ${IDEA_NEXT[i.status]?`<div class="row-actions"><button class="btn btn--sm" onclick="ideaAdvance(${Number(i.id)},this)">${IDEA_NEXT[i.status]}</button></div>`:`<span class="badge badge--success">Posted</span>`}
+    </div>`;
+  // Today is always shown; other days only when something is on them.
+  const shown=(cal.days||[]).filter(d=>d.is_today||d.ideas.length||d.posted.length);
+  const lastDay=(cal.days||[]).length?new Date(cal.days[cal.days.length-1].date+"T00:00:00").toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"}):"";
+  const days=shown.map(d=>{
+    const dt=new Date(d.date+"T00:00:00");
+    const label=dt.toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"});
+    const empty=!d.ideas.length&&!d.posted.length;
+    return `<div class="row row--wrap ${d.is_today?"is-now":""}">
+      <span class="tt-time">${escHtml(label)}</span>
+      <div class="row-main">${empty?`<div class="row-sub">${d.is_today?"Nothing scheduled today":"—"}</div>`:""}
+        ${d.ideas.map(ideaRow).join("")}
+        ${d.posted.map(p=>`<div class="row-sub wrap">Posted: ${escHtml(p.title||p.url||"a post")}</div>`).join("")}</div>
+    </div>`;}).join("");
+  const backlog=cal.backlog||[];
+  const calCard=`<div class="card">
+    <div class="card-head"><div class="card-title"><span>Next two weeks</span></div><span class="badge badge--muted">${backlog.length} in the backlog</span></div>
+    <p class="hint">Tell Founder OS an idea or when to post it. Tap to move an idea on.</p>
+    <div class="list mt-3">${days}</div>
+    <p class="hint mt-3">${shown.length>1?"Nothing else":"Nothing"} is scheduled through ${escHtml(lastDay)}.</p>
+    ${backlog.length?`<div class="section-label mt-5">Backlog</div><div class="list">${backlog.map(ideaRow).join("")}</div>`:""}
+  </div>`;
+  return insight+accountsCard+perfCard+calCard;
+}
+
+async function brandSync(id,btn){
+  const d=await _bizTap(btn,"POST",`/brand/accounts/${Number(id)}/sync`);
+  if(!d)return;
+  if(d.ok)showToast(`Synced: ${Number(d.posts_new||0)} new post${d.posts_new===1?"":"s"}, ${Number(d.metrics_rows||0)} with new numbers`,"success");
+  else showToast("Sync failed: "+(d.last_error||d.error||"the platform could not be read"),"error");
+}
+
+async function brandConnect(btn){
+  const el=document.getElementById("brand-yt-handle");
+  const handle=el?el.value.trim():"";
+  if(!handle){showToast("Enter the channel's handle","error");if(el)el.focus();return;}
+  await _bizTap(btn,"POST","/brand/accounts",{platform:"youtube",handle});
+}
+
+async function brandImport(input){
+  const file=input.files&&input.files[0];
+  if(!file)return;
+  const platform=(document.getElementById("brand-import-platform")||{}).value||"linkedin";
+  try{
+    const fd=new FormData();
+    fd.append("file",file,file.name||"export.csv");
+    fd.append("platform",platform);
+    const r=await fetch(`${API_BASE}/brand/import`,{method:"POST",body:fd});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(d.detail||("HTTP "+r.status));
+    showToast(`Imported: ${Number(d.posts_new)} new, ${Number(d.posts_updated)} updated, ${Number(d.metrics_rows)} with new numbers`,"success");
+  }catch(e){showToast("Import failed: "+e.message,"error");}
+  input.value="";
+  renderBusiness();
+  try{loadBriefing();}catch(_){}
+}
+
+async function ideaAdvance(id,btn){
+  if(btn){btn.disabled=true;btn.classList.add("is-loading");}
+  try{
+    const r=await fetch(`${API_BASE}/brand/ideas/${Number(id)}/advance`,{method:"POST"});
+    const d=await r.json().catch(()=>({}));
+    if(r.status===409){ideaAskDate(id);return;}          // it needs a date before it can be scheduled
+    if(!r.ok)throw new Error(d.detail||("HTTP "+r.status));
+    if(d.change)showChanges([d.change]);
+    renderBusiness();
+    try{loadBriefing();}catch(_){}
+  }catch(e){
+    showToast("Could not do that: "+e.message,"error");
+    if(btn){btn.disabled=false;btn.classList.remove("is-loading");}
+  }
+}
+
+// Scheduling needs a day: swap the row's button for a date picker.
+function ideaAskDate(id){
+  const row=document.getElementById(`idea-${Number(id)}`);
+  const slot=row&&row.querySelector(".row-actions");
+  if(!slot)return;
+  slot.innerHTML=`<input type="date" class="input input--narrow" id="idea-date-${Number(id)}" min="${todayStr()}" aria-label="Day to post it"><button class="btn btn--primary btn--sm" onclick="ideaSetDate(${Number(id)},this)">Schedule</button>`;
+  const el=document.getElementById(`idea-date-${Number(id)}`);
+  if(el){el.focus();try{el.showPicker&&el.showPicker();}catch(_){}}
+}
+
+async function ideaSetDate(id,btn){
+  const el=document.getElementById(`idea-date-${Number(id)}`);
+  if(!el||!el.value){showToast("Pick a day","error");return;}
+  await _bizTap(btn,"PATCH",`/brand/ideas/${Number(id)}`,{scheduled_for:el.value});
 }
 
 /* ── Clients ── */

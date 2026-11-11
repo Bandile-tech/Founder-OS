@@ -720,6 +720,57 @@ Decisions where the spec was silent:
   measured and must not be estimated (empty values are stripped from what the model sees).
 - Briefing: an account in `error` shows the error item and not the cadence-gap item.
 
+### Brand UI (split from S12) (done)
+
+Shipped (`frontend/index.html`): the Brand tab of the Business page.
+- The cached weekly insight above everything, when there is one.
+- Accounts from `GET /brand/accounts`: a tile per account with followers (a dash when the
+  platform did not report them), the 30-day change when both readings exist, posts stored,
+  when it was last synced or imported, a Connected or Error badge (the error tile shows
+  `last_error`), and Sync (`POST /brand/accounts/{id}/sync`) on API accounts. With no
+  YouTube account there is a "Not connected" tile with one handle field and Connect
+  (`POST /brand/accounts`). Below: a platform select and Import CSV (`POST /brand/import`).
+- "What is working" from `GET /brand/performance`: posts a week, days since the last post,
+  posts this month against the target, top posts with reach and engagement rate, and
+  medians by format. Every unmeasured value is a dash, never 0.
+- "Next two weeks" from `GET /brand/calendar`: today and any day with something on it, each
+  idea with one action (Mark drafted, Schedule, Mark posted →
+  `POST /brand/ideas/{id}/advance`), then the unscheduled backlog. When scheduling needs a
+  date (409) the button becomes a date picker and a Schedule button that sends
+  `PATCH /brand/ideas/{id}`.
+- With no account at all: "No account is connected, so there are no numbers to show.
+  Nothing here is ever estimated."
+- The home screen's Content tile is now a live link to this tab. All four Business tabs
+  and all six home tiles are live.
+- `tests/e2e/screens.js` imports the LinkedIn fixture, adds a YouTube account in the error
+  state, an insight and ideas, and checks the tab at the four sizes; `tests/e2e/smoke.js`
+  gained a ninth flow (the not-connected state; Advance moves an idea to drafted; the
+  date picker schedules it).
+
+Checked in headless Chrome at the four sizes, plus full-height captures at 1280 and 390
+wide. What they showed: LinkedIn reads "— · Followers not reported · 6 posts" with
+Connected and From export; the YouTube tile shows the handle field (or, in the error
+state, "YOUTUBE_API_KEY not set" in red with Sync); top posts list impressions and rates
+from 4.0 % down to 1.7 %; "By format" reads "Post · 6 · — median views · 2.9%" because
+LinkedIn reports impressions, not views; the calendar shows today lit with its idea and
+"Mark posted". On the phone the two account tiles sit side by side and each list row wraps.
+First pass showed three faults, all fixed: platform names read "Linkedin" and "Youtube";
+fourteen day-rows of dashes drowned the two scheduled ideas (now only today and days with
+something are listed, with a closing line); and the idea buttons read like statuses
+("Posted") rather than actions.
+
+A fixture fault the screenshot exposed: one row of
+`tests/fixtures/linkedin_content_sample.csv` had an unquoted "2,105", which the CSV reader
+split into 2 impressions and 105 reactions and the page showed as a 6300 % engagement
+rate. The cell is now quoted.
+
+Decisions where the spec was silent:
+- After a 409 the date picker sends one `PATCH scheduled_for`, which schedules the idea;
+  the spec's "then retry the advance" would move it on a second step, to posted.
+- There is no Disconnect button on the tab (the session's task does not list one; the
+  endpoint exists and is change-logged).
+- Only LinkedIn is offered in the import select, because it is the only importer built.
+
 ## Environment variables added so far
 
 | Var | Default | Session | Purpose |
@@ -756,6 +807,11 @@ service after deployment.
   least 100) and current spin-down behaviour. Not checked.
 
 ## Follow-ups noticed (not done here)
+
+- Brand tab: a Disconnect control behind a confirm dialog (`DELETE /brand/accounts/{id}`
+  exists), and a way to drop an idea from the screen.
+- `tests/e2e/smoke.js` has a `KEEP=1` option that does not keep the server alive on
+  Windows (the child process ends with the script).
 
 - Pipeline tab: add an "Import CSV" button (file picker only) for `POST /leads/import`, and
   a "Qualify" tap on a segment's unqualified leads for `POST /leads/qualify`. Both

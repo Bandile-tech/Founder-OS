@@ -36,7 +36,7 @@ const VIEWPORTS = [
 ];
 // "page:state" opens a page and then one of its sub-views (see show()).
 const PAGES = ["home", "timetable", "health", "syllabus", "history", "agents", "agents:detail", "business", "business:clients", "business:client",
-  "business:portfolio", "warroom", "annual", "applications", "guide", "settings"];
+  "business:portfolio", "business:brand", "warroom", "annual", "applications", "guide", "settings"];
 // Extra states worth seeing on the sheet (not part of the per-page consistency checks).
 const EXTRAS = ["stage", "menu"];
 
@@ -148,6 +148,16 @@ async function seedBusiness() {
   await api("PATCH", `/requirements/${rids[3]}`, { status: "submitted" });
   await api("POST", `/requirements/${rids[0]}/todo`);
   await api("POST", "/applications", { name: "Mastercard Foundation Scholarship", kind: "scholarship" });
+  // Brand: a LinkedIn export, ideas on the calendar and in the backlog.
+  const li = fs.readFileSync(path.join(ROOT, "backend", "tests", "fixtures", "linkedin_content_sample.csv"));
+  const bf = new FormData();
+  bf.set("file", new Blob([li], { type: "text/csv" }), "content.csv");
+  bf.set("platform", "linkedin");
+  await api("POST", "/brand/import", bf);
+  await api("POST", "/brand/ideas", { title: "A short on how I built the bakery site", format: "short", platform: "youtube", scheduled_for: day(0) });
+  await api("POST", "/brand/ideas", { title: "Three pricing mistakes", format: "post", platform: "linkedin", scheduled_for: day(3) });
+  const loose = (await api("POST", "/brand/ideas", { title: "Why WhatsApp is the only system most shops need", format: "post" })).json;
+  await api("POST", `/brand/ideas/${loose.id}/advance`);
   return { leadId: ids[0], clientId: c.id };
 }
 
@@ -169,6 +179,9 @@ function seedDraft(env) {
       "industry='retail pharmacy', customer_segment='independent pharmacies, Lusaka', scores=json.dumps(scores), overall_score=7.8, " +
       "recommendation='pursue', status='surfaced', first_customer_path='Walk into five pharmacies with a demo', " +
       "evidence=json.dumps([{'source_type': 'web', 'title': 'Pharmacy stockouts in Lusaka', 'ref': 'https://example.com/stockouts'}])))",
+    "db.add(models.SocialAccount(platform='youtube', handle='@bandile', external_id='UCsynthetic', access='api_key', status='error', last_error='YOUTUBE_API_KEY not set'))",
+    "db.add(models.BrandInsight(week_start=__import__('datetime').date.today() - __import__('datetime').timedelta(days=__import__('datetime').date.today().weekday()), platform='all', " +
+      "text='The build-log posts earned the most reactions for their reach. The pricing post was seen least. Try one more build log this week.'))",
     "wharton = db.query(models.Application).filter(models.Application.name == 'Wharton').first()",
     "db.add(models.ApplicationGap(application_id=wharton.id, gap='No evidence of leadership outside school', severity='high', " +
       "evidence='The profile lists projects but no team or community role', suggested_action='Write up the client work as a leadership example', status='open'))",

@@ -15,6 +15,7 @@
  *   6. Portfolio tab: Focus makes a project priority 1 and demotes the previous one
  *   7. Agents page: the registry lists the agents, the toggle switches one off, Run runs one
  *   8. Applications page: a tap advances a requirement, Make it a task creates its task
+ *   9. Brand tab: says "Not connected" with no account; Advance moves an idea on
  *
  * Run from the repo root:
  *     node tests/e2e/smoke.js
@@ -249,6 +250,27 @@ async function api(token, method, p, body, isForm) {
     reqNow = (await api(token, "GET", `/applications/${appl.json.id}`)).json.requirements[0];
     const taskRow = (await api(token, "GET", "/todos")).json.find((x) => x.id === reqNow.todo_id);
     check(reqNow.status === "in_progress" && taskRow && taskRow.text === "Smoke University: Personal essay", "Make it a task created the task without moving the requirement");
+
+    // ── 9. Brand: not connected, and advancing an idea ──
+    console.log("9. brand: not connected state, advance an idea");
+    const idea = await api(token, "POST", "/brand/ideas", { title: "Smoke content idea" });
+    await page.evaluate(() => openBusinessTile("brand"));
+    await page.waitForSelector("#biz-body .card", { timeout: 15000 });
+    await page.waitForFunction(() => document.getElementById("biz-body").textContent.includes("Accounts"), null, { timeout: 15000 });
+    const brandText = await page.locator("#biz-body").textContent();
+    check(brandText.includes("No account is connected") && brandText.includes("Not connected"), "with no account the tab says it is not connected");
+    check(!/\b0 followers\b/.test(brandText), "no follower number is shown for an unconnected platform");
+    await page.locator(`#idea-${idea.json.id} button`).click();
+    await page.waitForTimeout(1200);
+    let ideaNow = (await api(token, "GET", "/brand/ideas")).json.find((i) => i.id === idea.json.id);
+    check(ideaNow.status === "drafted", "Advance moved the idea to drafted");
+    await page.locator(`#idea-${idea.json.id} button`).click();          // drafted → scheduled needs a date
+    await page.waitForSelector(`#idea-date-${idea.json.id}`, { timeout: 15000 });
+    await page.fill(`#idea-date-${idea.json.id}`, today);
+    await page.locator(`#idea-${idea.json.id} button.btn--primary`).click();
+    await page.waitForTimeout(1200);
+    ideaNow = (await api(token, "GET", "/brand/ideas")).json.find((i) => i.id === idea.json.id);
+    check(ideaNow.status === "scheduled" && ideaNow.scheduled_for === today, "scheduling asked for a day and set it");
 
     check(pageErrors.length === 0, `no page errors (${pageErrors.join("; ") || "none"})`);
   } catch (e) {
