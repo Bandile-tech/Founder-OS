@@ -772,3 +772,30 @@ def test_in_process_tick_is_guarded_by_the_env_flag(monkeypatch):
     assert db.query(models.JobTick).one().trigger == "in_process"
     assert db.query(models.AgentRun).one().trigger == "in_process"
     db.close()
+
+
+def test_agent_row_survives_two_requests_creating_it_at_once():
+    """The Agents page asks for the registry and the scheduler status together; both may
+    try to create the same agents row. The second must read the first one's row."""
+    spec = _spec("writer", lambda ctx: AgentResult(summary="ran"))
+    winner, loser = _db(), _db()
+    real_find = runner._find_row
+    seen = {"first": True}
+
+    def racing_find(db, key):
+        if db is loser and seen["first"]:            # the loser looked before the winner committed
+            seen["first"] = False
+            return None
+        return real_find(db, key)
+
+    first = runner.agent_row(winner, spec)
+    with patch.object(runner, "_find_row", side_effect=racing_find):
+        second = runner.agent_row(loser, spec)       # would raise IntegrityError without the retry
+    assert second.id == first.id and loser.query(models.Agent).count() == 1
+    assert loser.query(models.Todo).count() == 0     # the session is still usable afterwards
+    winner.close()
+    loser.close()
+
+    listed = client.get("/agents").json()            # and the endpoints that share it still answer
+    status = client.get("/jobs/status").json()
+    assert [a["key"] for a in listed] == ["writer"] and status["agents_due_now"] == ["writer"]

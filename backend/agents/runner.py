@@ -16,6 +16,8 @@ import os
 import time
 from datetime import datetime, timedelta
 
+from sqlalchemy.exc import IntegrityError
+
 import agents
 import change_log
 import llm
@@ -37,16 +39,31 @@ def tick_budget_seconds() -> float:
 
 # ── Rows ─────────────────────────────────────────────────────
 
+def _find_row(db, key: str):
+    return db.query(models.Agent).filter(models.Agent.key == key).first()
+
+
 def agent_row(db, spec) -> models.Agent:
     """The agents row for a spec, created on first sight (the registry is the source of
-    truth; the table only holds toggles, overrides and last-run facts)."""
-    row = db.query(models.Agent).filter(models.Agent.key == spec.key).first()
+    truth; the table only holds toggles, overrides and last-run facts).
+
+    Two requests can reach this at the same moment (the Agents page asks for the registry
+    and the scheduler status together). ``key`` is unique, so the loser of that race gets an
+    IntegrityError: it rolls back and reads the row the winner wrote."""
+    row = _find_row(db, spec.key)
     if row is None:
         row = models.Agent(key=spec.key, enabled=bool(spec.enabled_by_default), runs_count=0,
                            cost_usd_total=0.0, created_at=datetime.utcnow(), updated_at=datetime.utcnow())
         db.add(row)
-        db.commit()
-        db.refresh(row)
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            row = _find_row(db, spec.key)
+            if row is None:
+                raise
+        else:
+            db.refresh(row)
     return row
 
 

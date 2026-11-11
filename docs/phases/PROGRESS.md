@@ -507,6 +507,56 @@ midnight failed a single date assertion (a test's module-level "today" against t
 "today"). It passed on the rerun. Tests that hold `date.today()` at import can do this for
 a few seconds a day; not changed.
 
+### Agents UI (split from S12 and S22) (done)
+
+Shipped (`frontend/index.html`): the Agents page rebuilt on the registry.
+- A Scheduler card from `GET /jobs/status`: when the last tick ran and from where, how many
+  agents are due now, ticks in 24 hours, whether the in-process tick is on and whether a
+  scheduler token is set. When the last tick is more than an hour old it says so and
+  explains that agents run while the app is open.
+- The registry from `GET /agents`: name, phase badge, effective schedule, the last run's
+  summary and status badge, model cost this month, an On/Off toggle
+  (`PATCH /agents/{key}`, shown in the change strip with Undo) and Run
+  (`POST /agents/{key}/run`, with a running state and a toast of the run's summary).
+- A tap opens the agent: description, schedule, the events it reacts to, its model-call cap,
+  the tables it may write, and its recent runs with duration, cost, the first three changes
+  and Undo per run (`POST /agents/runs/{id}/undo`).
+- Market intelligence keeps its detail under its agent: four KPIs, a Standing objectives
+  card from `GET /research/objectives` (On/Off toggle, Run with a running state), research
+  projects, the pipeline and the lesson memory. Surfaced findings now have Dismiss next to
+  Promote, and show their recommendation and how often they have been seen.
+- The home screen's Agents tile is now a live link.
+- `tests/e2e/screens.js` seeds an objective, a research project with a finding and three
+  agent runs, and checks the agent detail state; `tests/e2e/smoke.js` gained a seventh
+  flow (the registry lists the agents, the toggle switches one off, Run runs one, a tap
+  opens its run log).
+
+Checked in headless Chrome at the four sizes. What the screenshots showed: the scheduler
+card reads "Not run yet / No tick yet / 1 due now" on a fresh database with its
+explanation line; six agent rows with status badges, toggles and Run buttons aligned in a
+column on the desktop and wrapped under the name on the phone; the market-intelligence
+detail shows the due objective with its toggle and Run, and an opened project shows the
+finding with its score, badges and axes; nothing sits under the talk bar and nothing
+scrolls sideways.
+
+A backend bug found here and fixed in the same commit: the page asks for `GET /agents` and
+`GET /jobs/status` together, and on a database with no `agents` rows both requests tried to
+create the same row; the second failed on the unique key and left its session unusable
+(seen in the smoke run's server log as `UNIQUE constraint failed: agents.key`).
+`runner.agent_row` now rolls back and reads the row the other request wrote. Covered by
+`test_agent_row_survives_two_requests_creating_it_at_once`.
+
+Where the prompt's names no longer exist: `renderAgents`, `openAgentDetail`,
+`closeAgentDetail` and `renderAgentDetail` keep their names; `renderAgentDetail` now draws
+only the market-intelligence part of an agent's detail, and `openAgentDetail(key)` takes
+the agent's key (default `market_intel`).
+
+Decisions where the spec was silent:
+- The warning for a tick older than 60 minutes does not say "GitHub Actions not seen",
+  because the external schedule ships switched off; it says the scheduler is quiet and
+  why.
+- Server timestamps are naive UTC; the page reads them as UTC when showing "12 min ago".
+
 ## Environment variables added so far
 
 | Var | Default | Session | Purpose |

@@ -1001,11 +1001,10 @@ button.home-tile:active{transform:scale(0.98)}
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18M5 21V10M19 21V10M9 21v-7h6v7M2 10 12 4l10 6"/></svg>
             <div class="tt">Applications</div><div class="ts">Wharton · Deadlines · Gaps</div>
           </div>
-          <div class="home-tile c-agents soon" aria-disabled="true">
-            <span class="soon-tag">Soon</span>
+          <button class="home-tile c-agents" onclick="openAgentsTile()">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3Z"/><path d="M19 17l.8 2.2L22 20l-2.2.8L19 23l-.8-2.2L16 20l2.2-.8L19 17Z"/></svg>
-            <div class="tt">Agents</div><div class="ts">Research · Outreach · Execution</div>
-          </div>
+            <div class="tt">Agents</div><div class="ts">Schedules · Runs · Research</div>
+          </button>
         </div>
       </div>
     </section>
@@ -1157,40 +1156,52 @@ button.home-tile:active{transform:scale(0.98)}
     <!-- ── AGENTS ── -->
     <section class="page" id="p-agents">
       <div class="page-head">
-        <div><div class="page-eyebrow">System</div><h1 class="page-title">Agents</h1><div class="page-sub">Standing AI departments. You start them from the talk bar.</div></div>
+        <div><div class="page-eyebrow">System</div><h1 class="page-title">Agents</h1><div class="page-sub">What runs on its own: when it runs, what it did and what it cost.</div></div>
       </div>
 
-      <div id="agents-registry">
-        <button class="card card--button agent-card" onclick="openAgentDetail()">
-          <div class="card-head"><div class="card-title"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="3.6" r="1.9"/><circle cx="3.4" cy="12.2" r="1.9"/><circle cx="12.6" cy="12.2" r="1.9"/><path d="M7.1 5.3 4.4 10.5M8.9 5.3l2.7 5.2M5.3 12.2h5.4"/></svg><span>Market Intelligence</span></div><span class="badge badge--glow" id="ag-mi-status">—</span></div>
-          <p class="hint">A five-role research department (planner, parallel researchers, analyst, founder advisor, adversarial verifier) that investigates a business objective across web, War Room and vault sources, and surfaces evidence-backed opportunities scored against the founder profile.</p>
-          <div class="kpis mt-5">
-            <div class="kpi"><div class="kpi-label">Runs</div><div class="kpi-value" id="ag-mi-runs">—</div></div>
-            <div class="kpi"><div class="kpi-label">Findings</div><div class="kpi-value" id="ag-mi-findings">—</div></div>
-            <div class="kpi"><div class="kpi-label">In pipeline</div><div class="kpi-value" id="ag-mi-pipeline">—</div></div>
-            <div class="kpi"><div class="kpi-label">Lessons</div><div class="kpi-value" id="ag-mi-lessons">—</div></div>
-          </div>
-        </button>
+      <div id="agents-registry" class="stack-lg">
+        <div class="card" id="ag-scheduler"><div class="skel skel-row"></div></div>
+        <div class="card">
+          <div class="card-head"><div class="card-title"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="3.6" r="1.9"/><circle cx="3.4" cy="12.2" r="1.9"/><circle cx="12.6" cy="12.2" r="1.9"/><path d="M7.1 5.3 4.4 10.5M8.9 5.3l2.7 5.2M5.3 12.2h5.4"/></svg><span>Agents</span></div><span class="badge badge--muted" id="ag-count">—</span></div>
+          <p class="hint">Each agent runs on its own schedule and only touches what it is allowed to. Tap one to see what it did; every run can be undone.</p>
+          <div class="list mt-3" id="ag-list"><div class="skel skel-row"></div><div class="skel skel-row"></div><div class="skel skel-row"></div></div>
+        </div>
       </div>
 
       <div id="agent-detail" class="stack-lg hidden">
         <div><button class="btn btn--sm" onclick="closeAgentDetail()">← All agents</button></div>
+        <div class="card" id="ag-detail-head"><div class="skel skel-row"></div></div>
         <div class="card">
-          <div class="card-head"><div class="card-title"><span>Market Intelligence</span></div><span class="badge badge--glow" id="ag-detail-status">—</span></div>
-          <p class="hint">This page is for looking and managing; you run the agent from the talk bar. Type <code>research &lt;objective&gt;</code> to run it, or <code>promote finding &lt;id&gt;</code> to save an opportunity. The agent only surfaces findings; nothing enters the pipeline until you promote it.</p>
+          <div class="card-head"><div class="card-title"><span>Recent runs</span></div><span class="badge badge--muted" id="ag-runs-badge">0</span></div>
+          <div class="list" id="ag-runs"><div class="empty">Loading…</div></div>
         </div>
-        <div class="card">
-          <div class="card-head"><div class="card-title"><span>Research projects</span></div><span class="badge badge--muted" id="ag-proj-badge">0</span></div>
-          <div class="list" id="ag-projects"><div class="empty">Loading…</div></div>
-        </div>
-        <div class="grid">
-          <div class="card">
-            <div class="card-head"><div class="card-title"><span>Opportunity pipeline</span></div><span class="badge badge--muted" id="ag-pipe-badge">0</span></div>
-            <div class="list" id="ag-pipeline"></div>
+
+        <div id="ag-mi-detail" class="stack-lg hidden">
+          <div class="kpis">
+            <div class="kpi"><div class="kpi-label">Research runs</div><div class="kpi-value" id="ag-mi-runs">—</div></div>
+            <div class="kpi"><div class="kpi-label">Findings</div><div class="kpi-value" id="ag-mi-findings">—</div></div>
+            <div class="kpi"><div class="kpi-label">In pipeline</div><div class="kpi-value" id="ag-mi-pipeline">—</div></div>
+            <div class="kpi"><div class="kpi-label">Lessons</div><div class="kpi-value" id="ag-mi-lessons">—</div></div>
           </div>
           <div class="card">
-            <div class="card-head"><div class="card-title"><span>Lesson memory</span></div><span class="badge badge--muted" id="ag-mem-badge">0</span></div>
-            <div class="list" id="ag-memory"></div>
+            <div class="card-head"><div class="card-title"><span>Standing objectives</span></div><span class="badge badge--muted" id="ag-obj-badge">0</span></div>
+            <p class="hint">Research that repeats. Set one by telling Founder OS, for example <code>keep researching Lusaka pharmacies every two weeks</code>. A run surfaces findings; nothing enters the pipeline until you promote it.</p>
+            <div class="list mt-3" id="ag-objectives"><div class="empty">Loading…</div></div>
+          </div>
+          <div class="card">
+            <div class="card-head"><div class="card-title"><span>Research projects</span></div><span class="badge badge--muted" id="ag-proj-badge">0</span></div>
+            <p class="hint">Type <code>research &lt;objective&gt;</code> in the talk bar to run one now. Open a project to promote or dismiss its findings.</p>
+            <div class="list mt-3" id="ag-projects"><div class="empty">Loading…</div></div>
+          </div>
+          <div class="grid">
+            <div class="card">
+              <div class="card-head"><div class="card-title"><span>Opportunity pipeline</span></div><span class="badge badge--muted" id="ag-pipe-badge">0</span></div>
+              <div class="list" id="ag-pipeline"></div>
+            </div>
+            <div class="card">
+              <div class="card-head"><div class="card-title"><span>Lesson memory</span></div><span class="badge badge--muted" id="ag-mem-badge">0</span></div>
+              <div class="list" id="ag-memory"></div>
+            </div>
           </div>
         </div>
       </div>
@@ -2074,6 +2085,11 @@ function openAcademicsTile(){
   nav("syllabus",document.querySelector(`.nav-item[onclick*="nav('syllabus'"]`));
 }
 
+function openAgentsTile(){
+  closeAgentDetail();
+  nav("agents",document.querySelector(`.nav-item[onclick*="nav('agents'"]`));
+}
+
 async function refreshAiPill(){
   const el=document.getElementById("h-ai");
   if(!el)return;
@@ -2699,50 +2715,14 @@ let _agData={projects:[],pipeline:[],memory:[]};
 const _agProjCache={};   // project_id -> detail (findings)
 const _agOpen=new Set(); // expanded project ids
 
-async function renderAgents(){
-  try{
-    const [pr,pl,mem]=await Promise.all([
-      fetch(`${API_BASE}/research/projects`).then(r=>r.ok?r.json():[]),
-      fetch(`${API_BASE}/research/pipeline`).then(r=>r.ok?r.json():[]),
-      fetch(`${API_BASE}/research/memory`).then(r=>r.ok?r.json():[]),
-    ]);
-    _agData={projects:pr||[],pipeline:pl||[],memory:mem||[]};
-  }catch(_){
-    document.getElementById("ag-mi-status").textContent="Offline";
-    document.getElementById("ag-mi-status").className="badge badge--danger";
-    return;
-  }
-  const running=_agData.projects.some(p=>p.status==="running");
-  const statusTxt=running?"Running":"Available";
-  const st=document.getElementById("ag-mi-status");
-  st.textContent=statusTxt;st.className="badge "+(running?"badge--success":"badge--glow");
-  document.getElementById("ag-mi-runs").textContent=_agData.projects.length;
-  document.getElementById("ag-mi-findings").textContent=_agData.projects.reduce((s,p)=>s+(p.finding_count||0),0);
-  document.getElementById("ag-mi-pipeline").textContent=_agData.pipeline.length;
-  document.getElementById("ag-mi-lessons").textContent=_agData.memory.length;
-  if(!document.getElementById("agent-detail").classList.contains("hidden"))renderAgentDetail();
-}
-
-function openAgentDetail(){
-  document.getElementById("agents-registry").classList.add("hidden");
-  document.getElementById("agent-detail").classList.remove("hidden");
-  renderAgentDetail();
-}
-function closeAgentDetail(){
-  document.getElementById("agent-detail").classList.add("hidden");
-  document.getElementById("agents-registry").classList.remove("hidden");
-}
-
 function _agStatusBadge(status){
   const cls=status==="completed"?"badge--success":status==="failed"?"badge--danger":status==="running"?"badge--glow":"badge--muted";
   return `<span class="badge ${cls}">${escHtml(status||"—")}</span>`;
 }
 
+// The market-intelligence part of an agent's detail: projects, pipeline, lessons.
 function renderAgentDetail(){
-  const running=_agData.projects.some(p=>p.status==="running");
-  const st=document.getElementById("ag-detail-status");
-  st.textContent=running?"Running":"Available";st.className="badge "+(running?"badge--success":"badge--glow");
-
+  if(!document.getElementById("ag-projects"))return;
   document.getElementById("ag-proj-badge").textContent=String(_agData.projects.length);
   const projEl=document.getElementById("ag-projects");
   projEl.innerHTML=_agData.projects.length
@@ -2818,7 +2798,8 @@ function _renderAgProjBody(id){
         ${axes.length?`<div class="scores">${axes.map(k=>`<div><span>${escHtml(k.replace(/_/g," "))}</span><b>${escHtml(String(sc[k]))}</b></div>`).join("")}</div>`:""}
         ${f.first_customer_path?`<div class="section-label mt-3">First customer path</div><p class="hint">${escHtml(f.first_customer_path)}</p>`:""}
         ${ev.length?`<div class="section-label mt-3">Evidence · ${ev.length}</div><ul class="evidence">${ev.slice(0,6).map(e=>`<li>(${escHtml(e.source_type||"web")}) ${escHtml(e.title||"")}${e.ref&&/^https?:/.test(e.ref)?` — <a href="${escHtml(e.ref)}" target="_blank" rel="noopener">${escHtml(e.ref)}</a>`:""}</li>`).join("")}</ul>`:""}
-        ${f.status==="surfaced"?`<div class="mt-3"><button class="btn btn--sm btn--primary" onclick="promoteFinding(${Number(f.id)})">Promote to pipeline</button></div>`:""}
+        ${f.recommendation||Number(f.times_seen)>1?`<div class="cluster mt-3">${f.recommendation?`<span class="badge ${f.recommendation==="pursue"?"badge--success":f.recommendation==="watch"?"badge--warn":"badge--muted"}">${escHtml(f.recommendation)}</span>`:""}${Number(f.times_seen)>1?`<span class="badge badge--muted">seen ${Number(f.times_seen)} times</span>`:""}</div>`:""}
+        ${f.status==="surfaced"?`<div class="cluster mt-3"><button class="btn btn--sm btn--primary" onclick="promoteFinding(${Number(f.id)})">Promote to pipeline</button><button class="btn btn--ghost btn--sm" onclick="dismissFinding(${Number(f.id)},this)">Dismiss</button></div>`:""}
       </div>`;
     }).join("")
     :`<div class="empty">No findings — ${d.error?`run failed: ${escHtml(d.error)}`:"no evidence-backed candidates survived verification."}</div>`;
@@ -4034,6 +4015,238 @@ async function renderClientDetail(id){
       <span class="row-meta">${escHtml(_day(m.occurred_at))}</span></div>`).join("")}</div>`:`<div class="empty">Nothing logged. Tell Founder OS when you speak to them.</div>`}
   </div>`;
   return head+`<div class="grid">${contacts}${deals}</div><div class="grid">${payments}${talk}</div>`;
+}
+
+/* ── Agents: scheduler strip, registry, one agent's run log ── */
+const AG={agents:[],jobs:null,key:null,detail:null,objectives:[]};
+
+function _ago(iso){
+  if(!iso)return "";
+  const t=new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(iso)?iso:iso+"Z");     // server times are UTC
+  const mins=Math.max(0,Math.round((Date.now()-t.getTime())/60000));
+  if(mins<1)return "just now";
+  if(mins<60)return `${mins} min ago`;
+  const h=Math.round(mins/60);
+  return h<48?`${h} h ago`:`${Math.round(h/24)} days ago`;
+}
+function _ageMinutes(iso){
+  if(!iso)return Infinity;
+  const t=new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(iso)?iso:iso+"Z");
+  return (Date.now()-t.getTime())/60000;
+}
+function _agRunBadge(status){
+  const cls=status==="completed"?"badge--success":(status==="failed"||status==="violation")?"badge--danger":status==="running"?"badge--glow":"badge--muted";
+  return `<span class="badge ${cls}">${escHtml(status||"never run")}</span>`;
+}
+function _cents(n){
+  const v=Number(n||0);
+  return v<=0?"":"$"+(v<0.01?v.toFixed(4):v.toFixed(2));
+}
+
+async function renderAgents(){
+  let agents,jobs;
+  try{
+    [agents,jobs]=await Promise.all([_bizGet("/agents"),_bizGet("/jobs/status")]);
+  }catch(_){
+    const sched=document.getElementById("ag-scheduler");
+    if(sched)sched.innerHTML=`<div class="empty">Waiting for the backend…</div>`;
+    return;
+  }
+  AG.agents=agents||[];AG.jobs=jobs;
+  _renderScheduler();
+  safeUpdate("ag-count",String(AG.agents.length));
+  const list=document.getElementById("ag-list");
+  if(list)list.innerHTML=AG.agents.length?AG.agents.map(_agentRow).join(""):`<div class="empty">No agents are registered.</div>`;
+  if(AG.key&&!document.getElementById("agent-detail").classList.contains("hidden"))loadAgentDetail(AG.key);
+}
+
+function _renderScheduler(){
+  const el=document.getElementById("ag-scheduler"), j=AG.jobs;
+  if(!el||!j)return;
+  const last=j.last_tick, age=last?_ageMinutes(last.started_at):Infinity;
+  const stale=age>60;
+  const source={github:"external schedule",in_process:"in-process",manual:"manual"}[last&&last.trigger]||"";
+  const due=(j.agents_due_now||[]).length;
+  el.innerHTML=`<div class="card-head"><div class="card-title"><span>Scheduler</span></div>${stale?`<span class="badge badge--warn">${last?"Quiet":"Not run yet"}</span>`:`<span class="badge badge--success">Running</span>`}</div>
+    <div class="cluster">
+      <span class="badge badge--muted">${last?`Last tick ${escHtml(_ago(last.started_at))}${source?" · "+escHtml(source):""}`:"No tick yet"}</span>
+      <span class="badge ${due?"badge--glow":"badge--muted"}">${due} due now</span>
+      <span class="badge badge--muted">${Number(j.ticks_24h||0)} tick${Number(j.ticks_24h)===1?"":"s"} in 24 h</span>
+      <span class="badge badge--muted">${j.in_process_scheduler?"In-process tick on":"In-process tick off"}</span>
+      <span class="badge badge--muted">${j.token_configured?"Scheduler token set":"No scheduler token"}</span>
+    </div>
+    ${stale?`<p class="hint mt-3">${last?`No tick for ${escHtml(_ago(last.started_at).replace(" ago",""))}.`:"The scheduler has not ticked yet."} Agents run every 15 minutes while the app is open; nothing runs while it is closed unless the external schedule is switched on.</p>`:""}`;
+}
+
+function _agentRow(a){
+  const last=a.last_run;
+  const sub=[a.schedule.effective,last&&last.summary?last.summary:"not run yet"].filter(Boolean).map(escHtml).join(" · ");
+  const cost=_cents(a.cost_usd_month);
+  return `<div class="row row--tap row--wrap" role="button" tabindex="0" data-key="${escHtml(a.key)}" onclick="openAgentDetail(this.dataset.key)" onkeydown="if(event.target===this&&(event.key==='Enter'||event.key===' ')){event.preventDefault();openAgentDetail(this.dataset.key)}">
+    <div class="row-main"><div class="row-title">${escHtml(a.name)} <span class="badge badge--muted">Phase ${escHtml(a.phase)}</span></div><div class="row-sub">${sub}</div></div>
+    ${_agRunBadge(last?last.status:"")}
+    ${cost?`<span class="row-meta" title="Model cost this month">${escHtml(cost)}</span>`:""}
+    <div class="row-actions">
+      <button class="toggle toggle--sm ${a.enabled?"is-on":"is-off"}" aria-pressed="${a.enabled}" data-key="${escHtml(a.key)}" onclick="event.stopPropagation();agentToggle(this.dataset.key,${!a.enabled},this)">${a.enabled?"On":"Off"}</button>
+      <button class="btn btn--sm" data-key="${escHtml(a.key)}" onclick="event.stopPropagation();agentRun(this.dataset.key,this)">Run</button>
+    </div>
+  </div>`;
+}
+
+async function agentToggle(key,enabled,btn){
+  if(btn)btn.disabled=true;
+  try{
+    const r=await fetch(`${API_BASE}/agents/${encodeURIComponent(key)}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({enabled})});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(d.detail||("HTTP "+r.status));
+    if(d.change)showChanges([d.change]);
+  }catch(e){showToast("Could not change the agent: "+e.message,"error");}
+  await renderAgents();
+}
+
+async function agentRun(key,btn){
+  if(btn){btn.disabled=true;btn.classList.add("is-loading");}
+  try{
+    const r=await fetch(`${API_BASE}/agents/${encodeURIComponent(key)}/run`,{method:"POST"});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(d.detail||("HTTP "+r.status));
+    const bad=d.status==="failed"||d.status==="violation";
+    showToast(d.summary||d.status||"Done",bad?"error":"success");
+    try{loadSuggestions();loadBriefing();}catch(_){}
+  }catch(e){showToast("Run failed: "+e.message,"error");}
+  await renderAgents();
+}
+
+function openAgentDetail(key){
+  AG.key=key||"market_intel";
+  document.getElementById("agents-registry").classList.add("hidden");
+  document.getElementById("agent-detail").classList.remove("hidden");
+  const c=document.getElementById("content");if(c)c.scrollTop=0;
+  loadAgentDetail(AG.key);
+}
+function closeAgentDetail(){
+  AG.key=null;
+  document.getElementById("agent-detail").classList.add("hidden");
+  document.getElementById("agents-registry").classList.remove("hidden");
+}
+
+async function loadAgentDetail(key){
+  let d;
+  try{d=await _bizGet(`/agents/${encodeURIComponent(key)}`);}
+  catch(_){document.getElementById("ag-detail-head").innerHTML=`<div class="empty">Could not load this agent.</div>`;return;}
+  if(AG.key!==key)return;
+  AG.detail=d;
+  const p=d.permissions||{};
+  const head=document.getElementById("ag-detail-head");
+  head.innerHTML=`<div class="card-head"><div class="card-title"><span>${escHtml(d.name)}</span></div>${_agRunBadge(d.last_run?d.last_run.status:"")}</div>
+    <p class="hint">${escHtml(d.description)}</p>
+    <div class="cluster mt-3">
+      <span class="badge badge--glow">${escHtml(d.schedule.effective)}</span>
+      ${(d.events||[]).map(e=>`<span class="badge badge--purple">on ${escHtml(e)}</span>`).join("")}
+      <span class="badge badge--muted">${Number(p.max_llm_calls)?`up to ${Number(p.max_llm_calls)} model calls a run`:"no model calls"}</span>
+      ${_cents(d.cost_usd_month)?`<span class="badge badge--muted">${escHtml(_cents(d.cost_usd_month))} this month</span>`:""}
+      <span class="badge badge--muted">${Number(d.runs_count||0)} run${Number(d.runs_count)===1?"":"s"}</span>
+    </div>
+    <div class="section-label">May write to</div>
+    <div class="chips">${(p.tables_write||[]).map(t=>`<span class="chip">${escHtml(t.replace(/_/g," "))}</span>`).join("")||`<span class="chip is-dim">nothing</span>`}</div>
+    <div class="cluster mt-5">
+      <button class="toggle toggle--sm ${d.enabled?"is-on":"is-off"}" aria-pressed="${d.enabled}" data-key="${escHtml(d.key)}" onclick="agentToggle(this.dataset.key,${!d.enabled},this)">${d.enabled?"On":"Off"}</button>
+      <button class="btn btn--primary btn--sm" data-key="${escHtml(d.key)}" onclick="agentRun(this.dataset.key,this)">Run now</button>
+    </div>`;
+  const runs=d.runs||[];
+  safeUpdate("ag-runs-badge",String(runs.length));
+  document.getElementById("ag-runs").innerHTML=runs.length?runs.map(r=>{
+    const meta=[_ago(r.started_at),r.trigger,r.duration_ms!=null?`${(Number(r.duration_ms)/1000).toFixed(1)} s`:"",_cents(r.cost_usd),r.changes_count?`${Number(r.changes_count)} change${Number(r.changes_count)===1?"":"s"}`:""].filter(Boolean).map(escHtml).join(" · ");
+    const live=(r.changes||[]).filter(c=>!c.undone);
+    return `<div class="row row--wrap">
+      <div class="row-main"><div class="row-title wrap">${escHtml(r.summary||r.status)}</div><div class="row-sub wrap">${meta}${r.error?` · ${escHtml(r.error)}`:""}</div>
+        ${(r.changes||[]).slice(0,3).map(c=>`<div class="row-sub wrap">${c.undone?"<s>":""}${escHtml(c.summary||"")}${c.undone?"</s>":""}</div>`).join("")}</div>
+      ${_agRunBadge(r.status)}
+      ${live.length?`<div class="row-actions"><button class="btn btn--sm" onclick="agentUndoRun(${Number(r.id)},this)">Undo</button></div>`:""}
+    </div>`;}).join(""):`<div class="empty">This agent has not run yet.</div>`;
+
+  const mi=document.getElementById("ag-mi-detail");
+  mi.classList.toggle("hidden",key!=="market_intel");
+  if(key==="market_intel")loadResearch();
+}
+
+async function agentUndoRun(id,btn){
+  if(btn){btn.disabled=true;btn.classList.add("is-loading");}
+  try{
+    const r=await fetch(`${API_BASE}/agents/runs/${Number(id)}/undo`,{method:"POST"});
+    if(!r.ok)throw new Error((await r.json().catch(()=>({}))).detail||("HTTP "+r.status));
+    showToast("Run undone","info");
+    _afterWriteRefresh();
+  }catch(e){showToast("Undo failed: "+e.message,"error");}
+  await renderAgents();
+}
+
+/* ── Market intelligence: objectives, projects, pipeline, lessons ── */
+async function loadResearch(){
+  try{
+    const [pr,pl,mem,obj]=await Promise.all([_bizGet("/research/projects"),_bizGet("/research/pipeline"),_bizGet("/research/memory"),_bizGet("/research/objectives")]);
+    _agData={projects:pr||[],pipeline:pl||[],memory:mem||[]};
+    AG.objectives=obj||[];
+  }catch(_){return;}
+  safeUpdate("ag-mi-runs",String(_agData.projects.length));
+  safeUpdate("ag-mi-findings",String(_agData.projects.reduce((s,p)=>s+(p.finding_count||0),0)));
+  safeUpdate("ag-mi-pipeline",String(_agData.pipeline.length));
+  safeUpdate("ag-mi-lessons",String(_agData.memory.length));
+  safeUpdate("ag-obj-badge",String(AG.objectives.length));
+  const host=document.getElementById("ag-objectives");
+  if(host)host.innerHTML=AG.objectives.length?AG.objectives.map(o=>`<div class="row row--wrap">
+      <div class="row-main"><div class="row-title wrap">${escHtml(o.objective)}</div><div class="row-sub">every ${Number(o.cadence_days)} days · ${o.last_run_at?`last run ${escHtml(_ago(o.last_run_at))}`:"never run"}</div></div>
+      ${o.due?`<span class="badge badge--warn">Due</span>`:""}
+      <div class="row-actions">
+        <button class="toggle toggle--sm ${o.enabled?"is-on":"is-off"}" aria-pressed="${o.enabled}" onclick="objectiveToggle(${Number(o.id)},${!o.enabled},this)">${o.enabled?"On":"Off"}</button>
+        <button class="btn btn--sm" onclick="objectiveRun(${Number(o.id)},this)">Run</button>
+      </div>
+    </div>`).join(""):`<div class="empty">No standing objectives yet.</div>`;
+  renderAgentDetail();
+}
+
+async function objectiveToggle(id,enabled,btn){
+  if(btn)btn.disabled=true;
+  try{
+    const r=await fetch(`${API_BASE}/research/objectives/${Number(id)}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({enabled})});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(d.detail||("HTTP "+r.status));
+    if(d.change)showChanges([d.change]);
+  }catch(e){showToast("Could not change the objective: "+e.message,"error");}
+  await loadResearch();
+}
+
+async function objectiveRun(id,btn){
+  if(btn){btn.disabled=true;btn.classList.add("is-loading");}
+  showToast("Research is running. It takes up to a minute or two.","info");
+  try{
+    const r=await fetch(`${API_BASE}/research/objectives/${Number(id)}/run`,{method:"POST"});
+    const d=await r.json().catch(()=>({}));
+    if(r.status===503)throw new Error("research needs the AI key, which is not set");
+    if(!r.ok)throw new Error(d.detail||("HTTP "+r.status));
+    if(d.error)throw new Error(d.error);
+    const n=(d.opportunities||[]).length, seen=(d.repeated||[]).length;
+    showToast(`${n} new finding${n===1?"":"s"}${seen?`, ${seen} seen before`:""}`,"success");
+    showChanges(d.changes||[]);
+  }catch(e){showToast("Research did not run: "+e.message,"error");}
+  Object.keys(_agProjCache).forEach(k=>delete _agProjCache[k]);
+  await loadResearch();
+}
+
+async function dismissFinding(id,btn){
+  if(btn){btn.disabled=true;btn.classList.add("is-loading");}
+  try{
+    const r=await fetch(`${API_BASE}/research/findings/${Number(id)}/dismiss`,{method:"POST"});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(d.detail||("HTTP "+r.status));
+    if(d.change)showChanges([d.change]);
+    showToast("Finding dismissed","info");
+    const open=[..._agOpen];
+    Object.keys(_agProjCache).forEach(k=>delete _agProjCache[k]);
+    await Promise.all(open.map(async pid=>{try{_agProjCache[pid]=await _bizGet(`/research/projects/${pid}`);}catch(_){}}));
+    await loadResearch();
+    try{loadBriefing();}catch(_){}
+  }catch(e){showToast("Dismiss failed: "+e.message,"error");}
 }
 
 function renderGuide(){

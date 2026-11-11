@@ -13,6 +13,7 @@
  *   5. Business page: the Clients tab lists a client, a tap opens it, and Paid on a due
  *      payment marks it paid and logs the revenue
  *   6. Portfolio tab: Focus makes a project priority 1 and demotes the previous one
+ *   7. Agents page: the registry lists the agents, the toggle switches one off, Run runs one
  *
  * Run from the repo root:
  *     node tests/e2e/smoke.js
@@ -212,6 +213,24 @@ async function api(token, method, p, body, isForm) {
     const pr = (id) => projects.find((p) => p.id === id).priority;
     check(pr(projB.json.id) === 1 && pr(projA.json.id) === 2, "Focus made the project priority 1 and demoted the other");
     check((await page.locator("#biz-body .row", { hasText: "Smoke project two" }).locator("text=In focus").count()) === 1, "the row shows it is in focus");
+
+    // ── 7. Agents: toggle and Run ──
+    console.log("7. agents: toggle and run");
+    await page.evaluate(() => openAgentsTile());
+    await page.waitForSelector("#ag-list .row", { timeout: 15000 });
+    check((await page.locator("#ag-list .row").count()) >= 6, "the registry lists the shipped agents");
+    const qualifier = page.locator('#ag-list .row[data-key="lead_qualifier"]');
+    await qualifier.locator("button.toggle").click();
+    await page.waitForTimeout(1200);
+    const agentsNow = (await api(token, "GET", "/agents")).json;
+    check(agentsNow.find((a) => a.key === "lead_qualifier").enabled === false, "the toggle switched the agent off");
+    await page.locator('#ag-list .row[data-key="portfolio_reviewer"]').locator("button:has-text('Run')").click();
+    await page.waitForTimeout(1500);
+    const reviewerRuns = (await api(token, "GET", "/agents/portfolio_reviewer/runs")).json;
+    check(reviewerRuns.length === 1 && reviewerRuns[0].trigger === "manual", "Run ran the agent once");
+    await page.locator('#ag-list .row[data-key="portfolio_reviewer"]').click();
+    await page.waitForSelector("#ag-runs .row", { timeout: 15000 });
+    check((await page.locator("#ag-detail-head").textContent()).includes("Portfolio reviewer"), "a tap opens the agent with its run log");
 
     check(pageErrors.length === 0, `no page errors (${pageErrors.join("; ") || "none"})`);
   } catch (e) {

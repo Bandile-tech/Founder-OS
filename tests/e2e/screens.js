@@ -35,7 +35,7 @@ const VIEWPORTS = [
   { name: "390x844", width: 390, height: 844, mobile: true },
 ];
 // "page:state" opens a page and then one of its sub-views (see show()).
-const PAGES = ["home", "timetable", "health", "syllabus", "history", "agents", "business", "business:clients", "business:client",
+const PAGES = ["home", "timetable", "health", "syllabus", "history", "agents", "agents:detail", "business", "business:clients", "business:client",
   "business:portfolio", "warroom", "annual", "guide", "settings"];
 // Extra states worth seeing on the sheet (not part of the per-page consistency checks).
 const EXTRAS = ["stage", "menu"];
@@ -128,6 +128,11 @@ async function seedBusiness() {
   await api("POST", "/projects", { title: "Newsletter", priority: 4, expected_value: 1500, currency: "ZMW" });
   const side = (await api("POST", "/projects", { title: "Study planner app", priority: 3 })).json;
   await api("POST", `/projects/${side.id}/status`, { status: "paused" });
+  // Agents: a standing research objective and a couple of runs for the activity log.
+  await api("POST", "/research/objectives", { objective: "Painful admin problems in Lusaka pharmacies", cadence_days: 14 });
+  await api("POST", "/agents/portfolio_reviewer/run");
+  await api("POST", "/agents/crm_housekeeper/run");
+  await api("POST", "/agents/market_intel/run");
   return { leadId: ids[0], clientId: c.id };
 }
 
@@ -140,6 +145,15 @@ function seedDraft(env) {
     "lead = db.query(models.Lead).filter(models.Lead.name == 'Mercy Banda').first()",
     "db.add(models.OutreachMessage(lead_id=lead.id, channel='whatsapp', status='draft', brief='intro', " +
       "body='Hi Mercy, I am Bandile. I build small stock-alert tools for pharmacies in Lusaka.\\n\\nCould I show you a two-minute demo this week?'))",
+    "import json",
+    "project = models.ResearchProject(title='Lusaka pharmacy pain scan', objective='Painful admin problems in Lusaka pharmacies', status='completed')",
+    "db.add(project)",
+    "db.flush()",
+    "scores = {'pain_severity': 8, 'frequency': 8, 'financial_value': 7, 'market_size': 6, 'competition_gap': 7, 'founder_fit': 9, 'speed_to_mvp': 8, 'overall': 7.8}",
+    "db.add(models.ResearchFinding(project_id=project.id, problem='Independent pharmacies in Lusaka lose sales to manual stock tracking', " +
+      "industry='retail pharmacy', customer_segment='independent pharmacies, Lusaka', scores=json.dumps(scores), overall_score=7.8, " +
+      "recommendation='pursue', status='surfaced', first_customer_path='Walk into five pharmacies with a demo', " +
+      "evidence=json.dumps([{'source_type': 'web', 'title': 'Pharmacy stockouts in Lusaka', 'ref': 'https://example.com/stockouts'}])))",
     "from datetime import datetime, timedelta",
     "stale = db.query(models.Project).filter(models.Project.title == 'Newsletter').first()",
     "stale.last_activity_at = datetime.utcnow() - timedelta(days=20)",
@@ -197,6 +211,7 @@ async function show(page, name) {
   await page.evaluate(async ([base, state]) => {
     if (typeof closeStage === "function" && STAGE.open) closeStage();
     closeSidebar();
+    if (base === "agents") closeAgentDetail();
     if (base === "business") {
       BIZ.clientId = null;
       BIZ.tab = state === "clients" || state === "client" ? "clients" : (state || "pipeline");
@@ -206,6 +221,12 @@ async function show(page, name) {
     nav(base, el);
   }, [base, state || ""]);
   await page.waitForTimeout(base === "home" ? 1200 : 900);
+  if (base === "agents" && state === "detail") {
+    await page.evaluate(() => openAgentDetail("market_intel"));
+    await page.waitForTimeout(900);
+    await page.locator("#ag-projects .row--tap").first().click();
+    await page.waitForTimeout(500);
+  }
   if (state === "client") {
     await page.locator("#biz-body .row--tap", { hasText: "Wamu" }).first().click();
     await page.waitForTimeout(700);
