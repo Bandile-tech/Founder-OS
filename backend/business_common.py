@@ -137,8 +137,10 @@ _CLOCK = re.compile(r"(?:^|\s)(at\s+)?(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)?$")
 DEFAULT_REMINDER_HOUR = 9
 
 
-def parse_when(text, now_local):
+def parse_when(text, now_local, *, default_hour: int | None = DEFAULT_REMINDER_HOUR):
     """A spoken moment → a naive UTC datetime, or None when it cannot be read or has passed.
+    With ``default_hour=None`` a day with no clock time is refused (None) instead of
+    meaning 09:00.
 
     Reads "17:00", "5pm", "at 5", "in 2 hours", "in 30 minutes", "tomorrow 17:00",
     "friday at 9", "12 May 14:30", and anything ``parse_day`` reads on its own (a day with
@@ -180,7 +182,9 @@ def parse_when(text, now_local):
         return datetime.combine(d, time(hour, minute), tzinfo=now_local.tzinfo)
 
     if clock is None:
-        moment = at(day, DEFAULT_REMINDER_HOUR, 0)
+        if default_hour is None:
+            return None
+        moment = at(day, default_hour, 0)
     else:
         hour, minute, meridiem, zero_padded = clock
         if meridiem:

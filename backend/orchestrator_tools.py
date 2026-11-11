@@ -2876,3 +2876,89 @@ _register(
      "daily_cap": _int("The most messages in a day."),
      "enabled": {"type": "boolean", "description": "Turn notifications on or off."}},
 )
+
+
+# ── 6C: calendar ─────────────────────────────────────────────
+
+def _check_integration_error(db, params):
+    """True when any integration is in the error state."""
+    return db.query(models.Integration).filter(models.Integration.status == "error").first() is not None
+
+
+_RULE_CHECKS["integration_error"] = _check_integration_error
+
+
+def calendar_today(db, date: str | None = None):
+    """The day's events from the calendar cache. Read-only."""
+    import business_common
+    import integrations_google
+    from agents import schedule
+    if not integrations_google.connected(db):
+        return {"connected": False, "message": integrations_google.NOT_CONNECTED}, integrations_google.NOT_CONNECTED
+    today = schedule.to_local(datetime.utcnow()).date()
+    day = today
+    if date:
+        day = business_common.parse_day(date, today)
+        if day is None:
+            msg = f"could not read the date '{date}'"
+            return {"error": msg}, msg
+    events = [{"title": e["title"], "starts": e["start_local"], "ends": e["end_local"], "location": e["location"]}
+              for e in integrations_google.today(db, day)]
+    label = "today" if day == today else day.isoformat()
+    return ({"connected": True, "date": day.isoformat(), "events": events},
+            f"{len(events)} event(s) {label}" if events else f"nothing in the calendar {label}")
+
+
+def calendar_add_event(db, title: str, when: str, duration_minutes: int | None = None,
+                       location: str | None = None, notes: str | None = None):
+    """Create a calendar event on Google. Needs a date and a clock time."""
+    import business_common
+    import change_log
+    import integrations_google
+    from agents import schedule
+    if not (title or "").strip():
+        return {"error": "an event needs a title"}, "an event needs a title"
+    if not integrations_google.connected(db):
+        return {"error": integrations_google.NOT_CONNECTED}, integrations_google.NOT_CONNECTED
+    now_local = schedule.to_local(datetime.utcnow())
+    start = business_common.parse_when(when, now_local, default_hour=None)
+    if start is None:
+        if business_common.parse_day(when, now_local.date()) is not None:
+            return {"error": "need a time"}, "need a time"
+        msg = f"could not read '{when}' as a date and time that is still to come"
+        return {"error": msg}, msg
+    start_local = schedule.to_local(start)
+    with change_log.batch_scope(db, "assistant"):
+        try:
+            result = integrations_google.create_event(db, title, start_local, duration_minutes or 60, location, notes)
+        except (ValueError, integrations_google.GoogleError) as exc:
+            db.rollback()
+            return {"error": str(exc)}, str(exc)
+        db.commit()
+    event = result["event"]
+    when_label = _when_label(start, now_local)
+    out = {"event_id": event["id"], "title": event["title"], "when": when_label, "ends": event["end_local"],
+           "location": event["location"], "change": result["change"]}
+    return out, f"'{event['title']}' added to the calendar for {when_label}"
+
+
+_register(
+    "calendar_today", lambda db, a: calendar_today(db, date=a.get("date")),
+    "What is in the calendar for a day (today when no date is given). Read-only. When the "
+    "calendar is not connected it says so; never guess what is in it.",
+    {"date": _str("The day as he said it, e.g. 'tomorrow', 'friday', '12 May'. Omit for today.")},
+)
+
+_register(
+    "calendar_add_event",
+    lambda db, a: calendar_add_event(db, title=a.get("title", ""), when=a.get("when", ""),
+                                     duration_minutes=a.get("duration_minutes"), location=a.get("location"),
+                                     notes=a.get("notes")),
+    "Put an event in Bandile's Google Calendar. ONLY when he schedules something at a time "
+    "(\"clinic demo Friday at 2\"). It needs a clock time: if he gave only a day, ask for the time.",
+    {"title": _str("What the event is."),
+     "when": _str("The date and time as he said it, e.g. 'friday 14:00', 'tomorrow at 9am'."),
+     "duration_minutes": _int("How long it lasts (default 60)."),
+     "location": _str("Where, if he said."), "notes": _str("Anything to put in the description.")},
+    ["title", "when"],
+)

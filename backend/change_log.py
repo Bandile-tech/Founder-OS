@@ -182,11 +182,21 @@ def record_delete(db: Session, obj, summary: str, source: str | None = None) -> 
 
 # ── Undo ─────────────────────────────────────────────────────
 
-def _after_undo_hook(db: Session, table_name: str):
-    """Keep in-memory state in step with the database after an undo."""
+def _after_undo_hook(db: Session, table_name: str, row: models.ChangeLog | None = None):
+    """Keep in-memory state, and the outside world, in step with the database after an undo."""
     if table_name == "kpi_snapshots":
         import main
         main.load_kpi_state(db)
+    elif table_name == "calendar_events" and row is not None and row.action == "create":
+        # The event was created on Google too: remove it there. Best effort — the cache row
+        # is already gone whatever Google answers.
+        try:
+            external_id = (json.loads(row.after_json) if row.after_json else {}).get("external_id")
+            if external_id:
+                import integrations_google
+                integrations_google.delete_remote(db, external_id)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[change_log] calendar undo: remote delete failed ({type(exc).__name__})")
 
 
 def _undo_row(db: Session, row: models.ChangeLog) -> dict:
@@ -219,7 +229,7 @@ def _undo_row(db: Session, row: models.ChangeLog) -> dict:
 
     row.undone_at = datetime.utcnow()
     db.flush()
-    _after_undo_hook(db, row.table_name)
+    _after_undo_hook(db, row.table_name, row)
     return {**_entry(row), "already_undone": False}
 
 

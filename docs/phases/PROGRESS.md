@@ -885,6 +885,63 @@ Limits to know:
 VERIFY: the header name `X-Telegram-Bot-Api-Secret-Token`; Telegram's webhook timeout and
 retry behaviour.
 
+### S18 — Phase 6C.2: Google Calendar
+
+Shipped: `backend/integrations_google.py` (`start_url`, `new_state`, `check_state`, `exchange`,
+`_token` with refresh, `sync`, `create_event`, `delete_remote`, `today`, `week`, `disconnect`;
+`GET /integrations/google/start`, `GET /integrations/google/callback`, `POST
+/integrations/google/sync`, `POST /integrations/google/disconnect`, `GET /calendar/today`,
+`GET /calendar/week`, `POST /calendar/events`); the callback is exempt from the session check;
+`change_log._after_undo_hook` deletes the remote event when a created calendar event is undone;
+agent `calendar_sync` (every 30 minutes); tools `calendar_today` and `calendar_add_event`;
+prompt section "CALENDAR AND EMAIL" (calendar bullets); the briefing's `event` items and its
+`calendar`, `today_events` and `integrations` keys; alert rule `integration_error`; 16 more
+tests in `tests/test_phase6c_integrations.py` (spec tests 1–4, 8 and 9).
+
+Decisions where the spec was silent, and one correction:
+- The spec redirects the browser to `{FOUNDER_OS_FRONTEND_URL}/#settings?…`. There is one host
+  now, so the callback redirects to the relative path `/app/#settings?connected=google` (or
+  `?error=google_denied | google_state | google_exchange`). No `FOUNDER_OS_FRONTEND_URL`
+  variable exists.
+- The state is `nonce.timestamp.signature`, good for ten minutes and for one use; the nonce is
+  kept in the row's `config_json.pending_state` and cleared when it is used.
+- A successful callback runs one sync straight away, so the calendar is not empty until the
+  next tick.
+- A 401 from the Calendar API marks the integration in error with "Reconnect Google Calendar".
+  A network failure during a refresh also marks it in error, with "Google could not be reached".
+- Cancelled events are not cached. An event that reappears upstream is revived.
+- `sync` emits `calendar.changed` itself, so it does so from the endpoint as well as the agent.
+- Undo calls Google's delete only for a change-log entry that created the event; whatever
+  Google answers, the cached row is removed.
+- The briefing's calendar section uses the user's wall clock: the caller's `now` when given,
+  else the real time in `FOUNDER_OS_TZ`. An event under way scores 70.
+- `GET /calendar/week` takes `?from=YYYY-MM-DD`. `POST /calendar/events` takes `start` as an
+  ISO local date-time or as text with a clock time.
+- `parse_when` gained `default_hour`; with `None` a day with no clock time is refused, which
+  is how `calendar_add_event` answers "need a time".
+- The ICS read-only fallback (`GOOGLE_CALENDAR_ICS_URL`) is not built; it is only needed if
+  Google blocks the unverified app (see VERIFY).
+
+External setup — Google Calendar (not done; nothing here was tested against Google):
+1. In the Google Cloud console create a project (any name).
+2. APIs & Services → Library → enable "Google Calendar API".
+3. APIs & Services → OAuth consent screen: user type External; fill the app name and your
+   email; add the scope `https://www.googleapis.com/auth/calendar.events`; then publish the app
+   ("In production"). Leaving it in Testing makes the sign-in expire after seven days.
+4. APIs & Services → Credentials → Create credentials → OAuth client ID → Web application. Add
+   the authorised redirect URI `https://<your Render host>/integrations/google/callback`.
+5. On Render set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and `FOUNDER_OS_API_URL`
+   (`https://<your Render host>`, no trailing slash). `GOOGLE_CALENDAR_ID` is optional
+   (default `primary`).
+6. In the app: Settings → Integrations → Google Calendar → Connect, and accept Google's
+   "unverified app" warning (Advanced → continue).
+
+VERIFY (6C): that an unverified app in production with the `calendar.events` scope lets the
+owner through the warning screen; the token endpoint's fields (`access_token`,
+`refresh_token`, `expires_in`, the `invalid_grant` error); the events fields
+(`start.dateTime`, `start.date`, `end`, `summary`, `status`, `htmlLink`, `updated`,
+`nextPageToken`); the revoke endpoint.
+
 ## Environment variables added so far
 
 | Var | Default | Session | Purpose |
@@ -898,6 +955,9 @@ retry behaviour.
 | `TELEGRAM_BOT_TOKEN` | unset | S15 | Bot token from @BotFather |
 | `TELEGRAM_BOT_USERNAME` | unset | S15 | Bot username, for the pairing link in Settings |
 | `TELEGRAM_WEBHOOK_SECRET` | unset | S15 | Random string Telegram sends back with every update |
+| `GOOGLE_CLIENT_ID` | unset | S18 | Google OAuth client id for the calendar |
+| `GOOGLE_CLIENT_SECRET` | unset | S18 | Google OAuth client secret |
+| `GOOGLE_CALENDAR_ID` | `primary` | S18 | Which calendar to read and write |
 | `YOUTUBE_API_KEY` | unset | S9 | YouTube Data API v3 key for the Brand tab |
 
 ## VERIFY items (from the specs)

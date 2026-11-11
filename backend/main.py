@@ -95,6 +95,8 @@ import notify as _notify
 app.include_router(_notify.router)
 import telegram_inbound as _telegram_inbound
 app.include_router(_telegram_inbound.router)
+import integrations_google as _integrations_google
+app.include_router(_integrations_google.router)
 import agents as _agents
 from agents import api as _agents_api
 _agents.load_all()                       # every shipped agent registers itself

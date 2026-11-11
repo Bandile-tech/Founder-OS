@@ -83,6 +83,14 @@
         "days": 14
       },
       "message": "An application deadline is inside 14 days with requirements still missing."
+    },
+    {
+      "id": "integration_error",
+      "severity": "warn",
+      "enabled": true,
+      "check": "integration_error",
+      "params": {},
+      "message": "An integration is in error. Open Settings \u2192 Integrations."
     }
   ]
 }

@@ -339,3 +339,470 @@ def test_outreach_message_serialiser_carries_replied_at():
     db.commit()
     assert leads.serialize_message(db, message)["replied_at"] == datetime(2026, 11, 12, 9, 0)
     db.close()
+
+
+# ════════════════════════════════════════════════════════════════
+# 6C.2 — Google Calendar (spec tests 1–4, 8 and 9)
+# ════════════════════════════════════════════════════════════════
+
+from datetime import date, timedelta
+from urllib.parse import parse_qs, urlparse
+
+import agents
+import briefing
+import change_log
+import integrations_google as gcal
+import notify
+import orchestrator_tools as ot
+from agents import calendar_sync, runner, schedule
+
+ACCESS = "ya29.access-token-value-0001"
+REFRESH = "1//refresh-token-value-0001"
+EVENTS_URL = "https://www.googleapis.com/calendar/v3/calendars/primary/events"
+
+
+@pytest.fixture
+def google(monkeypatch):
+    monkeypatch.setenv("GOOGLE_CLIENT_ID", "client-id.apps.example")
+    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "GOCSPX-client-secret")
+    monkeypatch.setenv("FOUNDER_OS_API_URL", "https://founder.example")
+    monkeypatch.setenv("FOUNDER_OS_SECRET", "server-secret-for-state")
+    monkeypatch.setenv("FOUNDER_OS_TZ", "Africa/Lusaka")
+    with patch.object(runner, "SessionLocal", TestSessionLocal):
+        yield
+
+
+def _connect(db, *, expiry="2099-01-01T00:00:00", refresh=REFRESH):
+    row = integrations.get_or_create(db, "google_calendar")
+    row.status, row.account_label = "connected", "primary"
+    row.secret_json = json.dumps({"access_token": ACCESS, "refresh_token": refresh, "expiry": expiry})
+    db.commit()
+    return row
+
+
+def _http(status=200, payload=None):
+    return SimpleNamespace(status_code=status, json=lambda: payload if payload is not None else {},
+                           content=b"{}" if status != 204 else b"")
+
+
+def _state_of(url):
+    return parse_qs(urlparse(url).query)["state"][0]
+
+
+# ── 1. OAuth ─────────────────────────────────────────────────
+
+def test_oauth_start_builds_the_url_and_remembers_a_state(google, monkeypatch):
+    r = client.get("/integrations/google/start")
+    assert r.status_code == 200
+    url = urlparse(r.json()["url"])
+    assert f"{url.scheme}://{url.netloc}{url.path}" == "https://accounts.google.com/o/oauth2/v2/auth"
+    q = {k: v[0] for k, v in parse_qs(url.query).items()}
+    assert q["client_id"] == "client-id.apps.example" and q["response_type"] == "code"
+    assert q["redirect_uri"] == "https://founder.example/integrations/google/callback"
+    assert q["scope"] == "https://www.googleapis.com/auth/calendar.events"
+    assert q["access_type"] == "offline" and q["prompt"] == "consent"
+    nonce = q["state"].split(".")[0]
+    db = _db()
+    assert integrations.config(integrations.get_or_create(db, "google_calendar"))["pending_state"] == nonce
+    assert "GOCSPX-client-secret" not in r.text
+    db.close()
+
+    monkeypatch.delenv("GOOGLE_CLIENT_SECRET")
+    assert client.get("/integrations/google/start").status_code == 503
+
+
+def test_callback_with_a_bad_state_stores_nothing(google):
+    good = _state_of(client.get("/integrations/google/start").json()["url"])
+    nonce, stamp, signature = good.split(".")
+    forged = [f"{nonce}.{stamp}.{'0' * 64}", f"other.{stamp}.{signature}", "nonsense", ""]
+    with patch.object(gcal.httpx, "post") as post:
+        for state in forged:
+            r = client.get("/integrations/google/callback", params={"code": "abc", "state": state},
+                           follow_redirects=False)
+            assert r.status_code == 302 and r.headers["location"] == "/app/#settings?error=google_state"
+        denied = client.get("/integrations/google/callback", params={"error": "access_denied", "state": good},
+                            follow_redirects=False)
+        assert denied.headers["location"] == "/app/#settings?error=google_denied"
+        with patch.object(gcal.time, "time", return_value=gcal.time.time() + 601):     # ten minutes have passed
+            late = client.get("/integrations/google/callback", params={"code": "abc", "state": good},
+                              follow_redirects=False)
+        assert late.headers["location"] == "/app/#settings?error=google_state"
+    post.assert_not_called()
+    db = _db()
+    row = integrations.get_or_create(db, "google_calendar")
+    assert row.status == "disconnected" and row.secret_json is None
+    db.close()
+
+
+def test_callback_with_a_good_state_connects_and_never_returns_the_token(google):
+    state = _state_of(client.get("/integrations/google/start").json()["url"])
+    token = _http(200, {"access_token": ACCESS, "refresh_token": REFRESH, "expires_in": 3599})
+    with patch.object(gcal.httpx, "post", return_value=token) as post, \
+            patch.object(gcal.httpx, "get", return_value=_http(200, {"items": []})):
+        r = client.get("/integrations/google/callback", params={"code": "auth-code", "state": state},
+                       follow_redirects=False)
+        again = client.get("/integrations/google/callback", params={"code": "auth-code", "state": state},
+                           follow_redirects=False)
+    assert r.status_code == 302 and r.headers["location"] == "/app/#settings?connected=google"
+    assert again.headers["location"] == "/app/#settings?error=google_state"            # a state works once
+    (url,), kwargs = post.call_args
+    assert url == "https://oauth2.googleapis.com/token" and post.call_count == 1
+    assert kwargs["data"] == {"code": "auth-code", "client_id": "client-id.apps.example",
+                              "client_secret": "GOCSPX-client-secret",
+                              "redirect_uri": "https://founder.example/integrations/google/callback",
+                              "grant_type": "authorization_code"}
+    db = _db()
+    row = integrations.get_or_create(db, "google_calendar")
+    held = json.loads(row.secret_json)
+    assert row.status == "connected" and held["access_token"] == ACCESS and held["refresh_token"] == REFRESH
+    assert row.last_sync_at is not None and "pending_state" not in integrations.config(row)
+    listed = client.get("/integrations")
+    assert ACCESS not in listed.text and REFRESH not in listed.text and "GOCSPX" not in listed.text
+    item = {i["provider"]: i for i in listed.json()}["google_calendar"]
+    assert item["status"] == "connected" and item["actions"] == ["sync", "disconnect"]
+    db.close()
+
+
+def test_a_refused_exchange_redirects_with_an_error(google):
+    state = _state_of(client.get("/integrations/google/start").json()["url"])
+    with patch.object(gcal.httpx, "post", return_value=_http(400, {"error": "invalid_grant"})):
+        r = client.get("/integrations/google/callback", params={"code": "bad", "state": state},
+                       follow_redirects=False)
+    assert r.headers["location"] == "/app/#settings?error=google_exchange"
+    db = _db()
+    assert integrations.get_or_create(db, "google_calendar").secret_json is None
+    db.close()
+
+
+# ── 8. What needs a session ──────────────────────────────────
+
+def test_only_the_callback_is_reachable_without_a_session(google, monkeypatch):
+    import auth
+    assert "/integrations/google/callback" in auth.EXEMPT_EXACT
+    monkeypatch.setenv("FOUNDER_OS_PASSWORD", "a-long-password")
+    assert client.get("/integrations").status_code == 401
+    assert client.get("/integrations/google/start").status_code == 401
+    assert client.get("/calendar/today").status_code == 401
+    r = client.get("/integrations/google/callback", params={"code": "x", "state": "y"}, follow_redirects=False)
+    assert r.status_code == 302 and r.headers["location"] == "/app/#settings?error=google_state"
+
+
+# ── 2. Token refresh ─────────────────────────────────────────
+
+def test_an_expired_token_is_refreshed(google):
+    db = _db()
+    _connect(db, expiry="2020-01-01T00:00:00")
+    fresh = _http(200, {"access_token": "ya29.fresh-token-value-0002", "expires_in": 3599})
+    with patch.object(gcal.httpx, "post", return_value=fresh) as post:
+        assert gcal._token(db) == "ya29.fresh-token-value-0002"
+        assert gcal._token(db) == "ya29.fresh-token-value-0002"                        # still good: no second call
+    assert post.call_count == 1
+    assert post.call_args.kwargs["data"] == {"client_id": "client-id.apps.example",
+                                             "client_secret": "GOCSPX-client-secret",
+                                             "refresh_token": REFRESH, "grant_type": "refresh_token"}
+    held = integrations.secrets(integrations.get_or_create(db, "google_calendar"))
+    assert held["refresh_token"] == REFRESH and held["expiry"] > "2026"
+    db.close()
+
+
+def test_invalid_grant_puts_the_integration_in_error(google):
+    db = _db()
+    _connect(db, expiry="2020-01-01T00:00:00")
+    assert not any(a["rule_id"] == "integration_error" for a in ot.detect_off_track(db)[0])
+    with patch.object(gcal.httpx, "post", return_value=_http(400, {"error": "invalid_grant"})):
+        assert gcal._token(db) is None
+        counts = gcal.sync(db)
+    assert counts["ok"] is False and counts["error"] == "Reconnect Google Calendar"
+    item = {i["provider"]: i for i in client.get("/integrations").json()}["google_calendar"]
+    assert item["status"] == "error" and item["last_error"] == "Reconnect Google Calendar"
+    assert item["actions"] == ["connect", "disconnect"]
+    alert = next(a for a in ot.detect_off_track(db)[0] if a["rule_id"] == "integration_error")
+    assert alert["severity"] == "warn" and "Settings" in alert["message"]
+    assert client.get("/briefing/today").json()["integrations"]["google_calendar"] == "error"
+    db.close()
+
+
+# ── 3. Sync ──────────────────────────────────────────────────
+
+NOW = datetime(2026, 11, 12, 10, 0)                  # Thursday, 12:00 in Lusaka
+
+TIMED = {"id": "evt-timed", "summary": "Further Maths P1 past paper", "status": "confirmed",
+         "start": {"dateTime": "2026-11-13T09:00:00+02:00"}, "end": {"dateTime": "2026-11-13T10:30:00+02:00"},
+         "location": "Library", "htmlLink": "https://calendar.example/evt-timed",
+         "updated": "2026-11-10T08:00:00.000Z", "description": "d" * 1500}
+ALL_DAY = {"id": "evt-day", "summary": "Mock exams", "start": {"date": "2026-11-14"},
+           "end": {"date": "2026-11-15"}, "updated": "2026-11-10T08:00:00.000Z"}
+CANCELLED = {"id": "evt-gone", "summary": "Dropped", "status": "cancelled",
+             "start": {"dateTime": "2026-11-13T12:00:00+02:00"}, "end": {"dateTime": "2026-11-13T13:00:00+02:00"}}
+ZULU = {"id": "evt-zulu", "start": {"dateTime": "2026-11-12T22:30:00Z"}, "end": {"dateTime": "2026-11-12T23:00:00Z"}}
+
+
+def _events():
+    return db_events(_db())
+
+
+def db_events(db):
+    rows = db.query(models.CalendarEvent).order_by(models.CalendarEvent.external_id).all()
+    out = {e.external_id: e for e in rows}
+    return out
+
+
+def test_sync_upserts_converts_and_soft_deletes(google):
+    db = _db()
+    _connect(db)
+    pages = [_http(200, {"items": [TIMED, CANCELLED], "nextPageToken": "page-2"}),
+             _http(200, {"items": [ALL_DAY, ZULU]})]
+    with patch.object(gcal.httpx, "get", side_effect=pages) as get:
+        counts = gcal.sync(db, now=NOW)
+    assert counts == {"ok": True, "created": 3, "updated": 0, "deleted": 0, "unchanged": 0, "error": None}
+    first, second = get.call_args_list
+    assert first.args == (EVENTS_URL,) and first.kwargs["headers"] == {"Authorization": f"Bearer {ACCESS}"}
+    assert first.kwargs["params"] == {"timeMin": "2026-11-11T10:00:00Z", "timeMax": "2026-12-12T10:00:00Z",
+                                      "singleEvents": "true", "orderBy": "startTime", "maxResults": 250}
+    assert second.kwargs["params"]["pageToken"] == "page-2"
+
+    events = db_events(db)
+    assert set(events) == {"evt-timed", "evt-day", "evt-zulu"}                         # the cancelled one is not kept
+    timed = events["evt-timed"]
+    assert timed.title == "Further Maths P1 past paper" and timed.location == "Library"
+    assert timed.start_at == datetime(2026, 11, 13, 7, 0) and timed.end_at == datetime(2026, 11, 13, 8, 30)   # UTC
+    assert timed.start_date == date(2026, 11, 13) and timed.all_day is False and timed.created_by_us is False
+    assert len(timed.description) == 1000 and timed.remote_updated_at == datetime(2026, 11, 10, 8, 0)
+    day = events["evt-day"]
+    assert day.all_day is True and day.start_date == date(2026, 11, 14)
+    assert day.start_at == datetime(2026, 11, 13, 22, 0) and day.end_at == datetime(2026, 11, 14, 22, 0)     # local midnights
+    zulu = events["evt-zulu"]
+    assert zulu.title == "(no title)" and zulu.start_date == date(2026, 11, 13)        # 00:30 local the next day
+
+    emitted = db.query(models.AgentEvent).filter_by(kind="calendar.changed").all()
+    assert len(emitted) == 1 and json.loads(emitted[0].payload_json) == {"created": 3, "updated": 0, "deleted": 0}
+    assert db.query(models.ChangeLog).count() == 0                                     # a cache: nothing is logged
+    row = integrations.get_or_create(db, "google_calendar")
+    assert row.last_sync_at == NOW and row.status == "connected"
+
+    # The same answer again changes nothing and emits nothing.
+    same = [_http(200, {"items": [TIMED, CANCELLED, ALL_DAY, ZULU]})]
+    with patch.object(gcal.httpx, "get", side_effect=same):
+        again = gcal.sync(db, now=NOW + timedelta(minutes=30))
+    assert (again["created"], again["updated"], again["deleted"], again["unchanged"]) == (0, 0, 0, 3)
+    assert db.query(models.AgentEvent).filter_by(kind="calendar.changed").count() == 1
+
+    # One event moved, one vanished.
+    moved = {**TIMED, "start": {"dateTime": "2026-11-13T11:00:00+02:00"}, "end": {"dateTime": "2026-11-13T12:00:00+02:00"}}
+    with patch.object(gcal.httpx, "get", side_effect=[_http(200, {"items": [moved, ZULU]})]):
+        third = gcal.sync(db, now=NOW + timedelta(hours=1))
+    assert (third["created"], third["updated"], third["deleted"], third["unchanged"]) == (0, 1, 1, 1)
+    db.expire_all()
+    events = db_events(db)
+    assert events["evt-timed"].start_at == datetime(2026, 11, 13, 9, 0)
+    assert events["evt-day"].deleted_at == NOW + timedelta(hours=1)                    # kept, marked gone
+    assert db.query(models.AgentEvent).filter_by(kind="calendar.changed").count() == 2
+
+    # It comes back upstream: the row is revived.
+    with patch.object(gcal.httpx, "get", side_effect=[_http(200, {"items": [moved, ALL_DAY, ZULU]})]):
+        fourth = gcal.sync(db, now=NOW + timedelta(hours=2))
+    assert fourth["updated"] == 1
+    db.expire_all()
+    assert db_events(db)["evt-day"].deleted_at is None
+    db.close()
+
+
+def test_sync_reports_failure_without_raising(google):
+    db = _db()
+    assert gcal.sync(db)["error"] == "Calendar not connected"
+    _connect(db)
+    boom = RuntimeError(f"connect failed with Bearer {ACCESS}")
+    with patch.object(gcal.httpx, "get", side_effect=boom):
+        counts = gcal.sync(db, now=NOW)
+    assert counts["ok"] is False and ACCESS not in counts["error"]
+    row = integrations.get_or_create(db, "google_calendar")
+    assert row.status == "error" and ACCESS not in (row.last_error or "")
+    with patch.object(gcal.httpx, "get", return_value=_http(401, {"error": {"message": "Invalid Credentials"}})):
+        assert gcal.sync(db, now=NOW)["error"] == "Reconnect Google Calendar"
+    db.close()
+
+
+def test_calendar_sync_agent_runs_only_when_connected(google):
+    db = _db()
+    spec = calendar_sync.SPEC
+    assert spec.schedule.interval_minutes == 30 and spec.permissions.max_llm_calls == 0
+    assert spec.permissions.tables_write == ["calendar_events", "integrations"]
+    assert spec.permissions.may_emit == ["calendar.changed"]
+    assert runner.run_agent(spec, "schedule", now=NOW)["summary"] == "calendar not connected"
+    _connect(db)
+    with patch.object(gcal.httpx, "get", side_effect=[_http(200, {"items": [TIMED]})]):
+        out = runner.run_agent(spec, "schedule", now=NOW)
+    assert out["status"] == "completed" and out["summary"] == "1 new, 0 changed, 0 removed"
+    with patch.object(gcal.httpx, "get", side_effect=[_http(200, {"items": [TIMED]})]):
+        assert runner.run_agent(spec, "schedule", now=NOW + timedelta(minutes=30))["status"] == "skipped"
+    db.close()
+
+
+# ── 4. Creating an event, and undoing it ─────────────────────
+
+class _Clock(datetime):
+    """datetime with a fixed utcnow(): Thursday 12 November 2026, 10:00 in Lusaka."""
+
+    @classmethod
+    def utcnow(cls):
+        return cls(2026, 11, 12, 8, 0)
+
+
+def test_calendar_add_event_creates_remotely_and_undo_deletes_it(google):
+    db = _db()
+    _connect(db)
+    created = _http(200, {"id": "evt-new", "htmlLink": "https://calendar.example/evt-new", "status": "confirmed"})
+    with patch.object(ot, "datetime", _Clock), patch.object(gcal.httpx, "post", return_value=created) as post:
+        result, summary = ot.run_tool("calendar_add_event", {"title": "Clinic demo", "when": "Friday 14:00",
+                                                             "location": "Kabulonga"}, db)
+    assert summary == "'Clinic demo' added to the calendar for tomorrow 14:00"
+    (url,), kwargs = post.call_args
+    assert url == EVENTS_URL and kwargs["headers"] == {"Authorization": f"Bearer {ACCESS}"}
+    assert kwargs["json"] == {"summary": "Clinic demo", "location": "Kabulonga",
+                              "start": {"dateTime": "2026-11-13T14:00:00+02:00", "timeZone": "Africa/Lusaka"},
+                              "end": {"dateTime": "2026-11-13T15:00:00+02:00", "timeZone": "Africa/Lusaka"}}
+    event = db.query(models.CalendarEvent).one()
+    assert event.external_id == "evt-new" and event.created_by_us is True
+    assert event.start_at == datetime(2026, 11, 13, 12, 0) and event.start_date == date(2026, 11, 13)
+    change = result["change"]
+    assert change["table"] == "calendar_events" and change["action"] == "create"
+    assert change["summary"] == "Calendar: Clinic demo 14:00"
+
+    with patch.object(gcal.httpx, "delete", return_value=_http(204)) as delete:
+        change_log.undo_change(db, change["id"])
+    assert delete.call_args.args == (f"{EVENTS_URL}/evt-new",)
+    assert db.query(models.CalendarEvent).count() == 0
+    db.close()
+
+
+def test_undo_still_removes_the_row_when_google_refuses(google):
+    db = _db()
+    _connect(db)
+    created = _http(200, {"id": "evt-two"})
+    with patch.object(ot, "datetime", _Clock), patch.object(gcal.httpx, "post", return_value=created):
+        result, _ = ot.run_tool("calendar_add_event", {"title": "Call Wamu", "when": "tomorrow at 9am",
+                                                       "duration_minutes": 30}, db)
+    assert result["when"] == "tomorrow 09:00" and result["ends"] == "09:30"
+    with patch.object(gcal.httpx, "delete", side_effect=RuntimeError("network down")):
+        change_log.undo_change(db, result["change"]["id"])
+    assert db.query(models.CalendarEvent).count() == 0
+    db.close()
+
+
+def test_calendar_add_event_needs_a_time_and_a_connection(google):
+    db = _db()
+    with patch.object(ot, "datetime", _Clock), patch.object(gcal.httpx, "post") as post:
+        unconnected, summary = ot.run_tool("calendar_add_event", {"title": "Clinic demo", "when": "Friday 14:00"}, db)
+        assert unconnected == {"error": "Calendar not connected"} and summary == "Calendar not connected"
+        _connect(db)
+        no_time, summary = ot.run_tool("calendar_add_event", {"title": "Clinic demo", "when": "Friday"}, db)
+        assert no_time == {"error": "need a time"} and summary == "need a time"
+        unreadable, _ = ot.run_tool("calendar_add_event", {"title": "Clinic demo", "when": "sometime soon"}, db)
+        untitled, _ = ot.run_tool("calendar_add_event", {"title": " ", "when": "Friday 14:00"}, db)
+        assert "error" in unreadable and "error" in untitled
+    post.assert_not_called()
+    with patch.object(ot, "datetime", _Clock), \
+            patch.object(gcal.httpx, "post", return_value=_http(403, {"error": {"message": "Forbidden"}})):
+        refused, _ = ot.run_tool("calendar_add_event", {"title": "Clinic demo", "when": "Friday 14:00"}, db)
+    assert refused == {"error": "Forbidden"}
+    assert db.query(models.CalendarEvent).count() == 0 and db.query(models.ChangeLog).count() == 0
+    db.close()
+
+
+def test_calendar_today_tool_and_endpoints(google):
+    db = _db()
+    off, summary = ot.run_tool("calendar_today", {}, db)
+    assert off == {"connected": False, "message": "Calendar not connected"} and summary == "Calendar not connected"
+    assert client.get("/calendar/today").json() == {"connected": False, "events": []}
+    assert client.post("/calendar/events", json={"title": "x", "start": "2030-01-01T10:00"}).status_code == 503
+
+    _connect(db)
+    with patch.object(gcal.httpx, "get", side_effect=[_http(200, {"items": [TIMED, ALL_DAY]})]):
+        gcal.sync(db, now=NOW)
+    with patch.object(ot, "datetime", _Clock):
+        tomorrow, summary = ot.run_tool("calendar_today", {"date": "tomorrow"}, db)
+        nothing, quiet = ot.run_tool("calendar_today", {}, db)
+    assert summary == "1 event(s) 2026-11-13" and quiet == "nothing in the calendar today"
+    assert tomorrow["events"] == [{"title": "Further Maths P1 past paper", "starts": "09:00", "ends": "10:30",
+                                   "location": "Library"}]
+    assert nothing["events"] == []
+
+    day = client.get("/calendar/today", params={"date": "2026-11-14"}).json()
+    assert day["connected"] is True and [e["start_local"] for e in day["events"]] == ["all day"]
+    week = client.get("/calendar/week", params={"from": "2026-11-12"}).json()["days"]
+    assert len(week) == 7 and [len(d["events"]) for d in week[:3]] == [0, 1, 1]
+    assert client.get("/calendar/today", params={"date": "12 Nov"}).status_code == 422
+
+    made = _http(200, {"id": "evt-ui"})
+    with patch.object(gcal.httpx, "post", return_value=made) as post:
+        r = client.post("/calendar/events", json={"title": "Site visit", "start": "2030-03-01T08:30",
+                                                  "duration_minutes": 45})
+        assert client.post("/calendar/events", json={"title": "Site visit", "start": "someday"}).status_code == 422
+    assert r.status_code == 200 and r.json()["start_local"] == "08:30" and r.json()["end_local"] == "09:15"
+    assert r.json()["change"]["table"] == "calendar_events"
+    assert post.call_args.kwargs["json"]["start"]["dateTime"] == "2030-03-01T08:30:00+02:00"
+    db.close()
+
+
+def test_disconnect_revokes_forgets_and_retires_the_cache(google):
+    db = _db()
+    _connect(db)
+    with patch.object(gcal.httpx, "get", side_effect=[_http(200, {"items": [TIMED]})]):
+        gcal.sync(db, now=NOW)
+    with patch.object(gcal.httpx, "post", return_value=_http(200)) as post:
+        r = client.post("/integrations/google/disconnect")
+    assert post.call_args.args == ("https://oauth2.googleapis.com/revoke",)
+    assert post.call_args.kwargs["params"] == {"token": REFRESH}
+    assert r.json()["status"] == "disconnected" and r.json()["actions"] == ["connect"]
+    db.expire_all()
+    assert integrations.get_or_create(db, "google_calendar").secret_json is None
+    assert db.query(models.CalendarEvent).one().deleted_at is not None
+    assert gcal.connected(db) is False and client.post("/integrations/google/sync").json()["ok"] is False
+    db.close()
+
+
+# ── 9. Briefing ──────────────────────────────────────────────
+
+def _event(db, title, start_local, minutes=60, **kw):
+    start = schedule.to_utc(start_local.replace(tzinfo=schedule.tz()))
+    row = models.CalendarEvent(provider="google", external_id=f"evt-{title}", title=title, start_at=start,
+                               end_at=start + timedelta(minutes=minutes), start_date=start_local.date(),
+                               status="confirmed", **kw)
+    db.add(row)
+    db.commit()
+    return row
+
+
+def test_briefing_lists_timed_events_between_fifty_and_seventy(google):
+    db = _db()
+    clock = datetime(2026, 11, 12, 8, 0)                                               # 08:00 local
+    assert briefing.build_briefing(db, now=clock, with_summary=False)["calendar"] == {
+        "connected": False, "events_today": [], "all_day": []}
+    _connect(db)
+    _event(db, "Standup", datetime(2026, 11, 12, 7, 30))                               # under way until 08:30
+    _event(db, "Past paper", datetime(2026, 11, 12, 9, 0), location="Library")
+    _event(db, "Evening call", datetime(2026, 11, 12, 20, 0))
+    _event(db, "Early run", datetime(2026, 11, 12, 5, 0))                              # already over
+    _event(db, "Tomorrow thing", datetime(2026, 11, 13, 9, 0))
+    _event(db, "Mock exams", datetime(2026, 11, 12, 0, 0), minutes=1440, all_day=True)
+    gone = _event(db, "Cancelled", datetime(2026, 11, 12, 10, 0))
+    gone.deleted_at = datetime.utcnow()
+    db.commit()
+
+    b = briefing.build_briefing(db, now=clock, with_summary=False)
+    events = {i["title"]: i for i in b["items"] if i["category"] == "event"}
+    assert set(events) == {"Standup", "Past paper", "Evening call"}
+    assert events["Standup"]["score"] == 70 and events["Past paper"]["score"] == 68 and events["Evening call"]["score"] == 50
+    assert events["Past paper"]["due_label"] == "09:00" and events["Past paper"]["reason"] == "Library"
+    assert events["Evening call"]["reason"] == "Calendar" and events["Past paper"]["suggested_action"] == "Be there"
+    assert events["Past paper"]["target_type"] == "calendar_event" and events["Past paper"]["completable"] is False
+
+    cal = b["calendar"]
+    assert cal["connected"] is True
+    assert [e["title"] for e in cal["events_today"]] == ["Early run", "Standup", "Past paper", "Evening call"]
+    assert [e["title"] for e in cal["all_day"]] == ["Mock exams"] and b["today_events"] == ["Mock exams"]
+    assert b["integrations"] == {"email": "disconnected", "telegram": False, "google_calendar": "connected"}
+
+    text = notify.render_briefing(b, suppressed_overnight=[])
+    assert "TODAY\n" in text and "• 09:00 Past paper (calendar)" in text and "• 20:00 Evening call (calendar)" in text
+    db.close()

@@ -180,6 +180,8 @@ def _run_every_tool(db) -> dict:
             ("mark_posted", {"idea": "bakery site"}),
             ("set_reminder", {"text": "call the clinic", "when": "in 2 hours"}),
             ("notification_settings", {"morning_time": "05:45"}),
+            ("calendar_today", {}),
+            ("calendar_add_event", {"title": "Clinic demo", "when": "friday 14:00"}),
         ]
         for name, args in calls:
             result, _summary = ot.run_tool(name, args, db)

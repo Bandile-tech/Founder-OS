@@ -485,6 +485,25 @@ stored error and log line goes through `integrations.redact()`.
 | `POST /integrations/telegram/set-webhook` | | `{ok, description, url}`; 503 naming the missing env var (`TELEGRAM_BOT_TOKEN`, `FOUNDER_OS_API_URL`, `TELEGRAM_WEBHOOK_SECRET`) |
 | `POST /integrations/telegram/unpair` | | the telegram integration |
 
+### Google Calendar (Phase 6C — `backend/integrations_google.py`)
+
+An event: `{id, title, start_local ("HH:MM" | "all day"), end_local, all_day, date, start_at,
+end_at (naive UTC), location, html_link, created_by_us}`.
+
+| Method & path | Body / query | Returns |
+|---|---|---|
+| `GET /integrations/google/start` | | `{url}` — send the browser there; 503 until `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and `FOUNDER_OS_API_URL` are set |
+| `GET /integrations/google/callback` | `code`, `state` (from Google; no session) | 302 to `/app/#settings?connected=google` or `/app/#settings?error=google_denied|google_state|google_exchange` |
+| `POST /integrations/google/sync` | | `{ok, created, updated, deleted, unchanged, error}` |
+| `POST /integrations/google/disconnect` | | the google_calendar integration |
+| `GET /calendar/today` | `date?` (YYYY-MM-DD) | `{connected, events: [event]}` |
+| `GET /calendar/week` | `from?` (YYYY-MM-DD) | `{connected, days: [{date, events}]}` — seven days |
+| `POST /calendar/events` | `{title, start, duration_minutes?, location?, notes?}` | event + `change`; 422 without a date and time; 503 when not connected; 502 when Google refuses |
+
+`GET /briefing/today` now carries `calendar: {connected, events_today, all_day}`,
+`today_events` (all-day titles) and `integrations: {email, telegram, google_calendar}`; timed
+events today are items of category `event` (target type `calendar_event`).
+
 ### Notifications (Phase 6D — `backend/notify.py`, `backend/telegram_inbound.py`)
 
 A notification: `{id, created_at, channel, kind (briefing|evening|alert|deadline|reminder|

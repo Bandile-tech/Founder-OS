@@ -52,6 +52,8 @@ Environment (`backend/.env` locally, Render env vars in production):
 | `TELEGRAM_BOT_TOKEN` | unset | The bot's token from @BotFather. Unset: notifications are recorded as not sent |
 | `TELEGRAM_BOT_USERNAME` | unset | The bot's username, for the pairing link in Settings |
 | `TELEGRAM_WEBHOOK_SECRET` | unset | Random string Telegram must send back with each update |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | unset | The Google OAuth client for the calendar. Unset: the calendar shows "not connected" |
+| `GOOGLE_CALENDAR_ID` | `primary` | Which calendar to read and write |
 
 Tests (OpenAI is always mocked; the suite must pass with no key set):
 ```

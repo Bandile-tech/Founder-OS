@@ -21,8 +21,15 @@ Response shape (the target home screen is built against this):
   "business_detail": {"revenue_pct": int|null, "mrr_usd": float, "outstanding_usd": float,
                       "overdue_count": int},
   "counts": {...}, "exams": [...], "non_negotiables": [...], "weakness_notes": [...],
-  "delivery": {"last_sent_at": datetime|null, "channel": "telegram", "paired": bool}
+  "delivery": {"last_sent_at": datetime|null, "channel": "telegram", "paired": bool},
+  "calendar": {"connected": bool, "events_today": [{id, title, start_local, end_local,
+               location, html_link, created_by_us}], "all_day": [{id, title, html_link}]},
+  "today_events": [titles of all-day events],
+  "integrations": {"email": status, "telegram": bool, "google_calendar": status}
 }
+
+Phase 6C adds the item category ``event`` (target type ``calendar_event``): a timed event
+today that has not ended, labelled ``HH:MM``, scored 50–70 (sooner is higher).
 
 Phase 5 adds the item categories ``payment``, ``deal``, ``client``, ``project`` (target
 types of the same names), ``outreach`` (target types ``outreach_message`` and ``lead``) and
@@ -555,6 +562,48 @@ def _summary(db: Session, core: dict, refresh: bool) -> tuple[str | None, str | 
     return text, greeting_line, False
 
 
+def _calendar(db: Session, clock: datetime) -> tuple[list, dict]:
+    """Today's calendar: timed events still to come (or under way) as items, and the
+    ``calendar`` block for the home screen. ``clock`` is the local wall clock."""
+    block = {"connected": False, "events_today": [], "all_day": []}
+    try:
+        import integrations_google
+        from agents import schedule
+        block["connected"] = integrations_google.connected(db)
+        events = integrations_google.today(db, clock.date())
+    except Exception:  # noqa: BLE001 — the briefing never fails over the calendar
+        return [], block
+    items = []
+    for event in events:
+        if event["all_day"]:
+            block["all_day"].append({"id": event["id"], "title": event["title"], "html_link": event["html_link"]})
+            continue
+        block["events_today"].append({k: event[k] for k in ("id", "title", "start_local", "end_local", "location",
+                                                            "html_link", "created_by_us")})
+        start = schedule.to_local(event["start_at"]).replace(tzinfo=None)
+        end = schedule.to_local(event["end_at"]).replace(tzinfo=None) if event["end_at"] else start
+        if end <= clock:
+            continue                                  # already over
+        hours_until = (start - clock).total_seconds() / 3600
+        items.append(_item(title=event["title"], category="event", due=clock.date(), today=clock.date(),
+                           due_label=event["start_local"], reason=event["location"] or "Calendar",
+                           action="Be there", target_type="calendar_event", target_id=event["id"],
+                           score=min(70.0, 50 + max(0.0, 20 - hours_until * 2))))
+    return items, block
+
+
+def _integration_statuses(db: Session) -> dict:
+    """Connection states for the home screen's warnings."""
+    try:
+        import integrations
+        import integrations_telegram
+        by = integrations.statuses(db)
+        return {"email": by.get("email"), "telegram": integrations_telegram.is_paired(db),
+                "google_calendar": by.get("google_calendar")}
+    except Exception:  # noqa: BLE001
+        return {"email": None, "telegram": False, "google_calendar": None}
+
+
 def _delivery(db: Session, today: date) -> dict:
     """When today's briefing went to Telegram, for "Sent to Telegram at 06:00"."""
     try:
@@ -567,6 +616,13 @@ def _delivery(db: Session, today: date) -> dict:
 # ── Assemble ─────────────────────────────────────────────────
 
 def build_briefing(db: Session, *, refresh: bool = False, now: datetime | None = None, with_summary: bool = True) -> dict:
+    # The calendar is timed, so it needs the user's wall clock: the caller's ``now`` when
+    # one is given, else the real time in FOUNDER_OS_TZ (the server's own clock may be UTC).
+    if now is None:
+        from agents import schedule
+        clock = schedule.to_local(datetime.utcnow()).replace(tzinfo=None)
+    else:
+        clock = now
     now = now or datetime.now()
     today = now.date()
 
@@ -582,10 +638,11 @@ def build_briefing(db: Session, *, refresh: bool = False, now: datetime | None =
     application_items, applications_at_risk = _application_items(db, today)
     content_items, brand_pct = _content_items(db, today)
     alerts, alert_items = _alert_items(db, today)
+    event_items, calendar = _calendar(db, clock)
 
     items = (task_items + nn_items + exam_items + syl_items + target_items + alert_items
              + crm_items + outreach_items + portfolio_items + opportunity_items + application_items
-             + content_items)
+             + content_items + event_items)
     items.sort(key=lambda i: i["score"], reverse=True)
 
     counts["payments_overdue"] = business_detail["overdue_count"]
@@ -618,6 +675,9 @@ def build_briefing(db: Session, *, refresh: bool = False, now: datetime | None =
         "exams": exams[:6],
         "non_negotiables": nn_rows,
         "weakness_notes": weakness_notes,
+        "calendar": calendar,
+        "today_events": [e["title"] for e in calendar["all_day"]],
+        "integrations": _integration_statuses(db),
     }
 
     summary, greeting_line, cached = (None, None, False)
