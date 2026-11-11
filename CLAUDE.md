@@ -48,6 +48,10 @@ Environment (`backend/.env` locally, Render env vars in production):
 | `JOBS_TICK_BUDGET` | `80` | Seconds a tick may spend starting agents; the rest run on the next tick |
 | `JOBS_IN_PROCESS` | `1` | `0` turns off the in-process 15-minute tick (the external tick still works) |
 | `YOUTUBE_API_KEY` | unset | YouTube Data API v3 key for the Brand tab. Unset: the YouTube account shows an error and nothing is estimated |
+| `FOUNDER_OS_API_URL` | unset | The backend's public base URL (no trailing slash). Needed for the Telegram webhook and the Google sign-in redirect |
+| `TELEGRAM_BOT_TOKEN` | unset | The bot's token from @BotFather. Unset: notifications are recorded as not sent |
+| `TELEGRAM_BOT_USERNAME` | unset | The bot's username, for the pairing link in Settings |
+| `TELEGRAM_WEBHOOK_SECRET` | unset | Random string Telegram must send back with each update |
 
 Tests (OpenAI is always mocked; the suite must pass with no key set):
 ```

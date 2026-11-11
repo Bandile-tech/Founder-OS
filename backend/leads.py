@@ -144,7 +144,7 @@ def serialize_message(db: Session, m: models.OutreachMessage, *, lead_name: bool
         "subject": m.subject, "body": m.body, "status": m.status, "version": m.version,
         "supersedes_id": m.supersedes_id, "brief": m.brief,
         "pending_action_id": m.pending_action_id, "approved_at": m.approved_at,
-        "sent_at": m.sent_at, "external_id": m.external_id, "error": m.error,
+        "sent_at": m.sent_at, "replied_at": m.replied_at, "external_id": m.external_id, "error": m.error,
         "created_by": m.created_by, "created_at": m.created_at, "updated_at": m.updated_at,
     }
     if lead_name:

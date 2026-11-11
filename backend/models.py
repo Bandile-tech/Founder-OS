@@ -860,6 +860,7 @@ class OutreachMessage(Base):
     created_by        = Column(String, nullable=False, default="assistant")
     created_at        = Column(DateTime, default=datetime.utcnow)
     updated_at        = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    replied_at        = Column(DateTime, nullable=True)      # a reply to this message arrived by email
 
 
 # ── PHASE 5C: CRM ────────────────────────────────────────────
@@ -1240,3 +1241,70 @@ class BrandInsight(Base):
     text       = Column(Text, nullable=False)
     model      = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+# ── PHASE 6C: INTEGRATIONS ───────────────────────────────────
+
+class Integration(Base):
+    """One row per external provider. ``secret_json`` holds tokens the provider issued at
+    runtime; it is never serialised by any endpoint."""
+    __tablename__ = "integrations"
+
+    id            = Column(Integer, primary_key=True, index=True)
+    provider      = Column(String, nullable=False, unique=True)   # google_calendar|email|telegram|youtube
+    status        = Column(String, nullable=False, default="disconnected")   # disconnected|connected|error|pending
+    account_label = Column(String, nullable=True)
+    config_json   = Column(Text, nullable=True)            # non-secret settings
+    secret_json   = Column(Text, nullable=True)            # tokens — never returned
+    scopes        = Column(String, nullable=True)
+    connected_at  = Column(DateTime, nullable=True)
+    last_sync_at  = Column(DateTime, nullable=True)
+    last_error    = Column(Text, nullable=True)
+    created_at    = Column(DateTime, default=datetime.utcnow)
+    updated_at    = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class CalendarEvent(Base):
+    """A cached calendar event. Times are naive UTC; ``start_date`` is the local date."""
+    __tablename__ = "calendar_events"
+    __table_args__ = (Index("ux_calendar_events_provider_external", "provider", "external_id", unique=True),)
+
+    id                = Column(Integer, primary_key=True, index=True)
+    provider          = Column(String, default="google")
+    calendar_id       = Column(String, nullable=True)
+    external_id       = Column(String, nullable=False)
+    title             = Column(String, nullable=True)
+    description       = Column(Text, nullable=True)        # at most 1,000 characters
+    location          = Column(String, nullable=True)
+    start_at          = Column(DateTime, nullable=True)
+    end_at            = Column(DateTime, nullable=True)
+    all_day           = Column(Boolean, default=False)
+    start_date        = Column(Date, nullable=True, index=True)
+    status            = Column(String, default="confirmed")
+    html_link         = Column(String, nullable=True)
+    created_by_us     = Column(Boolean, default=False)     # events Founder OS created
+    remote_updated_at = Column(DateTime, nullable=True)
+    synced_at         = Column(DateTime, nullable=True)
+    deleted_at        = Column(DateTime, nullable=True)    # soft delete when gone upstream
+
+
+class EmailMessage(Base):
+    """An email from or to a known lead, contact or client: headers and a snippet of at
+    most 500 characters. Bodies are never stored; mail from unknown senders is never stored."""
+    __tablename__ = "email_messages"
+
+    id                  = Column(Integer, primary_key=True, index=True)
+    message_id          = Column(String, nullable=False, unique=True)
+    thread_key          = Column(String, nullable=True)
+    direction           = Column(String, nullable=False)   # in | out
+    from_addr           = Column(String, nullable=True)
+    to_addr             = Column(String, nullable=True)
+    subject             = Column(String, nullable=True)
+    snippet             = Column(Text, nullable=True)
+    received_at         = Column(DateTime, nullable=True, index=True)
+    lead_id             = Column(Integer, nullable=True)
+    client_id           = Column(Integer, nullable=True)
+    contact_id          = Column(Integer, nullable=True)
+    outreach_message_id = Column(Integer, nullable=True)
+    processed_at        = Column(DateTime, nullable=True)
+    created_at          = Column(DateTime, default=datetime.utcnow)

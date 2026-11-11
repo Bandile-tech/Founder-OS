@@ -771,6 +771,30 @@ Decisions where the spec was silent:
   endpoint exists and is change-logged).
 - Only LinkedIn is offered in the import select, because it is the only importer built.
 
+### S15 — Phase 6C.1: integrations table, redaction, Telegram pairing
+
+Shipped: `integrations`, `calendar_events`, `email_messages` and `outreach_messages.replied_at`
+(migration `m021`, RLS on the three new tables); `backend/integrations.py` (`get_or_create`,
+`redact`, `set_error`, `serialize`, `listing`, `GET /integrations`); `backend/integrations_telegram.py`
+(`pair_code`, `is_paired`, `chat_id`, `pair`, `unpair`, `POST /integrations/telegram/set-webhook`,
+`POST /integrations/telegram/unpair`); 22 tests in `tests/test_phase6c_integrations.py`.
+
+Decisions where the spec was silent:
+- `redact()` also covers `TELEGRAM_WEBHOOK_SECRET`, `OPENAI_API_KEY`, `FOUNDER_OS_SECRET` and
+  `FOUNDER_OS_PASSWORD`, beyond the five the spec lists. Values shorter than six characters are
+  not treated as secrets (they would blank ordinary words).
+- `set-webhook` answers 503 when `TELEGRAM_WEBHOOK_SECRET` is unset as well, not only the bot
+  token and the API URL: a webhook registered without a secret would accept anyone's updates.
+- The paired chat id lives in the telegram row's `config_json` (it is not a credential).
+- `GET /integrations` computes each status from the row and the environment: Telegram and email
+  show "pending" when their env vars are set but nothing is paired or synced yet; YouTube reads
+  the Brand tab's `social_accounts` row.
+- The pairing code is derived from the server secret. With neither `FOUNDER_OS_SECRET` nor
+  `FOUNDER_OS_PASSWORD` set that secret is a public constant, so S17 must refuse pairing in that
+  case and limit wrong attempts per chat.
+
+VERIFY: Telegram `setWebhook` parameter names (`url`, `secret_token`, `allowed_updates`).
+
 ## Environment variables added so far
 
 | Var | Default | Session | Purpose |
@@ -780,6 +804,10 @@ Decisions where the spec was silent:
 | `FOUNDER_OS_TZ` | `Africa/Lusaka` | S13 | Zone for agent schedules and notification times |
 | `JOBS_TICK_BUDGET` | `80` | S13 | Seconds a tick may spend starting agents |
 | `JOBS_IN_PROCESS` | `1` | S13 (used from S14) | `0` turns off the in-process 15-minute tick |
+| `FOUNDER_OS_API_URL` | unset | S15 | The backend's public base URL (no trailing slash); Telegram webhook and Google redirect |
+| `TELEGRAM_BOT_TOKEN` | unset | S15 | Bot token from @BotFather |
+| `TELEGRAM_BOT_USERNAME` | unset | S15 | Bot username, for the pairing link in Settings |
+| `TELEGRAM_WEBHOOK_SECRET` | unset | S15 | Random string Telegram sends back with every update |
 | `YOUTUBE_API_KEY` | unset | S9 | YouTube Data API v3 key for the Brand tab |
 
 ## VERIFY items (from the specs)
