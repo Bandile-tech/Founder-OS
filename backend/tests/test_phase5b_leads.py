@@ -7,6 +7,10 @@ Phase 5B — prospecting and outreach acceptance tests.
   4. drafts and revisions; nothing is ever sent without a later yes or a tap
   5. the Approve & send tap on a WhatsApp draft, its follow-up task and undo
   6. email fails cleanly until the email integration is configured
+  7. log_lead_reply: inbound row, lead replied, follow-up done
+  8. convert_lead: client linked both ways, follow-ups closed, idempotent
+  9. briefing items for waiting drafts and quiet leads; the outreach_stalled alert
+ 10. GET /outreach/stats reply and conversion rates
 
 No network and no OpenAI.
 """
@@ -505,3 +509,187 @@ def test_set_follow_up_moves_the_open_task_instead_of_adding_one():
     bad, _ = ot.run_tool("set_follow_up", {"lead": "Mercy", "date": "whenever"}, db)
     assert "error" in bad
     db.close()
+
+
+# ════════════════════════════════════════════════════════════════
+# Replies, conversion, stats, briefing, alert
+# ════════════════════════════════════════════════════════════════
+
+from datetime import datetime
+
+
+def _sent(db, lead, channel="whatsapp", days_ago=0):
+    """A message that was approved and sent ``days_ago`` days ago, with its follow-up."""
+    mid = _draft(db, lead, channel=channel)["id"]
+    message = db.query(models.OutreachMessage).filter(models.OutreachMessage.id == mid).one()
+    outreach.execute_send(db, message)
+    when = datetime.utcnow() - timedelta(days=days_ago)
+    message.sent_at = when
+    lead.last_contact_at = when
+    db.commit()
+    return message
+
+
+# ── 7. replies ────────────────────────────────────────────────
+
+def test_log_lead_reply_records_the_reply_and_closes_the_follow_up():
+    db = _db()
+    lead = _lead(db)
+    _sent(db, lead)
+    assert db.query(models.Todo).filter(models.Todo.done == False).count() == 1     # noqa: E712
+
+    result, summary = ot.run_tool("log_lead_reply", {"lead": "Mercy", "summary": "Wants a demo on Friday"}, db)
+    assert result["status"] == "replied" and summary == "Mercy Banda replied — follow-up closed"
+    inbound = db.query(models.OutreachMessage).filter(models.OutreachMessage.direction == "in").one()
+    assert (inbound.status, inbound.channel, inbound.body) == ("received", "whatsapp", "Wants a demo on Friday")
+    db.refresh(lead)
+    assert lead.status == "replied" and lead.next_follow_up_at is None
+    assert f"- {TODAY.isoformat()}: replied — Wants a demo on Friday" in lead.notes
+    todo = db.query(models.Todo).one()
+    assert todo.done is True and todo.completed_at == TODAY
+    assert db.query(models.Communication).filter(models.Communication.direction == "in").count() == 1
+    db.close()
+
+    other = client.post("/leads", json={"name": "Ruth Zulu", "email": "ruth@example.com"}).json()
+    tapped = client.post(f"/leads/{other['id']}/replied")                      # the one-tap path, no summary
+    assert tapped.status_code == 200 and tapped.json()["status"] == "replied"
+    assert tapped.json()["change"]["table"] == "leads"
+    assert client.post("/leads/9999/replied").status_code == 404
+
+
+# ── 8. conversion ─────────────────────────────────────────────
+
+def test_convert_lead_links_the_client_both_ways_and_is_idempotent():
+    db = _db()
+    lead = _lead(db, email="mercy@sunrise.example", role="Owner")
+    _sent(db, lead)
+    lead_id = lead.id
+
+    result, summary = ot.run_tool("convert_lead", {"lead": "Mercy Banda"}, db)
+    assert summary == "Mercy Banda is now a client" and result["already_converted"] is False
+    client_row = db.query(models.Client).one()
+    assert (client_row.name, client_row.company, client_row.status) == ("Mercy Banda", "Sunrise Pharmacy", "active")
+    assert client_row.lead_id == lead_id and client_row.service == "intro" and client_row.currency == "ZMW"
+    db.refresh(lead)
+    assert lead.client_id == client_row.id and lead.status == "converted"
+    assert db.query(models.Todo).filter(models.Todo.done == False).count() == 0     # noqa: E712
+    contact = db.query(models.Contact).one()
+    assert (contact.client_id, contact.name, contact.role, contact.is_primary) == (client_row.id, "Mercy Banda", "Owner", True)
+    assert contact.email == "mercy@sunrise.example" and contact.whatsapp == "+260977123456"
+    assert {c["table"] for c in result["changes"]} == {"clients", "leads", "todos", "contacts"}
+    db.close()
+
+    again = client.post(f"/leads/{lead_id}/convert").json()
+    assert again["already_converted"] is True and again["client"]["id"] == client_row.id
+    assert again["changes"] == []
+    db = _db()
+    assert db.query(models.Client).count() == 1 and db.query(models.Contact).count() == 1
+    db.close()
+
+
+# ── 9. briefing and the alert ─────────────────────────────────
+
+def test_briefing_shows_waiting_drafts_and_quiet_leads():
+    import briefing
+    db = _db()
+    waiting = _lead(db)
+    draft_id = _draft(db, waiting)["id"]
+    quiet = _lead(db, "Ruth Zulu", whatsapp="+260 955 111 222")
+    _sent(db, quiet, days_ago=10)
+    for todo in db.query(models.Todo).all():                 # the follow-up was done, and still no reply
+        todo.done = True
+    chased = _lead(db, "Peter Lungu", whatsapp="+260 966 333 444")
+    _sent(db, chased, days_ago=10)                           # still has its open follow-up
+    recent = _lead(db, "Chanda Mwila", whatsapp="+260 977 555 010")
+    _sent(db, recent, days_ago=3)
+    for todo in db.query(models.Todo).filter(models.Todo.lead_id == recent.id).all():
+        todo.done = True
+    db.commit()
+
+    b = briefing.build_briefing(_db(), with_summary=False)
+    by_id = {i["id"]: i for i in b["items"]}
+    draft_item = by_id[f"outreach:outreach_message:{draft_id}"]
+    assert draft_item["score"] == 38 and draft_item["reason"] == "Draft waiting for your approval"
+    assert draft_item["suggested_action"] == "Approve & send or dismiss" and draft_item["completable"] is False
+    quiet_item = by_id[f"outreach:lead:{quiet.id}"]
+    assert quiet_item["score"] == 28 and quiet_item["reason"] == "No reply in 10 days"
+    assert quiet_item["suggested_action"] == "Follow up or mark lost"
+    assert f"outreach:lead:{chased.id}" not in by_id         # an open follow-up already covers it
+    assert f"outreach:lead:{recent.id}" not in by_id         # only three days
+    assert b["counts"]["drafts_waiting"] == 1
+
+    client.post(f"/outreach/{draft_id}/cancel")
+    after = briefing.build_briefing(_db(), with_summary=False)
+    assert after["counts"]["drafts_waiting"] == 0
+    assert f"outreach:outreach_message:{draft_id}" not in {i["id"] for i in after["items"]}
+    db.close()
+
+
+def test_outreach_stalled_fires_with_three_qualified_leads_and_no_sends():
+    db = _db()
+
+    def fired():
+        alerts, _ = ot.detect_off_track(db)
+        return any(a["rule_id"] == "outreach_stalled" for a in alerts)
+
+    made = [_lead(db, name, whatsapp=f"+260 977 000 00{i}") for i, name in enumerate(["A One", "B Two", "C Three"])]
+    assert fired() is False                                   # leads exist but none is qualified
+    for lead in made[:2]:
+        lead.status = "qualified"
+    db.commit()
+    assert fired() is False                                   # two qualified: under the minimum
+    made[2].status = "qualified"
+    db.commit()
+    assert fired() is True
+
+    old = _sent(db, _lead(db, "D Four", whatsapp="+260 977 000 009"), days_ago=8)
+    assert fired() is True                                    # a send eight days ago does not count
+    old.sent_at = datetime.utcnow() - timedelta(days=2)
+    db.commit()
+    assert fired() is False                                   # something was sent this week
+    alert = [r for r in json.loads((Path(__file__).parent.parent.parent / "context" / "core"
+                                    / "off_track_rules.json").read_text(encoding="utf-8"))["rules"]
+             if r["id"] == "outreach_stalled"][0]
+    assert alert["severity"] == "warn" and alert["params"] == {"window_days": 7, "min_qualified": 3}
+    db.close()
+
+
+# ── 10. stats ─────────────────────────────────────────────────
+
+def test_outreach_stats_rates_per_segment_and_channel():
+    db = _db()
+    pharm = [_lead(db, f"Pharmacy {i}", whatsapp=f"+260 977 100 00{i}") for i in range(4)]
+    bakers = [_lead(db, f"Baker {i}", segment="kitwe bakeries", whatsapp=f"+260 966 200 00{i}") for i in range(2)]
+    untouched = _lead(db, "Nobody Yet", segment="kitwe bakeries", whatsapp="+260 966 200 009")
+    for lead in pharm[:3]:
+        _sent(db, lead)                                       # three pharmacies contacted on WhatsApp
+    _sent(db, bakers[0], channel="linkedin")                  # one baker contacted on LinkedIn
+    _sent(db, bakers[1], days_ago=120)                        # outside the 90-day window
+    leads.log_reply(db, pharm[0], "Interested")
+    leads.log_reply(db, pharm[1], "Send a quote")
+    leads.convert(db, pharm[1])
+    db.commit()
+    db.close()
+
+    s = client.get("/outreach/stats").json()
+    seg = {r["segment"]: r for r in s["by_segment"]}
+    assert seg["lusaka pharmacies"] == {"segment": "lusaka pharmacies", "leads": 4, "contacted": 3, "replied": 2,
+                                        "converted": 1, "reply_rate": 0.667, "conversion_rate": 0.333}
+    assert seg["kitwe bakeries"] == {"segment": "kitwe bakeries", "leads": 3, "contacted": 1, "replied": 0,
+                                     "converted": 0, "reply_rate": 0.0, "conversion_rate": 0.0}
+    chan = {r["channel"]: r for r in s["by_channel"]}
+    assert chan["whatsapp"]["sent"] == 3 and chan["whatsapp"]["reply_rate"] == 0.667
+    assert chan["linkedin"] == {"channel": "linkedin", "sent": 1, "contacted": 1, "replied": 0, "converted": 0,
+                                "reply_rate": 0.0, "conversion_rate": 0.0}
+    assert s["totals"] == {"leads": 7, "sent": 4, "contacted": 4, "replied": 2, "converted": 1,
+                           "reply_rate": 0.5, "conversion_rate": 0.25}
+
+    empty = client.get("/outreach/stats", params={"days": 1}).json()
+    assert empty["days"] == 1 and empty["totals"]["contacted"] == 4       # all four were sent today
+    db = _db()
+    for m in db.query(models.OutreachMessage).all():
+        m.sent_at = datetime.utcnow() - timedelta(days=200)
+    db.commit()
+    db.close()
+    none = client.get("/outreach/stats").json()["totals"]
+    assert none["contacted"] == 0 and none["reply_rate"] == 0.0 and none["conversion_rate"] == 0.0   # zero-safe

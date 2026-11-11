@@ -23,8 +23,9 @@ Response shape (the target home screen is built against this):
   "counts": {...}, "exams": [...], "non_negotiables": [...], "weakness_notes": [...]
 }
 
-Phase 5 adds the item categories ``payment``, ``deal`` and ``client`` (target types of the
-same names); none of them is completable from a checkbox.
+Phase 5 adds the item categories ``payment``, ``deal``, ``client`` (target types of the
+same names) and ``outreach`` (target types ``outreach_message`` and ``lead``); none of them
+is completable from a checkbox.
 """
 
 import re
@@ -205,6 +206,45 @@ def _alert_items(db: Session, today: date) -> tuple[list, list]:
     return alerts, items
 
 
+def _outreach_items(db: Session, today: date) -> tuple[list, int]:
+    """Drafts waiting for approval and contacted leads that have gone quiet."""
+    names = {l.id: l for l in db.query(models.Lead).all()}
+    now = datetime.utcnow()
+    stale_pending = {p.id for p in db.query(models.PendingAction).filter(
+        models.PendingAction.kind == "send_outreach",
+        models.PendingAction.created_at < now - timedelta(hours=24)).all()}
+    drafts = [m for m in db.query(models.OutreachMessage).filter(
+        models.OutreachMessage.direction == "out",
+        models.OutreachMessage.status.in_(("draft", "approved")),
+    ).order_by(models.OutreachMessage.id.desc()).all() if m.pending_action_id not in stale_pending]
+    items = []
+    for m in drafts[:3]:
+        lead = names.get(m.lead_id)
+        who = lead.name if lead else "a lead"
+        items.append(_item(title=f"{m.channel.capitalize()} draft to {who}", category="outreach", today=today,
+                           due_label="", reason="Draft waiting for your approval",
+                           action="Approve & send or dismiss", target_type="outreach_message",
+                           target_id=m.id, score=38))
+    quiet = []
+    for lead in names.values():
+        if lead.status != "contacted" or lead.last_contact_at is None:
+            continue
+        days = (now - lead.last_contact_at).days
+        if days <= 7:
+            continue
+        has_follow_up = db.query(models.Todo).filter(
+            models.Todo.lead_id == lead.id, models.Todo.done == False,   # noqa: E712
+            models.Todo.category == "outreach").first() is not None
+        if not has_follow_up:
+            quiet.append((days, lead))
+    quiet.sort(key=lambda pair: -pair[0])
+    for days, lead in quiet[:3]:
+        items.append(_item(title=f"{lead.name} has not replied", category="outreach", today=today,
+                           due_label="", reason=f"No reply in {days} days", action="Follow up or mark lost",
+                           target_type="lead", target_id=lead.id, score=28))
+    return items, len(drafts)
+
+
 def _crm_items(db: Session, today: date) -> tuple[list, dict]:
     """Payments, deals and quiet clients. Runs the CRM housekeeping first (recurring
     instalments that have fallen due, overdue flags) so the list is current."""
@@ -346,12 +386,15 @@ def build_briefing(db: Session, *, refresh: bool = False, now: datetime | None =
     syl_items, weakness_notes = _syllabus_items(db, today)
     target_items, targets_pct = _target_items(db, today)
     crm_items, business_detail = _crm_items(db, today)
+    outreach_items, drafts_waiting = _outreach_items(db, today)
     alerts, alert_items = _alert_items(db, today)
 
-    items = task_items + nn_items + exam_items + syl_items + target_items + alert_items + crm_items
+    items = (task_items + nn_items + exam_items + syl_items + target_items + alert_items
+             + crm_items + outreach_items)
     items.sort(key=lambda i: i["score"], reverse=True)
 
     counts["payments_overdue"] = business_detail["overdue_count"]
+    counts["drafts_waiting"] = drafts_waiting
     attention = (counts["overdue"] + len(target_items)
                  + sum(1 for a in alerts if a.get("severity") == "critical")
                  + counts["payments_overdue"])

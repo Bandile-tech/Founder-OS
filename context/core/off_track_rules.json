@@ -52,6 +52,17 @@
         "days": 14
       },
       "message": "A client payment is more than 14 days overdue. Chase it today."
+    },
+    {
+      "id": "outreach_stalled",
+      "severity": "warn",
+      "enabled": true,
+      "check": "no_outreach_sent",
+      "params": {
+        "window_days": 7,
+        "min_qualified": 3
+      },
+      "message": "At least 3 qualified leads but nothing sent in 7 days. Prospecting is stalling."
     }
   ]
 }

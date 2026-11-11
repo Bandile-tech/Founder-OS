@@ -158,6 +158,8 @@ def _run_every_tool(db) -> dict:
             ("draft_outreach", {"lead": "Mercy Banda", "channel": "whatsapp", "brief": "intro"}),
             ("request_send", {"message_id": 1}),
             ("set_follow_up", {"lead": "Mercy Banda", "date": "in 3 days"}),
+            ("log_lead_reply", {"lead": "Mercy Banda", "summary": "Wants a demo on Friday"}),
+            ("convert_lead", {"lead": "Mercy Banda"}),
         ]
         for name, args in calls:
             result, _summary = ot.run_tool(name, args, db)

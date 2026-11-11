@@ -186,6 +186,55 @@ All responses are JSON. Dates are ISO strings. `changes` entries have the shape
 ### Usage
 - `GET /usage/summary?days=90` → `{days, total{calls,input_tokens,cached_input_tokens,output_tokens,estimated_cost_usd}, by_day[], by_month[], by_model[]}`
 
+### Leads and outreach (Phase 5B — `backend/leads.py`, `backend/outreach.py`)
+
+A lead: `{id, name, company, role, email, phone, whatsapp, linkedin_url, website, location,
+segment, source, status, qualification_score, qualification, opportunity_id, client_id,
+notes, last_contact_at, next_follow_up_at, created_at, updated_at, open_follow_up,
+last_message}`. `status` is `new → qualified | disqualified → contacted → replied →
+converted | lost`. `qualification` is `{fit, reasons[], disqualifiers[], suggested_angle,
+model, scored_at}` or null. `open_follow_up` is `{todo_id, due_date}` or null;
+`last_message` is `{id, channel, status, created_at}` or null. Emails are stored
+lower-cased; phone and WhatsApp numbers as digits with an optional leading `+`.
+
+A message: `{id, lead_id, lead_name, channel, direction, subject, body, status, version,
+supersedes_id, brief, pending_action_id, approved_at, sent_at, external_id, error,
+created_by, created_at, updated_at}`. `channel` is `whatsapp | email | linkedin | call |
+other`; `status` is `draft → approved → sent | failed`, or `cancelled`; inbound rows are
+`direction: in`, `status: received`.
+
+| Method & path | Body / query | Returns |
+|---|---|---|
+| `GET /leads` | `status?`, `segment?`, `q?` (contains, on name or company), `limit=100` | `[lead]` |
+| `GET /leads/segments` | | `[{segment, total, by_status{}}]` |
+| `GET /leads/{id}` | | lead + `messages[]` + `follow_ups[]` (`{todo_id, text, due_date}`, open only) |
+| `POST /leads` | `{name, company?, role?, email?, phone?, whatsapp?, linkedin_url?, website?, location?, segment?, notes?}` | 201 lead + `change`, `deduped: false`; when the details match an existing lead, 200 with that lead updated and `deduped: true` |
+| `PATCH /leads/{id}` | any lead field, `status` | lead + `change` (400 for an unknown status) |
+| `POST /leads/import` | multipart `file` (CSV), `segment?`, `mapping?` (JSON `{csv header: column}`) | `{import_id, created, updated, skipped, total_rows, segment, columns_mapped{}, batch_id}` |
+| `POST /leads/qualify` | `{ids: [..≤20]}` or `{segment}` (the first 20 `new` leads of it) | `{results: [{lead_id, name, pre_score, score, status, fit, reasons, disqualifiers, suggested_angle, outcome?, error?, skipped_llm?}], changes}`; 400 above 20 |
+| `POST /leads/{id}/replied` | `{summary?}` | lead + `change`, `changes`, `message_id` |
+| `POST /leads/{id}/convert` | | `{lead, client: {id, name, company, status, service, lead_id}, changes}` (+ `already_converted: true` on a repeat) |
+| `GET /outreach` | `status?` (comma list, e.g. `draft`), `lead_id?` | `[message]` newest first |
+| `GET /outreach/stats` | `days=90` | `{days, by_segment: [{segment, leads, contacted, replied, converted, reply_rate, conversion_rate}], by_channel: [{channel, sent, contacted, replied, converted, reply_rate, conversion_rate}], totals: {leads, sent, contacted, replied, converted, reply_rate, conversion_rate}}` |
+| `GET /outreach/{id}` | | message |
+| `POST /outreach/{id}/send` | | `{message, changes, open_url?, follow_up_todo_id?}`; 409 unless the message is `draft` or `approved`. A failed send returns 200 with `message.status: failed` and `message.error` |
+| `POST /outreach/{id}/cancel` | | message + `change`; 409 unless `draft` or `approved` |
+
+`POST /outreach/{id}/send` is the Approve & send tap: the tap is the approval, so it sends
+in one step. For WhatsApp the response carries `open_url` (a `wa.me` link the UI opens in a
+new tab) and the message is marked sent. A successful send also moves the lead to
+`contacted`, creates the follow-up todo three days out (`category` and `source`
+`outreach`, `lead_id` set) and logs a communication. The assistant cannot send: its
+`request_send` tool only creates a pending action of kind `send_outreach`, and its
+`confirm_action` is refused with `{"error": "confirmation must come in a later message"}`
+until Bandile has written again. `POST /actions/{id}/confirm` (the dock tap) executes it.
+
+Briefing additions: items with category `outreach` — a draft awaiting approval (target type
+`outreach_message`, score 38, at most three) and a contacted lead with no reply for more
+than seven days and no open follow-up (target type `lead`, score 28, at most three);
+`counts.drafts_waiting`. Alert `outreach_stalled` (warn): at least three qualified leads
+and nothing sent in seven days.
+
 ### CRM (Phase 5C — `backend/crm.py`)
 
 Money is always `amount` + `currency` (`USD` | `ZMW`); serialised money rows also carry

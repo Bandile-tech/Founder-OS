@@ -2,9 +2,10 @@
 Leads — the prospect database (Phase 5B).
 
 Primitives: serialize, find_duplicate, create_lead, find_leads, pick_lead, import_csv,
-            segments, set_follow_up, close_follow_ups, pre_score, qualify
+            segments, set_follow_up, close_follow_ups, pre_score, qualify, log_reply, convert
 Endpoints:  GET /leads, GET /leads/segments, GET /leads/{id}, POST /leads,
-            PATCH /leads/{id}, POST /leads/import, POST /leads/qualify
+            PATCH /leads/{id}, POST /leads/import, POST /leads/qualify,
+            POST /leads/{id}/replied, POST /leads/{id}/convert
 
 A lead is a person or business Bandile intends to approach. Leads arrive by CSV import
 (an upsert with counts) or from conversation, never through a form. Every write is in the
@@ -620,3 +621,106 @@ def qualify_endpoint(payload: QualifyBody, db: Session = Depends(get_db)):
             raise HTTPException(400, str(exc))
         db.commit()
     return {"results": results, "changes": [r["change"] for r in results if r.get("change")]}
+
+
+# ════════════════════════════════════════════════════════════════
+# Replies and conversion
+# ════════════════════════════════════════════════════════════════
+
+def log_reply(db: Session, lead: models.Lead, summary: str | None = None,
+              channel: str | None = None) -> dict:
+    """The lead answered: an inbound message row, status ``replied``, follow-ups closed and
+    a dated line in the notes. The caller commits."""
+    import outreach_channels
+    last_out = db.query(models.OutreachMessage).filter(
+        models.OutreachMessage.lead_id == lead.id, models.OutreachMessage.direction == "out",
+    ).order_by(models.OutreachMessage.id.desc()).first()
+    channel = channel if channel in outreach_channels.CHANNELS else (last_out.channel if last_out else "whatsapp")
+    text = (summary or "").strip() or "Replied"
+    now = datetime.utcnow()
+    changes = []
+    inbound = models.OutreachMessage(
+        lead_id=lead.id, channel=channel, direction="in", body=text, status="received",
+        created_by="ui", created_at=now, updated_at=now)
+    db.add(inbound)
+    changes.append(change_log.record_create(db, inbound, f"Reply from {lead.name[:50]}: {text[:40]}"))
+    changes += close_follow_ups(db, lead)
+    before = change_log.snapshot(lead)
+    if lead.status not in ("converted", "lost"):
+        lead.status = "replied"
+    lead.last_contact_at = now
+    lead.notes = _merge_notes(lead.notes, f"- {date.today().isoformat()}: replied — {text}")
+    lead.updated_at = now
+    change = change_log.record_update(db, lead, before, f"{lead.name[:50]} replied")
+    changes.append(change)
+    if hasattr(models, "Communication"):
+        import crm
+        client = (db.query(models.Client).filter(models.Client.id == lead.client_id).first()
+                  if lead.client_id else None)
+        logged = crm.log_communication(
+            db, client=client, lead=lead, channel=channel if channel in crm.CHANNELS else "other",
+            direction="in", summary=text[:200], occurred_at=now, source="outreach",
+            outreach_message_id=inbound.id)
+        changes.append(logged["change"])
+    return {**serialize(db, lead), "change": change, "changes": [c for c in changes if c],
+            "message_id": inbound.id}
+
+
+def convert(db: Session, lead: models.Lead) -> dict:
+    """The lead became a client: a ``clients`` row linked both ways, status ``converted``,
+    open follow-ups closed, and the lead's contact details as the primary contact.
+    Idempotent: a converted lead returns its client. The caller commits."""
+    if lead.client_id is not None:
+        client = db.query(models.Client).filter(models.Client.id == lead.client_id).first()
+        if client is not None:
+            return {"lead": serialize(db, lead), "client": _client_dict(client), "changes": [],
+                    "already_converted": True}
+    last_sent = db.query(models.OutreachMessage).filter(
+        models.OutreachMessage.lead_id == lead.id, models.OutreachMessage.status == "sent",
+    ).order_by(models.OutreachMessage.id.desc()).first()
+    now = datetime.utcnow()
+    changes = []
+    client = models.Client(
+        name=lead.name, company=lead.company or "", status="active",
+        service=(last_sent.brief or "")[:200] if last_sent is not None else "",
+        notes="", lead_id=lead.id, currency="ZMW", created_at=now, updated_at=now)
+    db.add(client)
+    changes.append(change_log.record_create(db, client, f"New client: {lead.name[:60]}"))
+    changes += close_follow_ups(db, lead)
+    before = change_log.snapshot(lead)
+    lead.client_id, lead.status, lead.updated_at = client.id, "converted", now
+    changes.append(change_log.record_update(db, lead, before, f"Converted {lead.name[:60]} to a client"))
+    if hasattr(models, "Contact") and (lead.email or lead.phone or lead.whatsapp):
+        import crm
+        contact = crm.add_contact(db, client, name=lead.name, role=lead.role, email=lead.email,
+                                  phone=lead.phone, whatsapp=lead.whatsapp, is_primary=True)
+        changes += contact["changes"]
+    return {"lead": serialize(db, lead), "client": _client_dict(client),
+            "changes": [c for c in changes if c]}
+
+
+def _client_dict(client: models.Client) -> dict:
+    return {"id": client.id, "name": client.name, "company": client.company,
+            "status": client.status, "service": client.service, "lead_id": client.lead_id}
+
+
+class ReplyBody(BaseModel):
+    summary: str | None = None
+
+
+@router.post("/leads/{lead_id}/replied")
+def replied_endpoint(lead_id: int, payload: ReplyBody | None = None, db: Session = Depends(get_db)):
+    lead = _get(db, lead_id)
+    with change_log.batch_scope(db, "ui"):
+        result = log_reply(db, lead, payload.summary if payload else None)
+        db.commit()
+    return result
+
+
+@router.post("/leads/{lead_id}/convert")
+def convert_endpoint(lead_id: int, db: Session = Depends(get_db)):
+    lead = _get(db, lead_id)
+    with change_log.batch_scope(db, "ui"):
+        result = convert(db, lead)
+        db.commit()
+    return result

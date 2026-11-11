@@ -1978,3 +1978,73 @@ _register(
      "reason": _str("What the follow-up is about. Optional.")},
     ["lead", "date"],
 )
+
+
+# ── 5B: replies, conversion, the stalled-outreach alert ──────
+
+def log_lead_reply(db, lead, summary: str, channel: str | None = None):
+    """Record that a lead answered."""
+    import change_log
+    import leads
+    target, problem = _pick_lead(db, lead)
+    if target is None:
+        return problem
+    with change_log.batch_scope(db, "assistant"):
+        result = leads.log_reply(db, target, summary, channel)
+        db.commit()
+    return ({"lead": target.name, "status": result["status"], "reply": (summary or "").strip(),
+             "changes": result["changes"]}, f"{target.name} replied — follow-up closed")
+
+
+def convert_lead(db, lead):
+    """Turn a lead into a client."""
+    import change_log
+    import leads
+    target, problem = _pick_lead(db, lead)
+    if target is None:
+        return problem
+    with change_log.batch_scope(db, "assistant"):
+        result = leads.convert(db, target)
+        db.commit()
+    out = {"lead": target.name, "client_id": result["client"]["id"], "client": result["client"]["name"],
+           "already_converted": bool(result.get("already_converted")), "changes": result["changes"]}
+    if out["already_converted"]:
+        return out, f"{target.name} is already a client"
+    return out, f"{target.name} is now a client"
+
+
+_register(
+    "log_lead_reply",
+    lambda db, a: log_lead_reply(db, lead=a.get("lead", ""), summary=a.get("summary", ""), channel=a.get("channel")),
+    "Record that a lead replied. ONLY when Bandile reports the reply.",
+    {"lead": _str("Lead name, part of it, or the lead id."),
+     "summary": _str("What they said, in a line."),
+     "channel": _str("Where they replied.", ["whatsapp", "email", "linkedin", "call", "other"])},
+    ["lead", "summary"],
+)
+
+_register(
+    "convert_lead",
+    lambda db, a: convert_lead(db, lead=a.get("lead", "")),
+    "Turn a lead into a client. ONLY on an explicit statement that they are now a client, "
+    "have signed or have paid.",
+    {"lead": _str("Lead name, part of it, or the lead id.")},
+    ["lead"],
+)
+
+
+def _check_no_outreach_sent(db, params):
+    """True when at least ``min_qualified`` leads are qualified and nothing has been sent
+    in the last ``window_days`` days."""
+    window = int(params.get("window_days", 7))
+    minimum = int(params.get("min_qualified", 3))
+    qualified = db.query(models.Lead).filter(models.Lead.status == "qualified").count()
+    if qualified < minimum:
+        return False
+    since = datetime.utcnow() - timedelta(days=window)
+    return db.query(models.OutreachMessage).filter(
+        models.OutreachMessage.direction == "out", models.OutreachMessage.status == "sent",
+        models.OutreachMessage.sent_at >= since).first() is None
+
+
+_RULE_CHECKS["no_outreach_sent"] = _check_no_outreach_sent

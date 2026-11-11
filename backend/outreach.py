@@ -1,9 +1,9 @@
 """
 Outreach — drafted messages behind a human approval gate (Phase 5B).
 
-Primitives: draft, request_send, execute_send, cancel
-Endpoints:  GET /outreach, GET /outreach/{id}, POST /outreach/{id}/send,
-            POST /outreach/{id}/cancel
+Primitives: draft, request_send, execute_send, cancel, stats
+Endpoints:  GET /outreach, GET /outreach/stats, GET /outreach/{id},
+            POST /outreach/{id}/send, POST /outreach/{id}/cancel
 
     draft ──(tap Approve & send | "send it" → pending action → "yes")──► approved ──► sent | failed
       └──(tap Dismiss | "scrap it")──► cancelled
@@ -270,6 +270,55 @@ def cancel(db: Session, message: models.OutreachMessage) -> dict:
     return _result(db, message, change=change)
 
 
+# ── Stats ────────────────────────────────────────────────────
+
+def _rate(part: int, whole: int) -> float:
+    return round(part / whole, 3) if whole else 0.0
+
+
+def stats(db: Session, days: int = 90) -> dict:
+    """Who was contacted in the last ``days``, who replied and who converted, by segment
+    and by channel. A lead counts as contacted when a message to it was sent in the window;
+    as replied when it then answered (status replied or converted, or an inbound message);
+    as converted when it became a client. Rates are replied ÷ contacted and
+    converted ÷ contacted, and 0 when nobody was contacted."""
+    since = datetime.utcnow() - timedelta(days=max(1, int(days)))
+    all_leads = {l.id: l for l in db.query(models.Lead).all()}
+    sent = db.query(models.OutreachMessage).filter(
+        models.OutreachMessage.direction == "out", models.OutreachMessage.status == "sent",
+        models.OutreachMessage.sent_at >= since).all()
+    answered = {m.lead_id for m in db.query(models.OutreachMessage).filter(
+        models.OutreachMessage.direction == "in").all()}
+
+    def replied(lead):
+        return lead.status in ("replied", "converted") or lead.id in answered
+
+    def row(contacted_ids, **head):
+        contacted = [all_leads[i] for i in contacted_ids if i in all_leads]
+        n_replied = sum(1 for l in contacted if replied(l))
+        n_converted = sum(1 for l in contacted if l.status == "converted")
+        return {**head, "contacted": len(contacted), "replied": n_replied, "converted": n_converted,
+                "reply_rate": _rate(n_replied, len(contacted)),
+                "conversion_rate": _rate(n_converted, len(contacted))}
+
+    contacted_ids = {m.lead_id for m in sent}
+    segments = {}
+    for lead in all_leads.values():
+        segments.setdefault(lead.segment, []).append(lead.id)
+    by_segment = [row([i for i in ids if i in contacted_ids], segment=segment, leads=len(ids))
+                  for segment, ids in segments.items()]
+    by_segment.sort(key=lambda r: (-r["contacted"], -r["leads"], r["segment"] or ""))
+    channels = {}
+    for m in sent:
+        channels.setdefault(m.channel, {"ids": set(), "sent": 0})
+        channels[m.channel]["ids"].add(m.lead_id)
+        channels[m.channel]["sent"] += 1
+    by_channel = [row(info["ids"], channel=channel, sent=info["sent"]) for channel, info in channels.items()]
+    by_channel.sort(key=lambda r: (-r["contacted"], r["channel"]))
+    return {"days": int(days), "by_segment": by_segment, "by_channel": by_channel,
+            "totals": row(contacted_ids, leads=len(all_leads), sent=len(sent))}
+
+
 # ── Endpoints ────────────────────────────────────────────────
 
 def _get(db: Session, message_id: int) -> models.OutreachMessage:
@@ -287,6 +336,11 @@ def list_outreach(status: str | None = None, lead_id: int | None = None, db: Ses
     if lead_id is not None:
         q = q.filter(models.OutreachMessage.lead_id == lead_id)
     return [_result(db, m) for m in q.order_by(models.OutreachMessage.id.desc()).limit(200).all()]
+
+
+@router.get("/outreach/stats")
+def outreach_stats(days: int = 90, db: Session = Depends(get_db)):
+    return stats(db, days)
 
 
 # NOTE: any fixed /outreach/<word> route must be declared above this one.

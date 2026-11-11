@@ -222,6 +222,32 @@ Known limits:
   has been saved; if the model confirms before that, it is told to wait, and the dock tap
   works regardless.
 
+### S5 — 5B.3 replies, conversion, stats, briefing and alert (done)
+
+Shipped: `leads.log_reply` and `leads.convert` with `POST /leads/{id}/replied` and
+`POST /leads/{id}/convert`; `outreach.stats` and `GET /outreach/stats`; tools
+`log_lead_reply` and `convert_lead`; briefing `_outreach_items` and
+`counts.drafts_waiting`; alert `outreach_stalled` with `_check_no_outreach_sent`; the prompt
+bullets; every `/leads` and `/outreach` endpoint shape in `docs/REBUILD_HANDOFF.md` §2.
+Tests: acceptance tests 7–10 in `tests/test_phase5b_leads.py`.
+
+Deferred: nothing from §5B. Real email sending arrives with S19.
+
+Decisions where the spec was silent:
+- Stats: a lead counts as contacted when a message to it was sent inside the window;
+  replied when its status is `replied` or `converted` or it has an inbound message;
+  converted when its status is `converted`. `leads` per segment is every lead in the
+  segment, whenever it was added.
+- A reply logged with no summary stores the text "Replied". The reply's channel is the one
+  given, else the channel of the last outbound message, else WhatsApp.
+- A reply does not move a lead that is already `converted` or `lost` back to `replied`.
+- A converted client is named after the lead (`name`, `company`), is `active`, in ZMW, and
+  takes `service` from the brief of the last sent message. The lead's contact details become
+  the client's primary contact when it has an email or a number.
+- A draft whose send request is older than 24 hours is left out of the briefing (the
+  request has expired; the draft is still on the Pipeline tab).
+- Quiet leads in the briefing use target type `lead`.
+
 ## Environment variables added so far
 
 | Var | Default | Session | Purpose |
