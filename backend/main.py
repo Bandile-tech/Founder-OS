@@ -75,6 +75,8 @@ import conversation as _conversation
 app.include_router(_conversation.router)
 import leads as _leads
 app.include_router(_leads.router)
+import outreach as _outreach
+app.include_router(_outreach.router)
 import crm as _crm
 app.include_router(_crm.router)
 

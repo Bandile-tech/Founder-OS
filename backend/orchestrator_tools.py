@@ -512,7 +512,7 @@ def confirm_action(db, pending_id: int):
     result = actions.confirm_action(db, int(pending_id))
     if result.get("executed"):
         return result, f"done: {result['summary']}"
-    return result, f"not executed: {result.get('reason', 'unknown')}"
+    return result, f"not executed: {result.get('reason') or result.get('error') or 'unknown'}"
 
 
 def cancel_action(db, pending_id: int):
@@ -923,6 +923,9 @@ def _readable(name: str, result):
                 "next step": "Ask Bandile to confirm in plain words. Call confirm_action only after he says yes."}
     if name == "confirm_action":
         if result.get("executed"):
+            if result.get("open_url"):
+                return {"done": result["summary"], "open link": result["open_url"],
+                        "next step": "Tell Bandile to tap the link to open WhatsApp and send it."}
             return {"done": result["summary"]}
         return {"not done": f"{result['summary']} — {result.get('reason', 'not executed')}"}
     if name == "cancel_action":
@@ -1827,3 +1830,151 @@ def _check_payment_overdue(db, params):
 
 
 _RULE_CHECKS["payment_overdue"] = _check_payment_overdue
+
+
+# ── 5B: qualification, drafts, the approval gate, follow-ups ─
+
+def _pick_lead(db, ref):
+    """(lead, error_result). Resolves an id or a name fragment; never guesses."""
+    import leads
+    lead, scored = leads.pick_lead(db, ref)
+    if lead is not None:
+        return lead, None
+    if scored:
+        return None, _ambiguous("lead", str(ref), scored, lambda l: f"{l.name} ({l.company})" if l.company else l.name)
+    return None, ({"error": f"no lead matches '{ref}'"}, f"no lead matches '{ref}'")
+
+
+def qualify_leads(db, lead_ids: list | None = None, segment: str | None = None):
+    """Score leads against the ideal customer profile (at most 20 per call)."""
+    import change_log
+    import leads
+    if lead_ids:
+        ids = [int(i) for i in lead_ids]
+    elif segment:
+        ids = [l.id for l in db.query(models.Lead).filter(
+            models.Lead.segment == leads.normalise_segment(segment), models.Lead.status == "new",
+        ).order_by(models.Lead.id).limit(leads.QUALIFY_MAX).all()]
+    else:
+        return {"error": "give lead_ids or a segment"}, "give lead_ids or a segment"
+    with change_log.batch_scope(db, "assistant"):
+        try:
+            results = leads.qualify(db, ids)
+        except ValueError as exc:
+            return {"error": str(exc)}, str(exc)
+        db.commit()
+    qualified = sum(1 for r in results if r.get("outcome") == "qualified")
+    disqualified = sum(1 for r in results if r.get("outcome") == "disqualified")
+    shaped = [{"lead_id": r["lead_id"], "name": r.get("name"), "qualification_score": r.get("score"),
+               "status": r.get("status"), "fit": r.get("fit"), "reasons": r.get("reasons"),
+               "disqualifiers": r.get("disqualifiers"), "suggested_angle": r.get("suggested_angle"),
+               "error": r.get("error"), "skipped_llm": r.get("skipped_llm")} for r in results]
+    result = {"results": shaped, "qualified": qualified, "disqualified": disqualified,
+              "changes": [r["change"] for r in results if r.get("change")]}
+    if results and all(r.get("skipped_llm") for r in results):
+        result["note"] = "No AI key is configured, so only the basic score was computed and nothing changed."
+        return result, f"scored {len(results)} lead(s) without AI — nothing changed"
+    return result, f"qualified {qualified} of {len(results)} ({disqualified} disqualified)"
+
+
+def draft_outreach(db, lead, channel: str, brief: str | None = None, message_id: int | None = None):
+    """Draft (or revise) a message to a lead. Never sends."""
+    import change_log
+    import llm as _llm
+    import outreach
+    target, problem = _pick_lead(db, lead)
+    if target is None:
+        return problem
+    with change_log.batch_scope(db, "assistant"):
+        try:
+            result = outreach.draft(db, target, channel, brief,
+                                    message_id=int(message_id) if message_id else None)
+        except _llm.AIUnavailable:
+            msg = "drafting needs the AI key, which is not configured"
+            return {"error": msg}, msg
+        except ValueError as exc:
+            return {"error": str(exc)}, str(exc)
+        db.commit()
+    out = {"message_id": result["id"], "lead": target.name, "channel": result["channel"],
+           "subject": result["subject"], "body": result["body"], "version": result["version"],
+           "status": "draft — not sent", "changes": result["changes"],
+           "next_step": "Show Bandile the draft. It is sent only when he taps Approve & send or says to send it."}
+    return out, f"drafted {result['channel']} to {target.name} (v{result['version']})"
+
+
+def request_send(db, message_id: int):
+    """Ask for approval to send a draft. Sends nothing: it registers a pending action."""
+    import outreach
+    message = db.query(models.OutreachMessage).filter(
+        models.OutreachMessage.id == int(message_id or 0)).first()
+    if message is None:
+        return {"error": f"message {message_id} not found"}, f"message {message_id} not found"
+    try:
+        pending = outreach.request_send(db, message)
+    except ValueError as exc:
+        return {"error": str(exc)}, str(exc)
+    pending["next_step"] = ("Nothing has been sent. Ask Bandile for a plain yes. Call confirm_action "
+                            "only after he answers, in a later turn — never in this one.")
+    return pending, f"awaiting your yes: {pending['summary']}"
+
+
+def set_follow_up(db, lead, date_text: str, reason: str | None = None):
+    """Create or move the follow-up task for a lead."""
+    import business_common
+    import change_log
+    import leads
+    target, problem = _pick_lead(db, lead)
+    if target is None:
+        return problem
+    due = business_common.parse_day(date_text)
+    if due is None:
+        msg = f"could not read the date '{date_text}'"
+        return {"error": msg}, msg
+    with change_log.batch_scope(db, "assistant"):
+        todo, change = leads.set_follow_up(db, target, due, reason)
+        db.commit()
+    return ({"lead": target.name, "todo_id": todo.id, "follow_up_on": due, "change": change},
+            f"follow-up with {target.name} on {due.isoformat()}")
+
+
+_register(
+    "qualify_leads",
+    lambda db, a: qualify_leads(db, lead_ids=a.get("lead_ids"), segment=a.get("segment")),
+    "Score leads against the ideal customer profile (at most 20 per call). ONLY when Bandile "
+    "asks to qualify leads or asks which leads are worth pursuing.",
+    {"lead_ids": {"type": "array", "items": {"type": "integer"}, "description": "Lead ids (at most 20)."},
+     "segment": _str("Or a segment: its first 20 unqualified leads.")},
+)
+
+_register(
+    "draft_outreach",
+    lambda db, a: draft_outreach(db, lead=a.get("lead", ""), channel=a.get("channel", "whatsapp"),
+                                 brief=a.get("brief"), message_id=a.get("message_id")),
+    "Draft a message to a lead, or revise a draft when given its message_id. It only ever "
+    "creates a draft; it never sends.",
+    {"lead": _str("Lead name, part of it, or the lead id."),
+     "channel": _str("Where it will be sent.", ["whatsapp", "email", "linkedin", "call", "other"]),
+     "brief": _str("What Bandile asked for, e.g. 'intro, mention the bakery site' or 'shorter'."),
+     "message_id": _int("The draft to revise. Omit for a new draft.")},
+    ["lead", "channel"],
+)
+
+_register(
+    "request_send",
+    lambda db, a: request_send(db, message_id=a.get("message_id")),
+    "Register a request to send a drafted message. This sends NOTHING: it creates a pending "
+    "action. Ask Bandile for a plain yes and call confirm_action only after he gives it, in "
+    "a later turn.",
+    {"message_id": _int("The draft's message id.")},
+    ["message_id"],
+)
+
+_register(
+    "set_follow_up",
+    lambda db, a: set_follow_up(db, lead=a.get("lead", ""), date_text=a.get("date", ""), reason=a.get("reason")),
+    "Set or move the follow-up reminder for a lead. ONLY when Bandile says when to chase them.",
+    {"lead": _str("Lead name, part of it, or the lead id."),
+     "date": _str("When, as he said it: 'Friday', '12 May', 'in 3 days'."),
+     "reason": _str("What the follow-up is about. Optional.")},
+    ["lead", "date"],
+)

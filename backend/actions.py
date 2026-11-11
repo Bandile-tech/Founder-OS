@@ -4,7 +4,8 @@ extractions that need one tap).
 
 Pending actions
   propose_delete(db, table, record_id, reason)  — records the intent, deletes nothing
-  confirm_action(db, pending_id)                — executes the delete through the change log
+  confirm_action(db, pending_id)                — executes it through the change log; dispatches
+                                                  on the action's kind (delete, send_outreach)
   cancel_action(db, pending_id)
   GET  /actions/pending
   POST /actions/{id}/confirm
@@ -108,7 +109,35 @@ def _get_pending(db: Session, pending_id: int) -> models.PendingAction:
     return p
 
 
-def confirm_action(db: Session, pending_id: int) -> dict:
+def _execute_delete(db: Session, p: models.PendingAction) -> dict:
+    model, _ = DELETABLE[p.table_name]
+    obj = db.query(model).filter(model.id == p.record_id).first()
+    if obj is None:
+        return {"executed": False, "reason": "record no longer exists", "status": "cancelled"}
+    with change_log.batch_scope(db, "assistant"):
+        change = change_log.record_delete(db, obj, p.summary or f"Deleted {p.table_name}#{p.record_id}")
+    return {"executed": True, "change": change, "status": "confirmed"}
+
+
+def _execute_send_outreach(db: Session, p: models.PendingAction) -> dict:
+    import outreach
+    return outreach.execute_pending(db, p)
+
+
+# One executor per kind of pending action. An executor returns ``executed`` plus the
+# ``status`` the pending row should end in, and whatever else the caller should see.
+_EXECUTORS = {
+    "delete": _execute_delete,
+    "send_outreach": _execute_send_outreach,
+}
+
+# Kinds that leave the system. The assistant may not confirm one of these in the turn that
+# proposed it: the confirmation has to come in a later message from Bandile. A tap on the
+# screen (``human=True``) is itself the approval.
+_NEEDS_LATER_MESSAGE = {"send_outreach"}
+
+
+def confirm_action(db: Session, pending_id: int, *, human: bool = False) -> dict:
     p = _get_pending(db, pending_id)
     if p.status != "pending":
         return {**_pending_dict(p), "executed": False, "reason": f"already {p.status}"}
@@ -117,19 +146,20 @@ def confirm_action(db: Session, pending_id: int) -> dict:
         p.resolved_at = datetime.utcnow()
         db.commit()
         return {**_pending_dict(p), "executed": False, "reason": "expired — propose it again"}
-    model, _ = DELETABLE[p.table_name]
-    obj = db.query(model).filter(model.id == p.record_id).first()
-    if obj is None:
-        p.status = "cancelled"
-        p.resolved_at = datetime.utcnow()
-        db.commit()
-        return {**_pending_dict(p), "executed": False, "reason": "record no longer exists"}
-    with change_log.batch_scope(db, "assistant"):
-        change = change_log.record_delete(db, obj, p.summary or f"Deleted {p.table_name}#{p.record_id}")
-    p.status = "confirmed"
+    kind = p.kind or "delete"
+    executor = _EXECUTORS.get(kind)
+    if executor is None:
+        return {**_pending_dict(p), "executed": False, "reason": f"unknown action kind '{kind}'"}
+    if kind in _NEEDS_LATER_MESSAGE and not human:
+        import outreach
+        if not outreach.confirmed_in_a_later_message(db, p):
+            return {**_pending_dict(p), "executed": False,
+                    "error": "confirmation must come in a later message"}
+    outcome = executor(db, p)
+    p.status = outcome.pop("status", "confirmed" if outcome.get("executed") else "cancelled")
     p.resolved_at = datetime.utcnow()
     db.commit()
-    return {**_pending_dict(p), "executed": True, "change": change}
+    return {**_pending_dict(p), **outcome}
 
 
 def cancel_action(db: Session, pending_id: int) -> dict:
@@ -155,7 +185,7 @@ def pending_endpoint(db: Session = Depends(get_db)):
 
 @router.post("/actions/{pending_id}/confirm")
 def confirm_endpoint(pending_id: int, db: Session = Depends(get_db)):
-    return confirm_action(db, pending_id)
+    return confirm_action(db, pending_id, human=True)
 
 
 @router.post("/actions/{pending_id}/cancel")

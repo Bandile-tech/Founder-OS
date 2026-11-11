@@ -1,9 +1,10 @@
 """
 Leads — the prospect database (Phase 5B).
 
-Primitives: serialize, find_duplicate, create_lead, find_leads, pick_lead, import_csv, segments
+Primitives: serialize, find_duplicate, create_lead, find_leads, pick_lead, import_csv,
+            segments, set_follow_up, close_follow_ups, pre_score, qualify
 Endpoints:  GET /leads, GET /leads/segments, GET /leads/{id}, POST /leads,
-            PATCH /leads/{id}, POST /leads/import
+            PATCH /leads/{id}, POST /leads/import, POST /leads/qualify
 
 A lead is a person or business Bandile intends to approach. Leads arrive by CSV import
 (an upsert with counts) or from conversation, never through a form. Every write is in the
@@ -13,7 +14,7 @@ change log.
 import csv
 import io
 import json
-from datetime import datetime
+from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
 from pydantic import BaseModel
@@ -430,3 +431,192 @@ def patch_lead(lead_id: int, payload: LeadPatch, db: Session = Depends(get_db)):
         change = change_log.record_update(db, lead, before, f"Updated lead: {lead.name[:70]}")
         db.commit()
     return {**serialize(db, lead), "change": change}
+
+
+# ════════════════════════════════════════════════════════════════
+# Follow-ups and qualification
+# ════════════════════════════════════════════════════════════════
+
+QUALIFY_MAX = 20
+QUALIFIED_AT = 50
+ZAMBIAN_PLACES = ("lusaka", "kitwe", "ndola", "kabwe", "livingstone", "chingola", "mufulira",
+                  "chipata", "solwezi", "kasama", "zambia")
+
+# Stable first so the prefix caches; the ideal-customer file is appended after it.
+QUALIFY_PROMPT = (
+    "You score how well one sales lead fits the ideal customer described below. Judge only "
+    "from the lead's fields; do not invent facts. Respond as JSON: "
+    "{\"fit\": <integer 0-60>, \"reasons\": [up to 3 short reasons], "
+    "\"disqualifiers\": [any disqualifier from the profile that applies, else an empty list], "
+    "\"suggested_angle\": \"one sentence on what to open with\"}."
+)
+
+
+def set_follow_up(db: Session, lead: models.Lead, due: date, reason: str | None = None) -> tuple:
+    """Create the lead's follow-up task, or move the open one. Returns ``(todo, change)``.
+    A follow-up is an ordinary todo (category and source ``outreach``), so the briefing,
+    the home checkbox and undo already handle it. The caller commits."""
+    text = f"Follow up with {lead.name}" + (f" — {reason.strip()}" if reason and reason.strip() else "")
+    todo = open_follow_up(db, lead.id)
+    if todo is not None:
+        before = change_log.snapshot(todo)
+        todo.due_date, todo.due = due, due.isoformat()
+        if reason and reason.strip():
+            todo.text = text
+        change = change_log.record_update(db, todo, before, f"Follow-up with {lead.name[:50]} moved to {due.isoformat()}")
+    else:
+        todo = models.Todo(text=text, priority=3, done=False, category="outreach", source="outreach",
+                           due=due.isoformat(), due_date=due, lead_id=lead.id)
+        db.add(todo)
+        change = change_log.record_create(db, todo, f"Follow-up with {lead.name[:50]} on {due.isoformat()}")
+    lead.next_follow_up_at = due
+    return todo, change
+
+
+def close_follow_ups(db: Session, lead: models.Lead) -> list:
+    """Mark the lead's open follow-up tasks done. Returns the change entries."""
+    changes = []
+    for todo in db.query(models.Todo).filter(
+            models.Todo.lead_id == lead.id, models.Todo.done == False,   # noqa: E712
+            models.Todo.category == "outreach").all():
+        before = change_log.snapshot(todo)
+        todo.done, todo.completed_at = True, date.today()
+        changes.append(change_log.record_update(db, todo, before, f"Completed task: {todo.text[:80]}"))
+    lead.next_follow_up_at = None
+    return [c for c in changes if c]
+
+
+def pre_score(lead: models.Lead) -> int:
+    """The deterministic part of the score (0-40): reachable, has a company, has a segment,
+    is in Zambia."""
+    score = 0
+    if lead.email or lead.whatsapp or lead.phone:
+        score += 15
+    if (lead.company or "").strip():
+        score += 10
+    if (lead.segment or "").strip():
+        score += 10
+    if any(place in (lead.location or "").lower() for place in ZAMBIAN_PLACES):
+        score += 5
+    return score
+
+
+def _icp() -> str:
+    from pathlib import Path
+    path = Path(__file__).resolve().parent.parent / "context" / "core" / "icp.md"
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
+def _llm_fit(db: Session, lead: models.Lead) -> dict:
+    """One model call for one lead. {} when the answer is unusable."""
+    import llm
+    fields = {k: v for k, v in {
+        "name": lead.name, "company": lead.company, "role": lead.role, "segment": lead.segment,
+        "location": lead.location, "website": lead.website, "linkedin_url": lead.linkedin_url,
+        "has_email": bool(lead.email), "has_phone": bool(lead.whatsapp or lead.phone),
+        "notes": lead.notes,
+    }.items() if v}
+    messages = [
+        {"role": "system", "content": QUALIFY_PROMPT + "\n\n" + _icp()},
+        {"role": "user", "content": json.dumps(fields, ensure_ascii=False)},
+    ]
+    raw = llm.chat_text(messages, db=db, purpose="lead_qualify", max_tokens=300,
+                        response_format={"type": "json_object"})
+    try:
+        parsed = json.loads(raw)
+    except (ValueError, TypeError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def qualify(db: Session, lead_ids: list[int]) -> list[dict]:
+    """Score leads against the ideal customer: a deterministic pre-score (0-40) plus one
+    model call per lead for fit (0-60). At most 20 leads per call (``ValueError`` above
+    that). With no key only the pre-score is reported and nothing changes. The caller
+    commits."""
+    import llm
+    ids = [int(i) for i in (lead_ids or [])]
+    if len(ids) > QUALIFY_MAX:
+        raise ValueError(f"max {QUALIFY_MAX} per call")
+    configured = llm.is_configured()
+    results = []
+    for lead_id in ids:
+        lead = db.query(models.Lead).filter(models.Lead.id == lead_id).first()
+        if lead is None:
+            results.append({"lead_id": lead_id, "error": "lead not found"})
+            continue
+        pre = pre_score(lead)
+        entry = {"lead_id": lead.id, "name": lead.name, "pre_score": pre, "score": pre,
+                 "status": lead.status, "fit": None, "reasons": [], "disqualifiers": [],
+                 "suggested_angle": None}
+        if not configured:
+            entry["skipped_llm"] = True
+            results.append(entry)
+            continue
+        try:
+            answer = _llm_fit(db, lead)
+        except Exception as exc:                # noqa: BLE001 — one bad call must not stop the rest
+            print(f"[leads] qualification failed for lead {lead.id}: {type(exc).__name__}")
+            answer = {}
+        try:
+            fit = max(0, min(60, int(round(float(answer.get("fit"))))))
+        except (TypeError, ValueError):
+            entry["error"] = "the model gave no usable score"
+            results.append(entry)
+            continue
+        reasons = [str(r)[:200] for r in (answer.get("reasons") or []) if r][:3]
+        disqualifiers = [str(d)[:200] for d in (answer.get("disqualifiers") or []) if d]
+        angle = (str(answer.get("suggested_angle") or "")).strip() or None
+        score = pre + fit
+        if disqualifiers and fit < 15:
+            outcome = "disqualified"
+        elif score >= QUALIFIED_AT:
+            outcome = "qualified"
+        else:
+            outcome = "below_threshold"
+
+        before = change_log.snapshot(lead)
+        lead.qualification_score = score
+        lead.qualification_json = json.dumps({
+            "fit": fit, "reasons": reasons, "disqualifiers": disqualifiers,
+            "suggested_angle": angle, "model": llm.assistant_model(),
+            "scored_at": datetime.utcnow().isoformat(timespec="seconds")})
+        # Only a lead that has not been contacted yet changes status on a score.
+        if outcome != "below_threshold" and lead.status in ("new", "qualified", "disqualified"):
+            lead.status = outcome
+        lead.updated_at = datetime.utcnow()
+        verb = {"qualified": "Qualified", "disqualified": "Disqualified"}.get(outcome, "Scored")
+        change = change_log.record_update(db, lead, before, f"{verb} {lead.name[:50]} {score}/100")
+        entry.update({"score": score, "fit": fit, "reasons": reasons, "disqualifiers": disqualifiers,
+                      "suggested_angle": angle, "status": lead.status, "outcome": outcome,
+                      "change": change})
+        results.append(entry)
+    return results
+
+
+class QualifyBody(BaseModel):
+    ids: list[int] | None = None
+    segment: str | None = None
+
+
+@router.post("/leads/qualify")
+def qualify_endpoint(payload: QualifyBody, db: Session = Depends(get_db)):
+    """``{ids: [..≤20]}`` or ``{segment}`` (the first 20 leads of the segment still ``new``)."""
+    if payload.ids:
+        ids = payload.ids
+    elif payload.segment:
+        ids = [l.id for l in db.query(models.Lead).filter(
+            models.Lead.segment == normalise_segment(payload.segment), models.Lead.status == "new",
+        ).order_by(models.Lead.id).limit(QUALIFY_MAX).all()]
+    else:
+        raise HTTPException(400, "Give ids or a segment")
+    with change_log.batch_scope(db, "ui"):
+        try:
+            results = qualify(db, ids)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+        db.commit()
+    return {"results": results, "changes": [r["change"] for r in results if r.get("change")]}

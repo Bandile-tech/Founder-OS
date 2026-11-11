@@ -154,6 +154,10 @@ def _run_every_tool(db) -> dict:
             ("add_contact", {"client": "Bel Baby", "name": "Mrs Banda", "phone": "0977 000 222"}),
             ("record_payment", {"client": "Bel Baby", "amount": 1500, "status": "due", "due_date": "tomorrow"}),
             ("crm_summary", {}),
+            ("qualify_leads", {"segment": "lusaka pharmacies"}),
+            ("draft_outreach", {"lead": "Mercy Banda", "channel": "whatsapp", "brief": "intro"}),
+            ("request_send", {"message_id": 1}),
+            ("set_follow_up", {"lead": "Mercy Banda", "date": "in 3 days"}),
         ]
         for name, args in calls:
             result, _summary = ot.run_tool(name, args, db)

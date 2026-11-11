@@ -181,6 +181,47 @@ Decisions where the spec was silent:
   /briefing/today` can write (generated instalments, overdue flags). A failure there is
   logged and the briefing still renders.
 
+### S4 — 5B.2 qualification, outreach drafts, the approval gate, follow-ups (done)
+
+Shipped: `leads.qualify` (pre-score 0–40 plus one `lead_qualify` call per lead, capped at
+20) and `POST /leads/qualify`; `leads.set_follow_up` / `close_follow_ups`; `outreach.py`
+(`draft`, `request_send`, `execute_send`, `cancel`; `GET /outreach`, `GET /outreach/{id}`,
+`POST /outreach/{id}/send`, `POST /outreach/{id}/cancel`); `outreach_channels.py`
+(WhatsApp link, email, manual); `actions.confirm_action` dispatching on the action's kind
+through `_EXECUTORS` (`delete`, `send_outreach`); tools `qualify_leads`, `draft_outreach`,
+`request_send`, `set_follow_up`; the prompt bullets. Tests: acceptance tests 3–6 in
+`tests/test_phase5b_leads.py`; `tests/test_stage2_changes.py` passes unchanged.
+
+Deferred to S5: replies, conversion, stats, briefing items, the stalled-outreach alert.
+
+Decisions where the spec was silent:
+- The "confirmation must come in a later message" rule applies to the assistant's
+  `confirm_action` tool. The dock's Confirm tap (`POST /actions/{id}/confirm`) passes
+  `human=True`, because a tap is itself the approval; without that a send requested in
+  conversation could never be confirmed from the dock.
+- A qualification score changes a lead's status only while the lead is `new`, `qualified`
+  or `disqualified`; a lead already contacted keeps its status and just gets the new score.
+- With no AI key, qualification reports the pre-score and stores nothing.
+- Revising a draft cancels the previous version only if it was still a draft; a version
+  that was already sent is left as it is. Cancelling a draft also closes its open
+  pending action.
+- A successful send moves the lead to `contacted` only from `new`, `qualified` or
+  `disqualified`, and does not create a second follow-up if one is already open.
+- A failed send leaves the lead untouched and creates no follow-up; the pending action
+  that triggered it is closed as `confirmed` (the approval was given; the channel failed).
+- `business_common.parse_day` is used for `set_follow_up` (it wraps
+  `syllabus.parse_date_text` and adds weekday names and "in 3 days").
+- `EmailChannel` already calls `integrations_email` when that module exists and reports
+  itself configured; until S19 it returns "email sending is not configured".
+
+Known limits:
+- A WhatsApp link is built from the stored digits exactly as the spec says. A local number
+  kept as typed (`0977…`) therefore produces `wa.me/0977…`, which WhatsApp does not accept;
+  only numbers stored with a country code (`+260…`) open correctly. See follow-ups.
+- In live voice the spoken "yes" counts as a later message only once its transcript line
+  has been saved; if the model confirms before that, it is told to wait, and the dock tap
+  works regardless.
+
 ## Environment variables added so far
 
 | Var | Default | Session | Purpose |
@@ -197,5 +238,9 @@ service after deployment.
   `[]` and a run proceeds on War Room and vault evidence only.
 
 ## Follow-ups noticed (not done here)
+
+- WhatsApp links for local numbers: add a default country code (for example an env var
+  `WHATSAPP_DEFAULT_COUNTRY_CODE=260`) applied only when building the `wa.me` link for a
+  number that starts with a single `0`. Today those links do not open a chat.
 
 - `tests/test_market_intel.py` uses the deprecated `Query.get()` in three places.
