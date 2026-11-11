@@ -36,7 +36,7 @@ const VIEWPORTS = [
 ];
 // "page:state" opens a page and then one of its sub-views (see show()).
 const PAGES = ["home", "timetable", "health", "syllabus", "history", "agents", "agents:detail", "business", "business:clients", "business:client",
-  "business:portfolio", "warroom", "annual", "guide", "settings"];
+  "business:portfolio", "warroom", "annual", "applications", "guide", "settings"];
 // Extra states worth seeing on the sheet (not part of the per-page consistency checks).
 const EXTRAS = ["stage", "menu"];
 
@@ -133,6 +133,21 @@ async function seedBusiness() {
   await api("POST", "/agents/portfolio_reviewer/run");
   await api("POST", "/agents/crm_housekeeper/run");
   await api("POST", "/agents/market_intel/run");
+  // Applications: one with a deadline, requirements in every state and gaps; one with nothing yet.
+  const wharton = (await api("POST", "/applications", { name: "Wharton", institution: "University of Pennsylvania", programme: "Huntsman Program", deadline: day(12) })).json;
+  const reqs = [
+    { title: "Personal essay", kind: "essay", details: "650 words", due_date: day(5) },
+    { title: "Huntsman essay", kind: "essay", details: "A global issue, 500 words" },
+    { title: "SAT or ACT scores", kind: "test" },
+    { title: "School transcript", kind: "transcript", details: "From your counsellor" },
+  ];
+  const rids = [];
+  for (const r of reqs) rids.push((await api("POST", `/applications/${wharton.id}/requirements`, r)).json.id);
+  await api("POST", `/requirements/${rids[1]}/advance`);
+  await api("PATCH", `/requirements/${rids[2]}`, { status: "ready" });
+  await api("PATCH", `/requirements/${rids[3]}`, { status: "submitted" });
+  await api("POST", `/requirements/${rids[0]}/todo`);
+  await api("POST", "/applications", { name: "Mastercard Foundation Scholarship", kind: "scholarship" });
   return { leadId: ids[0], clientId: c.id };
 }
 
@@ -154,7 +169,13 @@ function seedDraft(env) {
       "industry='retail pharmacy', customer_segment='independent pharmacies, Lusaka', scores=json.dumps(scores), overall_score=7.8, " +
       "recommendation='pursue', status='surfaced', first_customer_path='Walk into five pharmacies with a demo', " +
       "evidence=json.dumps([{'source_type': 'web', 'title': 'Pharmacy stockouts in Lusaka', 'ref': 'https://example.com/stockouts'}])))",
+    "wharton = db.query(models.Application).filter(models.Application.name == 'Wharton').first()",
+    "db.add(models.ApplicationGap(application_id=wharton.id, gap='No evidence of leadership outside school', severity='high', " +
+      "evidence='The profile lists projects but no team or community role', suggested_action='Write up the client work as a leadership example', status='open'))",
+    "db.add(models.ApplicationGap(application_id=wharton.id, gap='Maths syllabus is half revised', severity='medium', " +
+      "evidence='Syllabus progress', suggested_action='Finish P1 revision before the test date', status='open'))",
     "from datetime import datetime, timedelta",
+    "wharton.gaps_reviewed_at = datetime.utcnow() - timedelta(days=2)",
     "stale = db.query(models.Project).filter(models.Project.title == 'Newsletter').first()",
     "stale.last_activity_at = datetime.utcnow() - timedelta(days=20)",
     "db.commit()",

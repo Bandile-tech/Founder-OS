@@ -14,6 +14,7 @@
  *      payment marks it paid and logs the revenue
  *   6. Portfolio tab: Focus makes a project priority 1 and demotes the previous one
  *   7. Agents page: the registry lists the agents, the toggle switches one off, Run runs one
+ *   8. Applications page: a tap advances a requirement, Make it a task creates its task
  *
  * Run from the repo root:
  *     node tests/e2e/smoke.js
@@ -231,6 +232,23 @@ async function api(token, method, p, body, isForm) {
     await page.locator('#ag-list .row[data-key="portfolio_reviewer"]').click();
     await page.waitForSelector("#ag-runs .row", { timeout: 15000 });
     check((await page.locator("#ag-detail-head").textContent()).includes("Portfolio reviewer"), "a tap opens the agent with its run log");
+
+    // ── 8. Applications: advance and make a task ──
+    console.log("8. applications: advance a requirement, make it a task");
+    const appl = await api(token, "POST", "/applications", { name: "Smoke University", deadline: today });
+    const reqA = await api(token, "POST", `/applications/${appl.json.id}/requirements`, { title: "Personal essay", kind: "essay" });
+    await page.evaluate(() => openApplicationsTile());
+    await page.waitForSelector("#apps-body .row--tap", { timeout: 15000 });
+    check((await page.locator("#apps-body .card", { hasText: "Smoke University" }).textContent()).includes("At risk"), "an application due today with a missing requirement is marked at risk");
+    await page.locator("#apps-body .row--tap", { hasText: "Personal essay" }).locator(".row-title").click();
+    await page.waitForTimeout(1200);
+    let reqNow = (await api(token, "GET", `/applications/${appl.json.id}`)).json.requirements[0];
+    check(reqNow.status === "in_progress", "a tap moved the requirement to in progress");
+    await page.locator("#apps-body .row--tap", { hasText: "Personal essay" }).locator("button:has-text('Make it a task')").click();
+    await page.waitForTimeout(1200);
+    reqNow = (await api(token, "GET", `/applications/${appl.json.id}`)).json.requirements[0];
+    const taskRow = (await api(token, "GET", "/todos")).json.find((x) => x.id === reqNow.todo_id);
+    check(reqNow.status === "in_progress" && taskRow && taskRow.text === "Smoke University: Personal essay", "Make it a task created the task without moving the requirement");
 
     check(pageErrors.length === 0, `no page errors (${pageErrors.join("; ") || "none"})`);
   } catch (e) {

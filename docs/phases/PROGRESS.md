@@ -620,6 +620,43 @@ Decisions where the spec was silent:
   task" once it has a linked task. Applications past `preparing` produce no items.
 - `applications_at_risk` counts applications still in `researching` or `preparing`.
 
+### Applications UI (split from S22) (done)
+
+Shipped (`frontend/index.html`): an Applications item in the rail under Annual Targets and
+page `p-applications`. One card per application from `GET /applications` and
+`GET /applications/{id}`: status badge and an "At risk" badge; a Deadline tile with the
+countdown, the date and where the date came from ("you gave this date" / "from the
+requirements you pasted"), or "Unknown" with a prompt to supply it; a Ready tile with a
+progress bar; requirement rows with a status dot, kind, details and due date, where a tap
+on the row advances it (`POST /requirements/{id}/advance`) and Make it a task creates its
+dated task (`POST /requirements/{id}/todo`); open gaps with severity, evidence, the
+suggested next step and Addressed / Accept risk (`PATCH /gaps/{id}`); and Refresh review
+(`GET …/gaps?refresh=1`, with a loading state and a clear message when there is no AI
+key). Every tap's change goes to the dock's change strip with Undo. The home screen's
+Applications tile is now a live link.
+
+Also: `_bizTap` takes the page's own renderer, so other pages reuse the one-tap helper;
+`.kpi-sub.wrap` lets a KPI's caption wrap. `tests/e2e/screens.js` seeds two applications
+(one with a deadline, requirements in every state, a linked task and two gaps; one empty)
+and checks the page at all four sizes; `tests/e2e/smoke.js` gained an eighth flow (an
+application due today with a missing requirement shows "At risk"; a tap moves the
+requirement to in progress; Make it a task creates the task and leaves the status alone).
+
+Checked in headless Chrome at the four sizes. What the screenshots showed: the Wharton card
+reads "12 days · 24 Nov 2026 · you gave this date" with the red At risk badge and 2 of 4
+ready; the four requirement rows carry the red, amber, blue and green dots of the legend
+above them; the row with a task shows "Has a task" in place of the button; on the phone the
+two tiles sit side by side and each row wraps to title, status and button. First pass on
+the phone truncated the "Requirements ready" label and the deadline's caption; the label
+is now "Ready" and the caption wraps.
+
+Decisions where the spec was silent:
+- A requirement row is tappable as a whole (as on the Syllabus page) rather than carrying a
+  separate Advance button; Make it a task is the row's one button, and it is replaced by
+  "Has a task" once a task is linked.
+- The countdown tile says where the deadline came from, because the page must never make a
+  model-supplied date look like a fact.
+
 ## Environment variables added so far
 
 | Var | Default | Session | Purpose |

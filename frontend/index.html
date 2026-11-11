@@ -379,6 +379,7 @@ mark.hl{background:rgba(167,235,242,0.18);color:#fff;border-radius:3px;padding:0
 .kpi-value small{font-family:var(--font-body);font-size:var(--fs-sm);font-weight:500;color:var(--muted);margin-left:4px;letter-spacing:0}
 .kpi-value .green{color:#5EE8C8}.kpi-value .red{color:#FF8080}
 .kpi-sub{font-size:var(--fs-xs);color:var(--muted);margin-top:var(--sp-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kpi-sub.wrap{white-space:normal;line-height:1.45}
 .kpi .bar{margin-top:var(--sp-3);height:5px}
 
 /* Chip, empty, skeleton, table, markdown */
@@ -922,6 +923,10 @@ button.home-tile:active{transform:scale(0.98)}
       <span class="ni"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6.3"/><circle cx="8" cy="8" r="3.3"/><circle cx="8" cy="8" r="0.9" fill="currentColor" stroke="none"/></svg></span>
       <span class="nav-label">Annual Targets</span>
     </button>
+    <button class="nav-item" onclick="nav('applications',this)" title="Applications">
+      <span class="ni"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 13.6h12M3.4 13.6V7M12.6 13.6V7M6.2 13.6V9.4h3.6v4.2M1.6 7 8 3l6.4 4"/></svg></span>
+      <span class="nav-label">Applications</span>
+    </button>
     <button class="nav-item" onclick="nav('guide',this)" title="Design Guide">
       <span class="ni"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6.4"/><path d="M10.7 5.3 9.2 9.2l-3.9 1.5 1.5-3.9Z"/></svg></span>
       <span class="nav-label">Design Guide</span>
@@ -996,11 +1001,10 @@ button.home-tile:active{transform:scale(0.98)}
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="m10 9 5 3-5 3V9Z" fill="currentColor" stroke="none"/></svg>
             <div class="tt">Content</div><div class="ts">Ideas · Performance · Plan</div>
           </div>
-          <div class="home-tile c-applications soon" aria-disabled="true">
-            <span class="soon-tag">Soon</span>
+          <button class="home-tile c-applications" onclick="openApplicationsTile()">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18M5 21V10M19 21V10M9 21v-7h6v7M2 10 12 4l10 6"/></svg>
             <div class="tt">Applications</div><div class="ts">Wharton · Deadlines · Gaps</div>
-          </div>
+          </button>
           <button class="home-tile c-agents" onclick="openAgentsTile()">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3Z"/><path d="M19 17l.8 2.2L22 20l-2.2.8L19 23l-.8-2.2L16 20l2.2-.8L19 17Z"/></svg>
             <div class="tt">Agents</div><div class="ts">Schedules · Runs · Research</div>
@@ -1219,6 +1223,21 @@ button.home-tile:active{transform:scale(0.98)}
         <button class="tab" role="tab" data-tab="brand" onclick="businessTab('brand')">Brand</button>
       </div>
       <div id="biz-body" class="stack-lg"><div class="skel skel-row"></div><div class="skel skel-row"></div><div class="skel skel-row"></div></div>
+    </section>
+
+    <!-- ── APPLICATIONS — deadlines, requirements, gaps ── -->
+    <section class="page" id="p-applications">
+      <div class="page-head">
+        <div><div class="page-eyebrow">System</div><h1 class="page-title">Applications</h1><div class="page-sub">What each application needs, what is missing and when it is due. Tap a requirement to move it on.</div></div>
+        <div class="page-actions"><span class="badge badge--glow" id="apps-count">—</span></div>
+      </div>
+      <div class="chips" aria-label="Requirement states">
+        <span class="chip"><span class="dot danger"></span>Missing</span>
+        <span class="chip"><span class="dot warn"></span>In progress</span>
+        <span class="chip"><span class="dot blue"></span>Ready</span>
+        <span class="chip"><span class="dot success"></span>Submitted</span>
+      </div>
+      <div id="apps-body" class="stack-lg"><div class="skel skel-row"></div><div class="skel skel-row"></div><div class="skel skel-row"></div></div>
     </section>
 
     <!-- ── DESIGN GUIDE — the live tokens and components ── -->
@@ -2140,6 +2159,7 @@ function renderPage(page){
   else if(page==="warroom"){renderWarRoom()}
   else if(page==="agents"){renderAgents()}
   else if(page==="business"){renderBusiness()}
+  else if(page==="applications"){renderApplications()}
   else if(page==="settings"){renderSettings()}
   else if(page==="guide"){renderGuide()}
 }
@@ -2856,6 +2876,7 @@ function _afterWriteRefresh(){
   try{loadBriefing();}catch(_){}
   try{if(document.getElementById("p-syllabus")&&document.getElementById("p-syllabus").classList.contains("active")&&typeof renderSyllabus==="function")renderSyllabus();}catch(_){}
   try{if(document.getElementById("p-business")&&document.getElementById("p-business").classList.contains("active"))renderBusiness();}catch(_){}
+  try{if(document.getElementById("p-applications")&&document.getElementById("p-applications").classList.contains("active"))renderApplications();}catch(_){}
 }
 
 function renderChangesStrip(changes,container){
@@ -3695,15 +3716,16 @@ async function _bizGet(path){
   if(!r.ok)throw new Error("HTTP "+r.status);
   return r.json();
 }
-// One tap = one request. Shows what changed (with Undo) and redraws the tab.
-async function _bizTap(btn,method,path,body){
+// One tap = one request. Shows what changed (with Undo) and redraws the page
+// (the Business tab by default; another page passes its own renderer).
+async function _bizTap(btn,method,path,body,after){
   if(btn){btn.disabled=true;btn.classList.add("is-loading");}
   try{
     const r=await fetch(`${API_BASE}${path}`,{method,headers:body?{"Content-Type":"application/json"}:{},body:body?JSON.stringify(body):undefined});
     const data=await r.json().catch(()=>({}));
     if(!r.ok)throw new Error(data.detail||("HTTP "+r.status));
     showChanges((data.changes||(data.change?[data.change]:[])).filter(Boolean));
-    renderBusiness();
+    (after||renderBusiness)();
     try{loadBriefing();}catch(_){}
     return data;
   }catch(e){
@@ -4247,6 +4269,95 @@ async function dismissFinding(id,btn){
     await loadResearch();
     try{loadBriefing();}catch(_){}
   }catch(e){showToast("Dismiss failed: "+e.message,"error");}
+}
+
+/* ═══════════════════════════════════════════════════
+   APPLICATIONS — deadlines, requirements, gaps
+   Dates here come from Bandile or from text he pasted, never from the model.
+═══════════════════════════════════════════════════ */
+const REQ_TONE={missing:"danger",in_progress:"warn",ready:"blue",submitted:"success",not_required:""};
+const REQ_LABEL={missing:"Missing",in_progress:"In progress",ready:"Ready",submitted:"Submitted",not_required:"Not required"};
+
+function openApplicationsTile(){
+  nav("applications",document.querySelector(`.nav-item[onclick*="nav('applications'"]`));
+}
+
+async function renderApplications(){
+  const host=document.getElementById("apps-body");
+  if(!host)return;
+  let apps;
+  try{
+    const list=await _bizGet("/applications");
+    apps=await Promise.all(list.map(a=>_bizGet(`/applications/${Number(a.id)}`)));
+  }catch(_){
+    if(!host.dataset.ready)host.innerHTML=`<div class="card"><div class="empty">Waiting for the backend…</div></div>`;
+    return;
+  }
+  host.dataset.ready="1";
+  safeUpdate("apps-count",apps.length?`${apps.length} application${apps.length>1?"s":""}`:"None yet");
+  host.innerHTML=apps.length?apps.map(_applicationCard).join(""):`<div class="card"><div class="empty">No applications yet. Tell Founder OS what you are applying for, for example <b>add Wharton, deadline 1 January</b>, then paste its requirements page.</div></div>`;
+}
+
+function _applicationCard(a){
+  const id=Number(a.id), t=a.timeline||{}, c=t.requirements||{};
+  const days=t.days_to_deadline;
+  const source={user:"you gave this date",document:"from the requirements you pasted"}[a.deadline_source]||"";
+  const countdown=a.deadline==null?"Unknown":days<0?`${-days}d overdue`:`${days}<small>day${days===1?"":"s"}</small>`;
+  const total=Number(t.requirements_total||0), done=Number(c.ready||0)+Number(c.submitted||0);
+  const pct=total?Math.round(100*done/total):0;
+  const statusTone={researching:"badge--muted",preparing:"badge--glow",submitted:"badge--success",interview:"badge--purple",accepted:"badge--success",rejected:"badge--danger",withdrawn:"badge--muted"};
+  const reqs=a.requirements||[], gaps=a.gaps||[];
+  const sevTone={high:"badge--danger",medium:"badge--warn",low:"badge--muted"};
+  return `<div class="card" id="app-${id}">
+    <div class="card-head"><div class="card-title"><span>${escHtml(a.name)}</span></div>
+      <div class="cluster">${t.at_risk?`<span class="badge badge--danger">At risk</span>`:""}<span class="badge ${statusTone[a.status]||"badge--muted"}">${escHtml(_cap(a.status))}</span></div></div>
+    ${a.institution||a.programme?`<p class="hint">${escHtml([a.institution,a.programme].filter(Boolean).join(" · "))}</p>`:""}
+    <div class="kpis mt-3">
+      <div class="kpi"><div class="kpi-label">Deadline</div><div class="kpi-value">${a.deadline!=null&&days<0?`<span class="red">${countdown}</span>`:countdown}</div>
+        <div class="kpi-sub wrap">${a.deadline==null?"Tell Founder OS the date, or paste the requirements":escHtml(new Date(a.deadline+"T00:00:00").toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"}))+(source?" · "+escHtml(source):"")}</div></div>
+      <div class="kpi"><div class="kpi-label">Ready</div><div class="kpi-value">${done}<small>of ${total}</small></div>
+        <div class="bar"><div class="bar-fill" style="width:${pct}%"></div></div></div>
+    </div>
+    <div class="section-label mt-5">Requirements${total?` · ${Number(c.missing||0)} missing · ${Number(c.in_progress||0)} in progress`:""}</div>
+    ${reqs.length?`<div class="list">${reqs.map(r=>{
+      const rid=Number(r.id);
+      const sub=[_cap(r.kind),r.details||"",r.due_date?`due ${_day(r.due_date)}`:""].filter(Boolean).map(escHtml).join(" · ");
+      return `<div class="row row--tap row--wrap" role="button" tabindex="0" title="Tap to move to the next state" onclick="_bizTap(null,'POST','/requirements/${rid}/advance',null,renderApplications)" onkeydown="if(event.target===this&&(event.key==='Enter'||event.key===' ')){event.preventDefault();this.click()}">
+        <span class="dot ${REQ_TONE[r.status]||""}"></span>
+        <div class="row-main"><div class="row-title wrap">${escHtml(r.title)}</div>${sub?`<div class="row-sub wrap">${sub}</div>`:""}</div>
+        <span class="row-meta">${escHtml(REQ_LABEL[r.status]||r.status)}</span>
+        <div class="row-actions">${r.todo_id?`<span class="badge badge--muted">Has a task</span>`:(r.status==="missing"||r.status==="in_progress"?`<button class="btn btn--sm" onclick="event.stopPropagation();_bizTap(this,'POST','/requirements/${rid}/todo',null,renderApplications)">Make it a task</button>`:"")}</div>
+      </div>`;}).join("")}</div>`:`<div class="empty">No requirements yet. Paste the requirements page into the talk bar and Founder OS will build the checklist.</div>`}
+    <div class="section-label mt-5">Open gaps · ${gaps.length}</div>
+    ${gaps.length?`<div class="list">${gaps.map(g=>`<div class="row row--wrap">
+        <div class="row-main"><div class="row-title wrap">${escHtml(g.gap)}</div>
+          ${g.evidence?`<div class="row-sub wrap">${escHtml(g.evidence)}</div>`:""}
+          ${g.suggested_action?`<div class="row-sub wrap">Next: ${escHtml(g.suggested_action)}</div>`:""}</div>
+        <span class="badge ${sevTone[g.severity]||"badge--muted"}">${escHtml(g.severity)}</span>
+        <div class="row-actions">
+          <button class="btn btn--sm" onclick="_bizTap(this,'PATCH','/gaps/${Number(g.id)}',{status:'addressed'},renderApplications)">Addressed</button>
+          <button class="btn btn--ghost btn--sm" onclick="_bizTap(this,'PATCH','/gaps/${Number(g.id)}',{status:'accepted_risk'},renderApplications)">Accept risk</button>
+        </div>
+      </div>`).join("")}</div>`:`<div class="empty">${a.gaps_reviewed_at?"No open gaps from the last review.":"Not reviewed yet."}</div>`}
+    <div class="cluster mt-3">
+      <button class="btn btn--sm" onclick="refreshGapReview(${id},this)">Refresh review</button>
+      <span class="hint">${a.gaps_reviewed_at?`Reviewed ${escHtml(_ago(a.gaps_reviewed_at))}. This is Founder OS's reading of your notes and progress.`:"The review reads your requirements, profile, syllabus progress and notes."}</span>
+    </div>
+  </div>`;
+}
+
+async function refreshGapReview(id,btn){
+  if(btn){btn.disabled=true;btn.classList.add("is-loading");}
+  try{
+    const r=await fetch(`${API_BASE}/applications/${Number(id)}/gaps?refresh=1`);
+    const d=await r.json().catch(()=>({}));
+    if(r.status===503)throw new Error("the review needs the AI key, which is not set");
+    if(!r.ok)throw new Error(d.detail||("HTTP "+r.status));
+    const n=(d.gaps||[]).length;
+    showToast(n?`${n} open gap${n>1?"s":""} found`:"No gaps found","success");
+  }catch(e){showToast("Review did not run: "+e.message,"error");}
+  await renderApplications();
+  try{loadBriefing();}catch(_){}
 }
 
 function renderGuide(){
