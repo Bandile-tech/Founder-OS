@@ -402,11 +402,53 @@ Decisions where the spec was silent:
 - A pipeline entry is "stale" when its `updated_at` is 14 or more days old; the overdue
   rule (48) takes precedence over the stale rule (30).
 
+### S13 — 6B.1 agent runner, registry, schedules, events, cost attribution, jobs tick (done)
+
+Shipped: `backend/agents/` — `base.py` (`Schedule`, `Permissions`, `AgentSpec`,
+`AgentContext` with the allow-listed `run_tool`, `notify`, `emit`, `log`, `AgentResult`),
+`schedule.py` (`due`, `effective`, `describe`, `next_due`, the user's zone), `runner.py`
+(`run_agent` steps 1–6, `tick` steps 1–5, the permission audit, `update_agent`, `due_now`),
+`__init__.py` (`REGISTRY`, `register`, `ordered_specs`, `emit`, `load_all`); models `Agent`,
+`AgentRun`, `AgentEvent`, `JobTick` and `llm_usage.agent_run_id` (m020, RLS);
+`llm.set_run_context` / `clear_run_context` / `current_run_id` / `BudgetExceeded`, with
+`log_usage(..., agent_run_id=)` and the call cap in `chat_completion` and `embed_texts`;
+`POST /jobs/tick` (its own token, exempt from the login) and `GET /jobs/status`; a startup
+warning for a short `JOBS_TOKEN`; the new env vars in `CLAUDE.md`. Tests:
+`tests/test_phase6b_agents.py` (acceptance tests 1–8 and 11).
+
+Deferred to S14: the shipped agents, `agents/api.py`, the three tools, the in-process tick
+job and the workflow file.
+
+Decisions where the spec was silent:
+- Test 8 needs a logged toggle before the `PATCH /agents/{key}` endpoint exists (S14), so
+  the toggle lives in a primitive, `runner.update_agent`, which the endpoint and the tool
+  will call. `interval_minutes=0`, `at_time=""` and `weekdays=[]` clear an override.
+- A schedule override of one kind replaces the spec's kind: giving an agent an `at_time`
+  makes it daily; giving it an interval (with no `at_time` override) makes it an interval
+  agent.
+- The first due agent of a tick always runs; the budget is checked before each later one.
+  `JOBS_TICK_BUDGET=0` therefore runs exactly one agent per tick.
+- `agent_runs.trigger` is `schedule` for the external tick, `in_process` for the in-process
+  one, `manual` for a manual tick or Run now, and `event` when only an event made it due.
+- An event stays unconsumed until an agent that subscribes to it actually runs; after 24
+  hours it is marked consumed and `dropped`.
+- A failed run rolls back whatever it had not committed; what it had committed stays and is
+  undoable from the run's batch. The audit runs for failed runs as well.
+- `chat_text` goes through `chat_completion`, so one call counts once against the cap.
+- The runner and the tick catch a failure to open a database session too (found by a test),
+  so neither can raise into the HTTP handler or the scheduler thread.
+- `FOUNDER_OS_TZ` falls back to a fixed UTC+2 when the machine has no time-zone database
+  and the zone is the default; `tzdata` is already pinned in `requirements.txt`.
+
 ## Environment variables added so far
 
 | Var | Default | Session | Purpose |
 |---|---|---|---|
 | `RESEARCH_MODEL` | the assistant model | S1 | Model for the market-intelligence roles |
+| `JOBS_TOKEN` | unset | S13 | Secret for `POST /jobs/tick`; unset means 503. 32+ random characters |
+| `FOUNDER_OS_TZ` | `Africa/Lusaka` | S13 | Zone for agent schedules and notification times |
+| `JOBS_TICK_BUDGET` | `80` | S13 | Seconds a tick may spend starting agents |
+| `JOBS_IN_PROCESS` | `1` | S13 (used from S14) | `0` turns off the in-process 15-minute tick |
 
 ## VERIFY items (from the specs)
 

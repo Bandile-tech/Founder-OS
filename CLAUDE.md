@@ -42,6 +42,11 @@ Environment (`backend/.env` locally, Render env vars in production):
 | `REALTIME_MODEL` | `gpt-realtime-2.1-mini` | Live voice (current mini realtime model, checked 2026-11-05) |
 | `ASSISTANT_HISTORY_TURNS` / `ASSISTANT_SUMMARY_BATCH` | `20` / `10` | History budget |
 | `INTENT_CONFIDENCE_MIN` | `0.7` | Below this an extracted item becomes a suggestion |
+| `RESEARCH_MODEL` | the assistant model | Model for the market-intelligence roles |
+| `JOBS_TOKEN` | unset | Secret for `POST /jobs/tick` (the scheduler). Unset: the endpoint answers 503. Use 32+ random characters |
+| `FOUNDER_OS_TZ` | `Africa/Lusaka` | The zone agent schedules and notification times are read in |
+| `JOBS_TICK_BUDGET` | `80` | Seconds a tick may spend starting agents; the rest run on the next tick |
+| `JOBS_IN_PROCESS` | `1` | `0` turns off the in-process 15-minute tick (the external tick still works) |
 
 Tests (OpenAI is always mocked; the suite must pass with no key set):
 ```

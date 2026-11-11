@@ -190,6 +190,7 @@ class LLMUsage(Base):
     output_tokens = Column(Integer, default=0)
     estimated_cost_usd = Column(Float, default=0.0)
     duration_ms = Column(Integer, nullable=True)
+    agent_run_id = Column(Integer, nullable=True, index=True)   # the agent run that made the call
 
 
 class BibleEntry(Base):
@@ -998,3 +999,77 @@ class ProjectUpdate(Base):
     occurred_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     source      = Column(String, default="conversation")
     created_at  = Column(DateTime, default=datetime.utcnow)
+
+
+# ── PHASE 6B: AGENTS ─────────────────────────────────────────
+
+class Agent(Base):
+    """One row per registered agent. The registry in code is the source of truth; this
+    table holds the toggle, schedule overrides and last-run facts."""
+    __tablename__ = "agents"
+
+    id               = Column(Integer, primary_key=True, index=True)
+    key              = Column(String, nullable=False, unique=True)
+    enabled          = Column(Boolean, nullable=False, default=True)
+    interval_minutes = Column(Integer, nullable=True)      # overrides, nullable
+    at_time          = Column(String, nullable=True)
+    weekdays_json    = Column(Text, nullable=True)
+    config_json      = Column(Text, nullable=True)
+    last_run_at      = Column(DateTime, nullable=True)
+    last_status      = Column(String, nullable=True)
+    last_summary     = Column(String, nullable=True)
+    runs_count       = Column(Integer, default=0)
+    cost_usd_total   = Column(Float, default=0.0)
+    created_at       = Column(DateTime, default=datetime.utcnow)
+    updated_at       = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class AgentRun(Base):
+    """The activity log: one row per run. status: running|completed|skipped|failed|violation."""
+    __tablename__ = "agent_runs"
+
+    id            = Column(Integer, primary_key=True, index=True)
+    agent_key     = Column(String, nullable=False)
+    trigger       = Column(String, nullable=False)          # schedule|event|manual|in_process
+    tick_id       = Column(Integer, nullable=True)
+    started_at    = Column(DateTime, nullable=False, default=datetime.utcnow)
+    finished_at   = Column(DateTime, nullable=True)
+    status        = Column(String, nullable=False, default="running")
+    summary       = Column(String, nullable=True)
+    result_json   = Column(Text, nullable=True)
+    error         = Column(Text, nullable=True)
+    log_text      = Column(Text, nullable=True)
+    llm_calls     = Column(Integer, default=0)
+    cost_usd      = Column(Float, default=0.0)
+    changes_count = Column(Integer, default=0)
+    batch_id      = Column(String, nullable=True)
+    over_time     = Column(Boolean, default=False)
+
+
+class AgentEvent(Base):
+    """Something happened that an agent may react to on the next tick."""
+    __tablename__ = "agent_events"
+
+    id           = Column(Integer, primary_key=True, index=True)
+    kind         = Column(String, nullable=False)
+    payload_json = Column(Text, nullable=True)
+    created_at   = Column(DateTime, nullable=False, default=datetime.utcnow)
+    consumed_at  = Column(DateTime, nullable=True)
+    dropped      = Column(Boolean, default=False)
+    source       = Column(String, nullable=True)
+
+
+class JobTick(Base):
+    """One row per tick. trigger: github|manual|in_process."""
+    __tablename__ = "job_ticks"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    trigger         = Column(String, nullable=False)
+    started_at      = Column(DateTime, nullable=True)
+    finished_at     = Column(DateTime, nullable=True)
+    agents_run      = Column(Integer, nullable=True)
+    agents_skipped  = Column(Integer, nullable=True)
+    events_consumed = Column(Integer, nullable=True)
+    errors          = Column(Integer, nullable=True)
+    duration_ms     = Column(Integer, nullable=True)
+    summary_json    = Column(Text, nullable=True)

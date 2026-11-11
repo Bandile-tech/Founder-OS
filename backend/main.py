@@ -139,6 +139,8 @@ async def startup():
     from migrations.m004_warroom import run as run_m004
     if not _auth.auth_required():
         print("[startup] WARNING: FOUNDER_OS_PASSWORD is not set — the API is open. Set it on Render.")
+    if os.getenv("JOBS_TOKEN") and len(os.getenv("JOBS_TOKEN")) < 32:
+        print("[startup] WARNING: JOBS_TOKEN is shorter than 32 characters. Use a longer random value.")
     db = SessionLocal()
     try:
         load_kpi_state(db)
@@ -172,6 +174,8 @@ async def startup():
         run_m016(db)        # m016 — contacts, deals, projects, payments, recurring_revenue, communications
         from migrations.m018_portfolio import run as run_m018
         run_m018(db)        # m018 — project_updates
+        from migrations.m020_agents import run as run_m020
+        run_m020(db)        # m020 — agents, agent_runs, agent_events, job_ticks, llm_usage.agent_run_id
         _validate_schema(engine)   # raises if any ORM column is absent from the live DB
         _seed_non_negotiables_if_empty(db)
         _verify_seed_integrity(db)
@@ -2515,7 +2519,55 @@ def research_memory(db: Session = Depends(get_db)):
     } for n in notes]
 
 
-# ── SOCIAL SCORE ──────────────────────────────────────────────
+# ── JOBS — the scheduler of record (ADR-0001) ─────────────────
+
+def _jobs_in_process() -> bool:
+    return (os.getenv("JOBS_IN_PROCESS", "1") or "1").strip().lower() not in ("0", "false", "no", "off")
+
+
+@app.post("/jobs/tick")
+def jobs_tick(request: Request):
+    """Run every due agent once. Called by the scheduler with ``X-Jobs-Token``; exempt from
+    the session login and gated by its own token. 503 until ``JOBS_TOKEN`` is set."""
+    import hmac
+    from agents import runner
+    expected = os.getenv("JOBS_TOKEN") or ""
+    if not expected:
+        raise HTTPException(503, "JOBS_TOKEN is not set")
+    given = request.headers.get("x-jobs-token") or ""
+    if not hmac.compare_digest(given.encode("utf-8"), expected.encode("utf-8")):
+        raise HTTPException(401, "Invalid jobs token")
+    import agents
+    agents.load_all()
+    return runner.tick("github")
+
+
+@app.get("/jobs/status")
+def jobs_status(db: Session = Depends(get_db)):
+    """When the scheduler last ran, and what is due now."""
+    import agents
+    from agents import runner
+    agents.load_all()
+    last = db.query(models.JobTick).order_by(models.JobTick.id.desc()).first()
+    since = datetime.utcnow() - timedelta(hours=24)
+    try:
+        due = runner.due_now(db)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[jobs] could not compute due agents: {exc}")
+        due = []
+    return {
+        "last_tick": ({"id": last.id, "trigger": last.trigger, "started_at": last.started_at,
+                       "finished_at": last.finished_at, "agents_run": last.agents_run,
+                       "agents_skipped": last.agents_skipped, "events_consumed": last.events_consumed,
+                       "errors": last.errors, "duration_ms": last.duration_ms} if last else None),
+        "ticks_24h": db.query(models.JobTick).filter(models.JobTick.started_at >= since).count(),
+        "agents_due_now": due,
+        "token_configured": bool(os.getenv("JOBS_TOKEN")),
+        "in_process_scheduler": _jobs_in_process(),
+    }
+
+
+# ── SOCIAL SCORE ──────────────────────────────────────────────# ── SOCIAL SCORE ──────────────────────────────────────────────
 @app.get("/social-score")
 def get_social_score(db: Session = Depends(get_db)):
     latest = db.query(SocialScore).order_by(SocialScore.date.desc()).first()

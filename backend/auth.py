@@ -28,7 +28,8 @@ from pydantic import BaseModel
 router = APIRouter()
 
 # "/" and "/index.html" only 307 to "/app/" (main.root_redirect); they serve no files.
-EXEMPT_EXACT = {"/health", "/ping", "/auth/login", "/auth/status", "/", "/index.html"}
+# /jobs/tick is called by the scheduler, not a signed-in user: it checks its own token.
+EXEMPT_EXACT = {"/health", "/ping", "/auth/login", "/auth/status", "/", "/index.html", "/jobs/tick"}
 EXEMPT_PREFIXES = ("/app/",)   # the static frontend mount; "/app" itself redirects to "/app/"
 DEFAULT_ORIGINS = ["http://127.0.0.1:8000", "http://localhost:8000"]
 
