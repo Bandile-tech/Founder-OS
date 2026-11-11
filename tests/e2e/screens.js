@@ -17,7 +17,7 @@
  * Needs: Python env with the backend requirements (PYTHON env var, default `python`) and the
  * `playwright` npm package with Chromium installed. Env: PORT (default 8766), SHEET=path, PW_CHANNEL=msedge to use an installed browser.
  */
-const { spawn } = require("child_process");
+const { spawn, spawnSync } = require("child_process");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -34,7 +34,9 @@ const VIEWPORTS = [
   { name: "1920x1080", width: 1920, height: 1080 },
   { name: "390x844", width: 390, height: 844, mobile: true },
 ];
-const PAGES = ["home", "timetable", "health", "syllabus", "history", "agents", "warroom", "annual", "guide", "settings"];
+// "page:state" opens a page and then one of its sub-views (see show()).
+const PAGES = ["home", "timetable", "health", "syllabus", "history", "agents", "business", "business:clients", "business:client",
+  "warroom", "annual", "guide", "settings"];
 // Extra states worth seeing on the sheet (not part of the per-page consistency checks).
 const EXTRAS = ["stage", "menu"];
 
@@ -87,6 +89,47 @@ async function seed() {
   // A short conversation for the Conversations page (saved like live-voice transcript lines).
   await api("POST", "/voice/realtime/transcript", { role: "user", text: "Revised S1 probability, still shaky on conditional probability." });
   await api("POST", "/voice/realtime/transcript", { role: "assistant", text: "Marked S1 Probability as revised and saved the note about conditional probability." });
+  await seedBusiness();
+}
+
+// Leads, a draft, a client with a contact, a deal, payments and a conversation (all synthetic).
+async function seedBusiness() {
+  const day = (n) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
+  const leads = [
+    { name: "Mercy Banda", company: "Sunrise Pharmacy", segment: "Lusaka pharmacies", location: "Lusaka", whatsapp: "+260 977 123 456" },
+    { name: "Joseph Phiri", company: "Golden Crust Bakery", segment: "Kitwe bakeries", location: "Kitwe", email: "joseph@goldencrust.example" },
+    { name: "Chanda Mwila", company: "Mwila Salon", segment: "Lusaka pharmacies", location: "Ndola", phone: "0977 555 010" },
+    { name: "Ruth Zulu", company: "Hope Academy", segment: "Schools", location: "Lusaka", email: "ruth@hopeacademy.example" },
+  ];
+  const ids = [];
+  for (const l of leads) ids.push((await api("POST", "/leads", l)).json.id);
+  await api("PATCH", `/leads/${ids[1]}`, { status: "contacted" });
+  await api("PATCH", `/leads/${ids[2]}`, { status: "qualified" });
+  await api("POST", `/leads/${ids[3]}/replied`, { summary: "Wants a demo on Friday" });
+  const c = (await api("POST", "/clients", { name: "Wamu's Bakes & Cakes", company: "Wamu's Bakes", status: "active", service: "Website" })).json;
+  await api("POST", `/clients/${c.id}/contacts`, { name: "Wamu Tembo", role: "Owner", phone: "+260 966 100 200", is_primary: true });
+  await api("POST", "/deals", { client_id: c.id, title: "Online ordering", amount: 8000, currency: "ZMW", stage: "proposal", expected_close: day(20) });
+  await api("POST", "/payments", { client_id: c.id, amount: 2000, currency: "ZMW", title: "Website deposit", due_date: day(-3) });
+  await api("POST", "/payments", { client_id: c.id, amount: 1500, currency: "ZMW", title: "Final invoice", due_date: day(10) });
+  await api("POST", "/recurring", { client_id: c.id, title: "Hosting retainer", amount: 600, currency: "ZMW", interval: "monthly", start: day(12) });
+  await api("POST", "/communications", { client_id: c.id, channel: "call", direction: "out", summary: "Agreed the gallery page and the order form" });
+  await api("POST", "/clients", { name: "Hope Clinic", status: "prospect" });
+  return { leadId: ids[0], clientId: c.id };
+}
+
+// A draft needs the model, which the checks never call: write one straight into the database.
+function seedDraft(env) {
+  const code = [
+    "import models",
+    "from database import SessionLocal",
+    "db = SessionLocal()",
+    "lead = db.query(models.Lead).filter(models.Lead.name == 'Mercy Banda').first()",
+    "db.add(models.OutreachMessage(lead_id=lead.id, channel='whatsapp', status='draft', brief='intro', " +
+      "body='Hi Mercy, I am Bandile. I build small stock-alert tools for pharmacies in Lusaka.\\n\\nCould I show you a two-minute demo this week?'))",
+    "db.commit()",
+  ].join("\n");
+  const r = spawnSync(PYTHON, ["-c", code], { cwd: path.join(ROOT, "backend"), env, encoding: "utf8" });
+  if (r.status !== 0) console.log("  (draft seed failed: " + String(r.stderr).slice(-300) + ")");
 }
 
 // Runs in the page: shell measurements, overflow and dock coverage for the active page.
@@ -133,13 +176,22 @@ function measure() {
 }
 
 async function show(page, name) {
-  await page.evaluate(async (name) => {
+  const [base, state] = name.split(":");
+  await page.evaluate(async ([base, state]) => {
     if (typeof closeStage === "function" && STAGE.open) closeStage();
     closeSidebar();
-    const el = document.querySelector(`.nav-item[onclick*="nav('${name}'"]`);
-    nav(name, el);
-  }, name);
-  await page.waitForTimeout(name === "home" ? 1200 : 900);
+    if (base === "business") {
+      BIZ.clientId = null;
+      BIZ.tab = state === "clients" || state === "client" ? "clients" : "pipeline";
+    }
+    const el = document.querySelector(`.nav-item[onclick*="nav('${base}'"]`);
+    nav(base, el);
+  }, [base, state || ""]);
+  await page.waitForTimeout(base === "home" ? 1200 : 900);
+  if (state === "client") {
+    await page.locator("#biz-body .row--tap", { hasText: "Wamu" }).first().click();
+    await page.waitForTimeout(700);
+  }
 }
 
 async function main() {
@@ -160,6 +212,7 @@ async function main() {
   try {
     await waitForServer();
     await seed();
+    seedDraft(env);
     browser = await chromium.launch(process.env.PW_CHANNEL ? { channel: process.env.PW_CHANNEL } : {});
     for (const vp of VIEWPORTS) {
       console.log(`${vp.name}`);
@@ -174,7 +227,7 @@ async function main() {
       table[vp.name] = {};
       for (const name of PAGES) {
         await show(page, name);
-        const file = path.join(OUT, vp.name, `${name}.png`);
+        const file = path.join(OUT, vp.name, `${name.replace(":", "-")}.png`);
         await page.screenshot({ path: file });
         shots.push({ vp: vp.name, page: name, file });
         const m = await page.evaluate(measure);

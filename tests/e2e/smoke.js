@@ -10,6 +10,8 @@
  *   3. advancing a syllabus row by tapping it
  *   4. a show_view directive (as the orchestrator emits it) opens the stage filtered to S1,
  *      Esc closes it, the close directive closes it
+ *   5. Business page: the Clients tab lists a client, a tap opens it, and Paid on a due
+ *      payment marks it paid and logs the revenue
  *
  * Run from the repo root:
  *     node tests/e2e/smoke.js
@@ -175,6 +177,24 @@ async function api(token, method, p, body, isForm) {
     check(!closed.shown && closed.orbHome, "Esc closed the stage and the orb returned home");
     await page.evaluate(() => { handleUiDirective({ view: "brief" }); handleUiDirective({ view: "close" }); });
     check(!(await page.evaluate(() => document.getElementById("stage").classList.contains("show"))), "close directive closes the stage");
+
+    // ── 5. Business: Clients → client → Paid ──
+    console.log("5. business: mark a payment paid");
+    const cl = await api(token, "POST", "/clients", { name: "Smoke Test Bakery", status: "active" });
+    const pay = await api(token, "POST", "/payments", { client_id: cl.json.id, amount: 1200, currency: "ZMW", title: "Deposit", due_date: today });
+    check(pay.status === 201 && pay.json.status === "due", "seeded a client with a due payment");
+    await page.evaluate(() => openBusinessTile("clients"));
+    await page.waitForSelector("#biz-body .row--tap", { timeout: 15000 });
+    check((await page.locator("#biz-tabs .tab.is-on").textContent()).trim() === "Clients", "the Clients tab is selected");
+    await page.locator("#biz-body .row--tap", { hasText: "Smoke Test Bakery" }).click();
+    await page.waitForSelector("#biz-body button:has-text('Paid')", { timeout: 15000 });
+    await page.locator("#biz-body button:has-text('Paid')").first().click();
+    await page.waitForTimeout(1200);
+    const paid = (await api(token, "GET", `/clients/${cl.json.id}`)).json.payments[0];
+    check(paid.status === "paid" && paid.revenue_id, "Paid marked the payment paid and linked its revenue");
+    const rev = (await api(token, "GET", "/revenue")).json.records.find((r) => r.id === paid.revenue_id);
+    check(rev && rev.amount === 1200 && rev.currency === "ZMW", "the revenue row was written in Kwacha");
+    check((await page.locator("#ucmd-changes .chg-row").count()) >= 1, "the change is shown with Undo in the dock");
 
     check(pageErrors.length === 0, `no page errors (${pageErrors.join("; ") || "none"})`);
   } catch (e) {

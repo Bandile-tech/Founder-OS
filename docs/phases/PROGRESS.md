@@ -248,6 +248,55 @@ Decisions where the spec was silent:
   request has expired; the draft is still on the Pipeline tab).
 - Quiet leads in the briefing use target type `lead`.
 
+### S11 — Phase 5 UI, part 1: Business page with Pipeline and Clients (done)
+
+Shipped (`frontend/index.html`): a Business item in the rail between Agents and War Room;
+page `p-business` with four tabs (Pipeline, Clients, Portfolio, Brand — the last two are
+placeholders until their sessions); the active tab is remembered in `localStorage`
+(`founderOS_bizTab`). The home screen's Business tile is now a live link.
+- Pipeline: a funnel line from `GET /outreach/stats`; "Drafts waiting" cards from
+  `GET /outreach?status=draft` with Approve & send (opens `open_url` in a new tab), Copy and
+  Dismiss; segment filter chips from `GET /leads/segments`; leads grouped by status, with
+  score and last-message badges and the follow-up date; one tap per row — Replied on a
+  contacted lead, Convert on a replied one; disqualified and lost leads collapsed.
+- Clients: a KPI strip from `GET /crm/summary`; client rows with a health dot, outstanding
+  and monthly recurring by currency; a tap opens the client (contacts, deals with stage
+  chips where the next stage is a button, payments with Paid on due and overdue rows, the
+  last ten conversations).
+- Every tap is one request; its `changes` go to the dock's change strip with Undo, and an
+  undo redraws the page. All text goes through `escHtml`.
+- Design system: two new shared components, `.tabs` / `.tab` and tappable `.chip`
+  (`.is-on`, `.is-dim`), added to the Design Guide page before use.
+- `tests/e2e/screens.js` now seeds business data and checks three more states (Pipeline,
+  Clients, one client) at all four sizes; `tests/e2e/smoke.js` gained a fifth flow (open a
+  client, tap Paid, confirm the payment and its revenue row on the backend).
+
+Checked in headless Chrome at 1280×720, 1536×864, 1920×1080 and 390×844. What the
+screenshots showed: the tabs, cards, rows and badges match the other pages; no horizontal
+scroll at any size; nothing is hidden under the talk bar; on the phone the draft card and
+the lead rows wrap cleanly and the deal's stage chips wrap to a second line; the client
+header shows the amber health badge and "K3,500 owed" for a client with an overdue payment.
+
+Where the prompt's names no longer exist: `.ar-btn-sm` / `.sr-btn` → `.btn.btn--sm`;
+`.badge b-glow|b-muted|b-suc|b-danger` → `.badge--glow|--muted|--success|--danger`;
+`.btn-danger` → `.btn--danger`; `renderChangesStrip` still exists and is used as is.
+
+Decisions where the spec was silent:
+- "At most one tap per row": a lead row offers Replied only while the lead is `contacted`
+  and Convert only once it has `replied`.
+- For a WhatsApp draft the new tab is opened inside the tap (so the browser does not block
+  it) and pointed at the `wa.me` link once the server has approved the send; if the send
+  fails the tab is closed and a toast offers Copy instead.
+- From `negotiation` a deal offers two next steps, Won and Lost; from `proposal`,
+  Negotiation and Lost; from `lead`, Proposal only.
+- The Clients KPI strip shows the summary's dollar totals (that is what
+  `GET /crm/summary` returns) with the Kwacha amount beneath where the endpoint gives one.
+
+Deferred / not built here:
+- There is no screen control for `POST /leads/import` or `POST /leads/qualify` (the session
+  rules allow no input beyond the dock and the segment chips). Leads arrive by
+  conversation; a CSV import needs the API until a button is added. See follow-ups.
+
 ## Environment variables added so far
 
 | Var | Default | Session | Purpose |
@@ -264,6 +313,12 @@ service after deployment.
   `[]` and a run proceeds on War Room and vault evidence only.
 
 ## Follow-ups noticed (not done here)
+
+- Pipeline tab: add an "Import CSV" button (file picker only) for `POST /leads/import`, and
+  a "Qualify" tap on a segment's unqualified leads for `POST /leads/qualify`. Both
+  endpoints exist and are tested; neither has a control on screen yet.
+- The Clients KPI strip is in dollars because `GET /crm/summary` reports `*_usd`. Bandile
+  works in Kwacha; consider adding ZMW totals to the summary and leading with them.
 
 - WhatsApp links for local numbers: add a default country code (for example an env var
   `WHATSAPP_DEFAULT_COUNTRY_CODE=260`) applied only when building the `wa.me` link for a

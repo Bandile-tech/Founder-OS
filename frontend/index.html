@@ -405,6 +405,19 @@ mark.hl{background:rgba(167,235,242,0.18);color:#fff;border-radius:3px;padding:0
 .md h1,.md h2,.md h3{color:#fff;font-size:var(--fs-md);margin:var(--sp-3) 0 var(--sp-1)}
 .md blockquote{border-left:2px solid var(--glow);padding-left:var(--sp-2);color:var(--muted)}
 
+/* Tabs — the sub-views of one page */
+.tabs{display:flex;gap:var(--sp-1);width:fit-content;max-width:100%;padding:3px;border-radius:var(--r-pill);background:var(--well);border:1px solid var(--line);overflow-x:auto;scrollbar-width:none}
+.tabs::-webkit-scrollbar{display:none}
+.tab{flex:none;height:calc(var(--control-h) - 8px);padding:0 var(--sp-4);border:none;border-radius:var(--r-pill);background:none;color:var(--text-2);font:inherit;font-size:var(--fs-sm);white-space:nowrap;cursor:pointer;transition:color var(--t-base),background-color var(--t-base)}
+@media(hover:hover) and (pointer:fine){.tab:hover{color:var(--text)}}
+.tab.is-on{color:#fff;background:rgba(167,235,242,0.14);box-shadow:inset 0 0 0 1px rgba(167,235,242,0.4)}
+/* Chips that filter or step a state are buttons; the current one is lit */
+button.chip{font:inherit;font-size:var(--fs-xs);cursor:pointer;transition:border-color var(--t-base),color var(--t-base)}
+@media(hover:hover) and (pointer:fine){button.chip:hover{border-color:rgba(167,235,242,0.45);color:var(--text)}}
+button.chip:active{transform:scale(0.97)}
+.chip.is-on{color:#E9FBFE;background:rgba(167,235,242,0.12);border-color:rgba(167,235,242,0.5)}
+.chip.is-dim{opacity:0.45}
+
 /* ═══ PAGES — only the layout the components above do not cover ═══ */
 /* Design guide */
 .gd-probe{position:absolute;visibility:hidden;height:0}
@@ -428,6 +441,9 @@ mark.hl{background:rgba(167,235,242,0.18);color:#fff;border-radius:3px;padding:0
 .score-val{min-width:2.5ch;font-size:var(--fs-md);font-weight:600;color:var(--glow);font-variant-numeric:tabular-nums;text-align:right}
 .tt-time{width:7.5em;color:var(--muted)}
 .row.is-now .tt-time{color:var(--glow)}
+/* Business */
+.draft-subject{margin-top:var(--sp-2);font-weight:600;color:#fff}
+.draft-body{margin-top:var(--sp-2);color:var(--text);white-space:pre-wrap;overflow-wrap:anywhere}
 .card--button{display:block;width:100%;text-align:left;font:inherit;color:inherit;cursor:pointer;transition:border-color var(--t-base),transform var(--t-fast) var(--ease-out)}
 @media(hover:hover) and (pointer:fine){.card--button:hover{border-color:var(--edge-hi)}}
 .card--button:active{transform:scale(0.995)}
@@ -894,6 +910,10 @@ button.home-tile:active{transform:scale(0.98)}
       <span class="ni"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="3.6" r="1.9"/><circle cx="3.4" cy="12.2" r="1.9"/><circle cx="12.6" cy="12.2" r="1.9"/><path d="M7.1 5.3 4.4 10.5M8.9 5.3l2.7 5.2M5.3 12.2h5.4"/></svg></span>
       <span class="nav-label">Agents</span>
     </button>
+    <button class="nav-item" onclick="nav('business',this)" title="Business">
+      <span class="ni"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4.8" width="12" height="8.6" rx="1.7"/><path d="M5.6 4.8V3.9a1.1 1.1 0 0 1 1.1-1.1h2.6a1.1 1.1 0 0 1 1.1 1.1v.9M2 8.4h12"/></svg></span>
+      <span class="nav-label">Business</span>
+    </button>
     <button class="nav-item" onclick="nav('warroom',this)" title="War Room">
       <span class="ni"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.6 13.6 4.8v6.4L8 14.4 2.4 11.2V4.8Z"/><circle cx="8" cy="8" r="1.1" fill="currentColor" stroke="none"/></svg></span>
       <span class="nav-label">War Room</span>
@@ -959,11 +979,10 @@ button.home-tile:active{transform:scale(0.98)}
         <div class="home-dock" id="home-dock"></div>
 
         <div class="home-tiles">
-          <div class="home-tile c-business soon" aria-disabled="true">
-            <span class="soon-tag">Soon</span>
+          <button class="home-tile c-business" onclick="openBusinessTile()">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="18" height="13" rx="2.5"/><path d="M8 7V5.5A1.5 1.5 0 0 1 9.5 4h5A1.5 1.5 0 0 1 16 5.5V7M3 12h18"/></svg>
             <div class="tt">Business</div><div class="ts">Pipeline · Outreach · Revenue</div>
-          </div>
+          </button>
           <button class="home-tile c-academics" onclick="openAcademicsTile()">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4 22 9l-10 5L2 9l10-5Z"/><path d="M6 11.5V16c0 1.7 2.7 3 6 3s6-1.3 6-3v-4.5"/><path d="M22 9v5"/></svg>
             <div class="tt">Academics</div><div class="ts">Syllabus · Exams · Study</div>
@@ -1178,6 +1197,20 @@ button.home-tile:active{transform:scale(0.98)}
       </div>
     </section>
 
+    <!-- ── BUSINESS — pipeline, clients, portfolio, brand ── -->
+    <section class="page" id="p-business">
+      <div class="page-head">
+        <div><div class="page-eyebrow">Business</div><h1 class="page-title">Business</h1><div class="page-sub">Tell Founder OS what happened. Tap here to approve, correct or mark something done.</div></div>
+      </div>
+      <div class="tabs" id="biz-tabs" role="tablist" aria-label="Business views">
+        <button class="tab" role="tab" data-tab="pipeline" onclick="businessTab('pipeline')">Pipeline</button>
+        <button class="tab" role="tab" data-tab="clients" onclick="businessTab('clients')">Clients</button>
+        <button class="tab" role="tab" data-tab="portfolio" onclick="businessTab('portfolio')">Portfolio</button>
+        <button class="tab" role="tab" data-tab="brand" onclick="businessTab('brand')">Brand</button>
+      </div>
+      <div id="biz-body" class="stack-lg"><div class="skel skel-row"></div><div class="skel skel-row"></div><div class="skel skel-row"></div></div>
+    </section>
+
     <!-- ── DESIGN GUIDE — the live tokens and components ── -->
     <section class="page" id="p-guide">
       <div class="page-head">
@@ -1234,6 +1267,9 @@ button.home-tile:active{transform:scale(0.98)}
         <div class="cluster"><button class="btn btn--primary">Primary</button><button class="btn">Default</button><button class="btn btn--ghost">Ghost</button><button class="btn btn--danger">Delete</button><button class="btn btn--sm">Small</button><button class="btn btn--icon" aria-label="Close">✕</button></div>
         <div class="section-label">Inputs</div>
         <div class="form-row"><input class="input" placeholder="Text input"><select class="select input--narrow" aria-label="Example"><option>Select</option></select><input class="input input--num" type="number" placeholder="0"></div>
+        <div class="section-label">Tabs and filter chips</div>
+        <div class="cluster"><div class="tabs"><button class="tab is-on">Pipeline</button><button class="tab">Clients</button><button class="tab">Portfolio</button></div>
+          <div class="chips"><button class="chip is-on">All</button><button class="chip">Pharmacies · 4</button><span class="chip is-dim">Won</span></div></div>
         <div class="section-label">Toggles and badges</div>
         <div class="cluster"><button class="toggle is-on">Done</button><button class="toggle">Pending</button><button class="toggle is-off">Missed</button>
           <div class="seg"><button>1</button><button>2</button><button class="is-on">3</button><button>4</button><button>5</button></div></div>
@@ -2088,6 +2124,7 @@ function renderPage(page){
   else if(page==="timetable"){renderTimetable()}
   else if(page==="warroom"){renderWarRoom()}
   else if(page==="agents"){renderAgents()}
+  else if(page==="business"){renderBusiness()}
   else if(page==="settings"){renderSettings()}
   else if(page==="guide"){renderGuide()}
 }
@@ -2838,6 +2875,7 @@ function _afterWriteRefresh(){
   try{syncFromBackend();}catch(_){}
   try{loadBriefing();}catch(_){}
   try{if(document.getElementById("p-syllabus")&&document.getElementById("p-syllabus").classList.contains("active")&&typeof renderSyllabus==="function")renderSyllabus();}catch(_){}
+  try{if(document.getElementById("p-business")&&document.getElementById("p-business").classList.contains("active"))renderBusiness();}catch(_){}
 }
 
 function renderChangesStrip(changes,container){
@@ -3644,6 +3682,293 @@ function toggleLiveVoice(){
 /* ═══════════════════════════════════════════════════
    DESIGN GUIDE — reads the live token values from the stylesheet
 ═══════════════════════════════════════════════════ */
+/* ═══════════════════════════════════════════════════
+   BUSINESS — pipeline, clients, portfolio, brand
+   A page for looking and for one-tap corrections. Facts come in through the talk bar.
+═══════════════════════════════════════════════════ */
+const BIZ_TABS=["pipeline","clients","portfolio","brand"];
+const BIZ={tab:null,segment:"",clientId:null,showClosed:false,drafts:{},seq:0};
+const LEAD_GROUPS=[["new","New"],["qualified","Qualified"],["contacted","Contacted"],["replied","Replied"],["converted","Converted"]];
+const DEAL_PATH=["lead","proposal","negotiation","won"];
+
+function _bizTab(){
+  if(!BIZ.tab){
+    let t="pipeline";
+    try{t=localStorage.getItem("founderOS_bizTab")||"pipeline";}catch(_){}
+    BIZ.tab=BIZ_TABS.includes(t)?t:"pipeline";
+  }
+  return BIZ.tab;
+}
+function businessTab(tab){
+  if(!BIZ_TABS.includes(tab))return;
+  BIZ.tab=tab;
+  try{localStorage.setItem("founderOS_bizTab",tab);}catch(_){}
+  renderBusiness();
+}
+function openBusinessTile(tab){
+  if(tab&&BIZ_TABS.includes(tab)){BIZ.tab=tab;try{localStorage.setItem("founderOS_bizTab",tab);}catch(_){}}
+  nav("business",document.querySelector(`.nav-item[onclick*="nav('business'"]`));
+}
+
+async function _bizGet(path){
+  const r=await fetch(`${API_BASE}${path}`);
+  if(!r.ok)throw new Error("HTTP "+r.status);
+  return r.json();
+}
+// One tap = one request. Shows what changed (with Undo) and redraws the tab.
+async function _bizTap(btn,method,path,body){
+  if(btn){btn.disabled=true;btn.classList.add("is-loading");}
+  try{
+    const r=await fetch(`${API_BASE}${path}`,{method,headers:body?{"Content-Type":"application/json"}:{},body:body?JSON.stringify(body):undefined});
+    const data=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(data.detail||("HTTP "+r.status));
+    const changes=(data.changes||(data.change?[data.change]:[])).filter(Boolean);
+    if(changes.length)renderChangesStrip(changes);
+    renderBusiness();
+    try{loadBriefing();}catch(_){}
+    return data;
+  }catch(e){
+    showToast("Could not do that: "+e.message,"error");
+    if(btn){btn.disabled=false;btn.classList.remove("is-loading");}
+    return null;
+  }
+}
+
+function _money(amount,currency){
+  const n=Number(amount||0);
+  const txt=n.toLocaleString("en-GB",{maximumFractionDigits:Number.isInteger(n)?0:2});
+  return (String(currency||"ZMW").toUpperCase()==="ZMW"?"K":"$")+txt;
+}
+function _moneyBy(totals){
+  const by=(totals&&totals.by_currency)||{};
+  const parts=Object.keys(by).filter(k=>by[k]).map(k=>_money(by[k],k));
+  return parts.length?parts.join(" + "):"—";
+}
+function _usd(n){return "$"+Number(n||0).toLocaleString("en-GB",{maximumFractionDigits:0});}
+function _day(s){
+  if(!s)return "";
+  const d=new Date(String(s).length<=10?s+"T00:00:00":s);
+  return isNaN(d)?"":d.toLocaleDateString("en-GB",{day:"numeric",month:"short"});
+}
+function _pct(x){return Math.round(Number(x||0)*100)+"%";}
+function _cap(s){s=String(s||"");return s.charAt(0).toUpperCase()+s.slice(1);}
+
+async function renderBusiness(){
+  const host=document.getElementById("biz-body");
+  if(!host)return;
+  const tab=_bizTab();
+  document.querySelectorAll("#biz-tabs .tab").forEach(b=>{
+    const on=b.dataset.tab===tab;
+    b.classList.toggle("is-on",on);b.setAttribute("aria-selected",String(on));
+  });
+  if(host.dataset.tab!==tab){
+    host.dataset.tab=tab;
+    host.innerHTML=`<div class="skel skel-row"></div><div class="skel skel-row"></div><div class="skel skel-row"></div>`;
+  }
+  const seq=++BIZ.seq;
+  let html;
+  try{
+    if(tab==="pipeline")html=await renderPipeline();
+    else if(tab==="clients")html=await renderClients();
+    else html=`<div class="card"><div class="empty">${tab==="portfolio"?"Portfolio":"Brand"} — coming in the next session.</div></div>`;
+  }catch(e){
+    html=`<div class="card"><div class="empty">Waiting for the backend…</div></div>`;
+  }
+  if(seq===BIZ.seq&&_bizTab()===tab)host.innerHTML=html;   // a newer render wins
+}
+
+/* ── Pipeline ── */
+async function renderPipeline(){
+  const seg=BIZ.segment;
+  const [segments,leads,drafts,stats]=await Promise.all([
+    _bizGet("/leads/segments"),
+    _bizGet("/leads?limit=300"+(seg?`&segment=${encodeURIComponent(seg)}`:"")),
+    _bizGet("/outreach?status=draft"),
+    _bizGet("/outreach/stats"),
+  ]);
+  BIZ.drafts={};
+  drafts.forEach(d=>{BIZ.drafts[d.id]=d;});
+  const t=stats.totals||{};
+  const funnel=`<div class="card">
+    <div class="card-head"><div class="card-title"><span>Outreach, last ${Number(stats.days||90)} days</span></div><span class="badge badge--muted">${Number(t.leads||0)} leads</span></div>
+    <div class="cluster">
+      <span class="badge badge--glow">${Number(t.contacted||0)} contacted</span><span class="muted" aria-hidden="true">→</span>
+      <span class="badge badge--purple">${Number(t.replied||0)} replied · ${_pct(t.reply_rate)}</span><span class="muted" aria-hidden="true">→</span>
+      <span class="badge badge--success">${Number(t.converted||0)} converted · ${_pct(t.conversion_rate)}</span>
+    </div>
+  </div>`;
+
+  const draftCards=drafts.length?`<div class="card">
+    <div class="card-head"><div class="card-title"><span>Drafts waiting</span></div><span class="badge badge--warn">${drafts.length}</span></div>
+    <p class="hint">Nothing is sent until you approve it. To change a draft, tell Founder OS what to change.</p>
+    <div class="mt-3">${drafts.map(d=>`<div class="result draft" id="draft-${Number(d.id)}">
+      <div class="cluster"><b>${escHtml(d.lead_name||"Lead")}</b><span class="badge badge--muted">${escHtml(d.channel)}</span>${Number(d.version)>1?`<span class="badge badge--muted">v${Number(d.version)}</span>`:""}</div>
+      ${d.subject?`<div class="draft-subject">${escHtml(d.subject)}</div>`:""}
+      <div class="draft-body">${escHtml(d.body||"")}</div>
+      <div class="cluster mt-3">
+        <button class="btn btn--primary btn--sm" onclick="draftSend(${Number(d.id)},this)">Approve &amp; send</button>
+        <button class="btn btn--sm" onclick="draftCopy(${Number(d.id)})">Copy</button>
+        <button class="btn btn--ghost btn--sm" onclick="_bizTap(this,'POST','/outreach/${Number(d.id)}/cancel')">Dismiss</button>
+      </div>
+    </div>`).join("")}</div>
+  </div>`:"";
+
+  const named=segments.filter(s=>s.segment);
+  const chips=named.length?`<div class="chips" role="group" aria-label="Segment">
+    <button class="chip ${seg?"":"is-on"}" onclick="pipelineSegment('')">All</button>
+    ${named.map(s=>`<button class="chip ${seg===s.segment?"is-on":""}" data-seg="${escHtml(s.segment)}" onclick="pipelineSegment(this.dataset.seg)">${escHtml(_cap(s.segment))} · ${Number(s.total)}</button>`).join("")}
+  </div>`:"";
+
+  const groups=LEAD_GROUPS.map(([status,label])=>{
+    const rows=leads.filter(l=>l.status===status);
+    if(!rows.length)return "";
+    return `<div class="section-label">${label} · ${rows.length}</div><div class="list">${rows.map(_leadRow).join("")}</div>`;
+  }).join("");
+  const closed=leads.filter(l=>l.status==="disqualified"||l.status==="lost");
+  const closedBlock=closed.length?`<div class="section-label">Disqualified and lost · ${closed.length}</div>
+    ${BIZ.showClosed?`<div class="list">${closed.map(_leadRow).join("")}</div>`:""}
+    <button class="btn btn--ghost btn--sm" onclick="BIZ.showClosed=!BIZ.showClosed;renderBusiness()">${BIZ.showClosed?"Hide":"Show"}</button>`:"";
+  const list=`<div class="card">
+    <div class="card-head"><div class="card-title"><span>Leads</span></div><span class="badge badge--muted">${leads.length}</span></div>
+    ${leads.length?groups+closedBlock:`<div class="empty">No leads yet. Tell Founder OS who you plan to approach.</div>`}
+  </div>`;
+  return funnel+draftCards+chips+list;
+}
+
+function _leadRow(l){
+  const id=Number(l.id);
+  const who=escHtml(l.name)+(l.company&&l.company!==l.name?` <span class="muted">· ${escHtml(l.company)}</span>`:"");
+  const sub=[l.segment?_cap(l.segment):"",l.location||"",l.open_follow_up&&l.open_follow_up.due_date?`follow up ${_day(l.open_follow_up.due_date)}`:""].filter(Boolean).map(escHtml).join(" · ");
+  const score=l.qualification_score!=null?`<span class="badge ${Number(l.qualification_score)>=50?"badge--glow":"badge--muted"}" title="Qualification score">${Number(l.qualification_score)}</span>`:"";
+  const last=l.last_message?`<span class="badge badge--muted">${escHtml(l.last_message.channel)} · ${escHtml(l.last_message.status)}</span>`:"";
+  let action="";
+  if(l.status==="contacted")action=`<button class="btn btn--sm" onclick="_bizTap(this,'POST','/leads/${id}/replied')">Replied</button>`;
+  else if(l.status==="replied")action=`<button class="btn btn--primary btn--sm" onclick="_bizTap(this,'POST','/leads/${id}/convert')">Convert</button>`;
+  return `<div class="row row--wrap">
+    <div class="row-main"><div class="row-title">${who}</div>${sub?`<div class="row-sub">${sub}</div>`:""}</div>
+    ${score}${last}${action?`<div class="row-actions">${action}</div>`:""}
+  </div>`;
+}
+
+function pipelineSegment(seg){BIZ.segment=seg||"";renderBusiness();}
+
+async function draftSend(id,btn){
+  const d=BIZ.drafts[id];
+  // WhatsApp sends by opening a link. Open the tab inside the tap so it is not blocked,
+  // then point it at the link once the server has approved the send.
+  const tab=d&&d.channel==="whatsapp"?window.open("","_blank"):null;
+  const data=await _bizTap(btn,"POST",`/outreach/${Number(id)}/send`);
+  const failed=!data||(data.message&&data.message.status==="failed");
+  if(data&&data.open_url&&!failed){
+    if(tab){try{tab.opener=null;}catch(_){}tab.location.href=data.open_url;}
+    else window.open(data.open_url,"_blank","noopener");
+  }else if(tab){tab.close();}
+  if(data&&failed)showToast("Not sent: "+((data.message&&data.message.error)||"the channel failed")+". Copy the text instead.","error");
+  else if(data&&!data.open_url)showToast("Marked as sent. Copy the text if you still need it.","success");
+}
+
+async function draftCopy(id){
+  const d=BIZ.drafts[id];
+  if(!d)return;
+  const text=(d.subject?d.subject+"\n\n":"")+(d.body||"");
+  try{await navigator.clipboard.writeText(text);showToast("Copied","success");}
+  catch(_){showToast("Could not copy — select the text and copy it","error");}
+}
+
+/* ── Clients ── */
+async function renderClients(){
+  if(BIZ.clientId)return renderClientDetail(BIZ.clientId);
+  const [summary,clients]=await Promise.all([_bizGet("/crm/summary"),_bizGet("/clients")]);
+  const p=summary.payments||{};
+  const strip=`<div class="kpis">
+    <div class="kpi"><div class="kpi-label">Monthly recurring</div><div class="kpi-value">${_usd(summary.mrr&&summary.mrr.total_usd)}</div><div class="kpi-sub">${escHtml(_moneyBy(summary.mrr))} a month</div></div>
+    <div class="kpi"><div class="kpi-label">Outstanding</div><div class="kpi-value">${_usd(Number(p.due_usd||0)+Number(p.overdue_usd||0))}</div><div class="kpi-sub">${_usd(p.paid_30d_usd)} paid in 30 days</div></div>
+    <div class="kpi"><div class="kpi-label">Overdue</div><div class="kpi-value">${Number(p.overdue_count)>0?`<span class="red">${Number(p.overdue_count)}</span>`:"0"}</div><div class="kpi-sub">${Number(p.overdue_count)>0?_usd(p.overdue_usd)+" to chase":"Nothing overdue"}</div></div>
+    <div class="kpi"><div class="kpi-label">Weighted pipeline</div><div class="kpi-value">${_usd(summary.deals&&summary.deals.weighted_pipeline_usd)}</div><div class="kpi-sub">Open deals × probability</div></div>
+  </div>`;
+  const tone={green:"success",amber:"warn",red:"danger"};
+  const rows=clients.map(c=>{
+    const out=_moneyBy(c.outstanding), mrr=_moneyBy(c.mrr);
+    const sub=[_cap(c.status),c.open_deals?`${Number(c.open_deals)} open deal${Number(c.open_deals)>1?"s":""}`:"",c.last_contact_at?`last contact ${_day(c.last_contact_at)}`:"no contact logged"].filter(Boolean).map(escHtml).join(" · ");
+    return `<div class="row row--tap row--wrap" role="button" tabindex="0" onclick="openClient(${Number(c.id)})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openClient(${Number(c.id)})}">
+      <span class="dot ${tone[c.health]||"success"}" title="Health: ${escHtml(c.health||"green")}"></span>
+      <div class="row-main"><div class="row-title">${escHtml(c.name)}${c.company&&c.company!==c.name?` <span class="muted">· ${escHtml(c.company)}</span>`:""}</div><div class="row-sub">${sub}</div></div>
+      <span class="row-meta">${out==="—"?"Nothing owed":escHtml(out)+" owed"}${mrr==="—"?"":" · "+escHtml(mrr)+"/mo"}</span>
+    </div>`;
+  }).join("");
+  const list=`<div class="card">
+    <div class="card-head"><div class="card-title"><span>Clients</span></div><span class="badge badge--muted">${clients.length}</span></div>
+    ${clients.length?`<div class="list">${rows}</div>`:`<div class="empty">No clients yet. Convert a lead, or tell Founder OS about a client.</div>`}
+  </div>`;
+  return strip+list;
+}
+
+function openClient(id){BIZ.clientId=Number(id)||null;const c=document.getElementById("content");if(c)c.scrollTop=0;renderBusiness();}
+function closeClient(){BIZ.clientId=null;renderBusiness();}
+
+async function renderClientDetail(id){
+  let c;
+  try{c=await _bizGet(`/clients/${Number(id)}`);}
+  catch(e){BIZ.clientId=null;throw e;}
+  const tone={green:"badge--success",amber:"badge--warn",red:"badge--danger"};
+  const head=`<div><button class="btn btn--sm" onclick="closeClient()">← All clients</button></div>
+  <div class="card">
+    <div class="card-head"><div class="card-title"><span>${escHtml(c.name)}</span></div><span class="badge ${tone[c.health]||"badge--success"}">${escHtml(_cap(c.health||"green"))}</span></div>
+    <div class="cluster">
+      <span class="badge badge--muted">${escHtml(_cap(c.status))}</span>
+      ${c.company&&c.company!==c.name?`<span class="badge badge--muted">${escHtml(c.company)}</span>`:""}
+      ${_moneyBy(c.outstanding)==="—"?"":`<span class="badge badge--warn">${escHtml(_moneyBy(c.outstanding))} owed</span>`}
+      ${_moneyBy(c.mrr)==="—"?"":`<span class="badge badge--muted">${escHtml(_moneyBy(c.mrr))} a month</span>`}
+      ${(c.tags||[]).map(t=>`<span class="badge badge--purple">${escHtml(t)}</span>`).join("")}
+    </div>
+  </div>`;
+
+  const contacts=`<div class="card">
+    <div class="card-head"><div class="card-title"><span>Contacts</span></div><span class="badge badge--muted">${c.contacts.length}</span></div>
+    ${c.contacts.length?`<div class="list">${c.contacts.map(x=>`<div class="row row--wrap">
+      <div class="row-main"><div class="row-title">${escHtml(x.name)}${x.is_primary?` <span class="badge badge--glow">Primary</span>`:""}</div><div class="row-sub">${escHtml([x.role,x.email].filter(Boolean).join(" · "))}</div></div>
+      <span class="row-meta">${escHtml(x.whatsapp||x.phone||"")}</span></div>`).join("")}</div>`:`<div class="empty">No contacts on file.</div>`}
+  </div>`;
+
+  const deals=`<div class="card">
+    <div class="card-head"><div class="card-title"><span>Deals</span></div><span class="badge badge--muted">${c.deals.length}</span></div>
+    ${c.deals.length?c.deals.map(d=>{
+      const at=DEAL_PATH.indexOf(d.stage);
+      const next=d.stage==="lost"||d.stage==="won"?[]:[DEAL_PATH[at+1]].concat(d.stage==="lead"?[]:["lost"]);
+      const chip=s=>{
+        if(s===d.stage)return `<span class="chip is-on">${escHtml(_cap(s))}</span>`;
+        if(next.includes(s))return `<button class="chip" title="Move to ${escHtml(s)}" onclick="_bizTap(this,'PATCH','/deals/${Number(d.id)}',{stage:'${s}'})">${escHtml(_cap(s))} →</button>`;
+        return `<span class="chip is-dim">${escHtml(_cap(s))}</span>`;
+      };
+      return `<div class="result">
+        <div class="cluster"><b>${escHtml(d.title)}</b>${d.amount!=null?`<span class="badge badge--muted">${escHtml(_money(d.amount,d.currency))}</span>`:""}${d.probability!=null?`<span class="badge badge--muted">${Number(d.probability)}%</span>`:""}${d.expected_close?`<span class="badge badge--muted">close ${escHtml(_day(d.expected_close))}</span>`:""}</div>
+        <div class="chips mt-3">${DEAL_PATH.map(chip).join("")}${d.stage==="lost"||next.includes("lost")?chip("lost"):""}</div>
+      </div>`;}).join(""):`<div class="empty">No deals yet.</div>`}
+  </div>`;
+
+  const payTone={paid:"badge--success",due:"badge--glow",overdue:"badge--danger",cancelled:"badge--muted"};
+  const payments=`<div class="card">
+    <div class="card-head"><div class="card-title"><span>Payments</span></div><span class="badge badge--muted">${c.payments.length}</span></div>
+    ${c.payments.length?`<div class="list">${c.payments.map(p=>{
+      const open=p.status==="due"||p.status==="overdue";
+      const when=p.status==="paid"?(p.paid_at?`paid ${_day(p.paid_at)}`:"paid"):(p.due_date?`due ${_day(p.due_date)}`:"no due date");
+      return `<div class="row row--wrap">
+        <div class="row-main"><div class="row-title">${escHtml(_money(p.amount,p.currency))} <span class="muted">· ${escHtml(p.title||"Payment")}</span></div><div class="row-sub">${escHtml(when)}</div></div>
+        <span class="badge ${payTone[p.status]||"badge--muted"}">${escHtml(_cap(p.status))}</span>
+        ${open?`<div class="row-actions"><button class="btn btn--primary btn--sm" onclick="_bizTap(this,'POST','/payments/${Number(p.id)}/paid')">Paid</button></div>`:""}
+      </div>`;}).join("")}</div>`:`<div class="empty">No payments recorded.</div>`}
+  </div>`;
+
+  const comms=c.communications.slice(0,10);
+  const talk=`<div class="card">
+    <div class="card-head"><div class="card-title"><span>Recent conversations</span></div><span class="badge badge--muted">${comms.length}</span></div>
+    ${comms.length?`<div class="list">${comms.map(m=>`<div class="row row--wrap">
+      <div class="row-main"><div class="row-title wrap">${escHtml(m.summary)}</div><div class="row-sub">${escHtml(_cap(m.channel))} · ${m.direction==="in"?"from them":"from you"}</div></div>
+      <span class="row-meta">${escHtml(_day(m.occurred_at))}</span></div>`).join("")}</div>`:`<div class="empty">Nothing logged. Tell Founder OS when you speak to them.</div>`}
+  </div>`;
+  return head+`<div class="grid">${contacts}${deals}</div><div class="grid">${payments}${talk}</div>`;
+}
+
 function renderGuide(){
   const cs=getComputedStyle(document.documentElement);
   const v=n=>cs.getPropertyValue(n).trim();
