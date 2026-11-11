@@ -557,6 +557,39 @@ Decisions where the spec was silent:
   why.
 - Server timestamps are naive UTC; the page reads them as UTC when showing "12 min ago".
 
+### S20 — 6A.1 applications: schema, requirements import, endpoints, tools (done)
+
+Shipped: `Application`, `ApplicationRequirement`, `ApplicationGap` (m019, RLS);
+`applications.py` (`find_application`, `create`, `import_requirements`, `add_requirement`,
+`advance`, `set_status`, `update_requirement`, `make_todo`, `timeline`, `set_gap_status`;
+`GET/POST /applications`, `GET/PATCH /applications/{id}`,
+`POST /applications/{id}/requirements/import`, `POST /applications/{id}/requirements`,
+`PATCH /requirements/{id}`, `POST /requirements/{id}/advance`, `POST /requirements/{id}/todo`,
+`GET /applications/{id}/gaps` (stored open gaps for now), `PATCH /gaps/{id}`); tools
+`add_application`, `import_requirements`, `update_requirement`, `application_status`; the
+"APPLICATIONS" prompt section; `applications` and `application_requirements` deletable.
+Tests: `tests/test_phase6a_applications.py` (acceptance tests 1, 2, 3, 7).
+
+Deferred to S21: `review_gaps`, the briefing items, the `application_watch` agent and the
+`application_at_risk` alert.
+
+Decisions where the spec was silent:
+- The guard against invented dates is stricter than "the phrase must not be empty": the
+  phrase the model gives for a date must actually occur in the pasted text (compared on
+  letters and digits only). A date whose phrase is not there is dropped and counted in
+  `dates_dropped`. The same applies to the application's deadline and decision date.
+- A requirement date Bandile set himself (`due_source: user`) is not overwritten by a later
+  import, by the same rule as the application's deadline.
+- The first successful import moves an application from `researching` to `preparing`.
+- `advance` from `not_required` goes to `missing`.
+- `make_todo` with no requirement date and no application deadline creates an undated task.
+- Tool results always carry `deadline`, `deadline_source` and a `deadline_note` sentence.
+  The note is what the model reads when the deadline is unknown (empty values are stripped
+  from what the model sees), and it says not to state a date from general knowledge.
+- `add_application` with a name that matches an existing application updates it.
+- Requirement details are embedded as `source_type="application"`; gap text will use
+  `"application_gap"` (two tables cannot share one `(type, id)` key).
+
 ## Environment variables added so far
 
 | Var | Default | Session | Purpose |

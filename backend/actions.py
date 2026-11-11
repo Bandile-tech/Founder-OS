@@ -53,6 +53,8 @@ DELETABLE = {
     "recurring_revenue": (models.RecurringRevenue, "title"),
     "communications": (models.Communication, "summary"),
     "project_updates": (models.ProjectUpdate, "text"),
+    "applications": (models.Application, "name"),
+    "application_requirements": (models.ApplicationRequirement, "title"),
 }
 
 

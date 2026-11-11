@@ -1073,3 +1073,65 @@ class JobTick(Base):
     errors          = Column(Integer, nullable=True)
     duration_ms     = Column(Integer, nullable=True)
     summary_json    = Column(Text, nullable=True)
+
+
+# ── PHASE 6A: APPLICATIONS ───────────────────────────────────
+
+class Application(Base):
+    """A long-horizon application. ``deadline_source`` says where the deadline came from:
+    user (Bandile stated it), document (read from text he pasted) or unknown (no deadline)."""
+    __tablename__ = "applications"
+
+    id                      = Column(Integer, primary_key=True, index=True)
+    name                    = Column(String, nullable=False)
+    institution             = Column(String, nullable=True)
+    programme               = Column(String, nullable=True)
+    kind                    = Column(String, nullable=False, default="university")
+    deadline                = Column(Date, nullable=True)
+    deadline_source         = Column(String, nullable=True)     # user | document | unknown
+    decision_date           = Column(Date, nullable=True)
+    status                  = Column(String, nullable=False, default="researching")
+    priority                = Column(Integer, default=2)        # 1 high … 3 low
+    portal_url              = Column(String, nullable=True)
+    notes                   = Column(Text, nullable=True)
+    requirements_updated_at = Column(DateTime, nullable=True)   # cache control for the gap review
+    gaps_reviewed_at        = Column(DateTime, nullable=True)
+    created_at              = Column(DateTime, default=datetime.utcnow)
+    updated_at              = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ApplicationRequirement(Base):
+    """One item of an application's checklist: missing → in_progress → ready → submitted,
+    or not_required."""
+    __tablename__ = "application_requirements"
+
+    id             = Column(Integer, primary_key=True, index=True)
+    application_id = Column(Integer, nullable=False)
+    title          = Column(String, nullable=False)
+    kind           = Column(String, nullable=False, default="other")
+    status         = Column(String, nullable=False, default="missing")
+    due_date       = Column(Date, nullable=True)
+    due_source     = Column(String, nullable=True)             # user | document
+    details        = Column(Text, nullable=True)
+    todo_id        = Column(Integer, nullable=True)
+    note_id        = Column(Integer, nullable=True)
+    sort_order     = Column(Integer, default=0)
+    created_at     = Column(DateTime, default=datetime.utcnow)
+    updated_at     = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ApplicationGap(Base):
+    """Something weak in the profile relative to an application, from a review.
+    status: open | addressed | accepted_risk | superseded (replaced by a newer review)."""
+    __tablename__ = "application_gaps"
+
+    id               = Column(Integer, primary_key=True, index=True)
+    application_id   = Column(Integer, nullable=False)
+    gap              = Column(String, nullable=False)
+    severity         = Column(String, nullable=False)          # high | medium | low
+    evidence         = Column(Text, nullable=True)
+    suggested_action = Column(Text, nullable=True)
+    status           = Column(String, nullable=False, default="open")
+    review_batch     = Column(String, nullable=True)
+    created_at       = Column(DateTime, default=datetime.utcnow)
+    updated_at       = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

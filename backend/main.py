@@ -83,6 +83,8 @@ import portfolio as _portfolio
 app.include_router(_portfolio.router)
 from market_intel import objectives as _research_objectives
 app.include_router(_research_objectives.router)
+import applications as _applications
+app.include_router(_applications.router)
 import agents as _agents
 from agents import api as _agents_api
 _agents.load_all()                       # every shipped agent registers itself
@@ -178,6 +180,8 @@ async def startup():
         run_m016(db)        # m016 — contacts, deals, projects, payments, recurring_revenue, communications
         from migrations.m018_portfolio import run as run_m018
         run_m018(db)        # m018 — project_updates
+        from migrations.m019_applications import run as run_m019
+        run_m019(db)        # m019 — applications, application_requirements, application_gaps
         from migrations.m020_agents import run as run_m020
         run_m020(db)        # m020 — agents, agent_runs, agent_events, job_ticks, llm_usage.agent_run_id
         _validate_schema(engine)   # raises if any ORM column is absent from the live DB

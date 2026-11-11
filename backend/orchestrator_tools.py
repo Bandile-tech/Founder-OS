@@ -1206,7 +1206,7 @@ TOOL_SCHEMAS = [
                                  "daily_bible_log", "clients", "lift_logs", "daily_logs",
                                  "leads", "outreach_messages", "contacts", "deals", "projects",
                                  "payments", "recurring_revenue", "communications",
-                                 "project_updates"],
+                                 "project_updates", "applications", "application_requirements"],
                         "description": "Which table the record lives in.",
                     },
                     "record_id": {"type": "integer", "description": "The record's id."},
@@ -2380,4 +2380,225 @@ _register(
      "weekdays": {"type": "array", "items": {"type": "integer"},
                   "description": "Days it may run: 0 Monday … 6 Sunday (empty list clears)."}},
     ["key"],
+)
+
+
+# ── 6A: applications ─────────────────────────────────────────
+
+def _pick_application(db, ref):
+    import applications
+    app, scored = applications.find_application(db, ref)
+    if app is not None:
+        return app, None
+    if scored:
+        return None, _ambiguous("application", str(ref), scored, lambda a: a.name)
+    return None, ({"error": f"no application matches '{ref}'"}, f"no application matches '{ref}'")
+
+
+def _deadline_note(app) -> str:
+    if app.deadline is None:
+        return ("unknown — neither Bandile nor a pasted document has given one. Do not state a "
+                "date from general knowledge; ask him for it.")
+    source = {"user": "Bandile stated it", "document": "read from text he pasted"}.get(app.deadline_source, "source unknown")
+    return f"{app.deadline.isoformat()} ({source})"
+
+
+def add_application(db, name: str, institution: str | None = None, programme: str | None = None,
+                    kind: str | None = None, deadline: str | None = None, priority: int | None = None,
+                    portal_url: str | None = None):
+    """Start tracking an application, or update the one the name already describes."""
+    import applications
+    import business_common
+    import change_log
+    due = None
+    if deadline:
+        due = business_common.parse_day(deadline)
+        if due is None:
+            msg = f"could not read the date '{deadline}'"
+            return {"error": msg}, msg
+    existing, _scored = applications.find_application(db, name or "")
+    with change_log.batch_scope(db, "assistant"):
+        try:
+            if existing is not None:
+                before = change_log.snapshot(existing)
+                if institution:
+                    existing.institution = institution.strip()
+                if programme:
+                    existing.programme = programme.strip()
+                if kind in applications.KINDS:
+                    existing.kind = kind
+                if due is not None:
+                    existing.deadline, existing.deadline_source = due, "user"
+                if priority is not None:
+                    existing.priority = max(1, min(3, int(priority)))
+                if portal_url:
+                    existing.portal_url = portal_url.strip()
+                existing.updated_at = datetime.utcnow()
+                change = change_log.record_update(db, existing, before, f"Updated application: {existing.name[:60]}")
+                app, verb = existing, "updated"
+            else:
+                made = applications.create(db, name, institution=institution, programme=programme,
+                                           kind=kind or "university", deadline=due,
+                                           priority=priority or 2, portal_url=portal_url)
+                app = db.query(models.Application).filter(models.Application.id == made["id"]).first()
+                change, verb = made["change"], "added"
+        except ValueError as exc:
+            return {"error": str(exc)}, str(exc)
+        db.commit()
+    result = {"application_id": app.id, "name": app.name, "status": app.status, "deadline": app.deadline,
+              "deadline_source": app.deadline_source or "unknown", "deadline_note": _deadline_note(app),
+              "change": change}
+    return result, f"application '{app.name}' {verb}" + (f", deadline {app.deadline.isoformat()}" if app.deadline else "")
+
+
+def import_requirements(db, application, text: str):
+    """Turn pasted requirements text into the application's checklist."""
+    import applications
+    import change_log
+    import llm as _llm
+    app, problem = _pick_application(db, application)
+    if app is None:
+        return problem
+    with change_log.batch_scope(db, "assistant"):
+        try:
+            result = applications.import_requirements(db, app, text)
+        except _llm.AIUnavailable:
+            db.rollback()
+            msg = "reading requirements needs the AI key, which is not configured"
+            return {"error": msg}, msg
+        except ValueError as exc:
+            db.rollback()
+            return {"error": str(exc)}, str(exc)
+        db.commit()
+    result["deadline_note"] = _deadline_note(app)
+    summary = f"{result['created']} requirement(s) added"
+    if result["updated"]:
+        summary += f", {result['updated']} updated"
+    if result["deadline_set"]:
+        summary += f", deadline {app.deadline.strftime('%d %b %Y')} from the text"
+    if result["dates_dropped"]:
+        summary += f", {result['dates_dropped']} date(s) left out (not found in the text)"
+    return result, summary
+
+
+def update_requirement(db, application, requirement: str, status: str | None = None,
+                       due_date: str | None = None, details: str | None = None, make_todo: bool = False):
+    """Change one requirement of an application, optionally turning it into a task."""
+    import applications
+    import business_common
+    import change_log
+    app, problem = _pick_application(db, application)
+    if app is None:
+        return problem
+    reqs = applications.requirements_of(db, app)
+    target, scored = business_common.fuzzy_pick(reqs, lambda r: r.title, requirement or "")
+    if target is None:
+        if scored:
+            return _ambiguous("requirement", requirement, scored, lambda r: r.title)
+        msg = f"no requirement of {app.name} matches '{requirement}'"
+        return {"error": msg, "requirements": [r.title for r in reqs]}, msg
+    due = None
+    if due_date:
+        due = business_common.parse_day(due_date)
+        if due is None:
+            msg = f"could not read the date '{due_date}'"
+            return {"error": msg}, msg
+    with change_log.batch_scope(db, "assistant"):
+        try:
+            result = applications.update_requirement(db, target, status=status, due_date=due, details=details)
+        except ValueError as exc:
+            return {"error": str(exc)}, str(exc)
+        changes = [result["change"]] if result.get("change") else []
+        if make_todo:
+            todo = applications.make_todo(db, target)
+            result["todo"] = todo["todo"]
+            changes += todo.get("changes") or []
+        db.commit()
+    result["application"] = app.name
+    result["changes"] = changes
+    return result, f"{app.name}: {target.title} — {target.status.replace('_', ' ')}" + (" (task added)" if make_todo else "")
+
+
+def _application_view(db, app) -> dict:
+    import applications
+    t = applications.timeline(db, app)
+    reqs = applications.requirements_of(db, app)
+    return {
+        "application_id": app.id, "name": app.name, "status": app.status,
+        "deadline": app.deadline, "deadline_source": app.deadline_source or "unknown",
+        "deadline_note": _deadline_note(app), "days_to_deadline": t["days_to_deadline"],
+        "at_risk": t["at_risk"], "requirement_counts": t["requirements"],
+        "missing": [r.title for r in reqs if r.status == "missing"],
+        "in_progress": [r.title for r in reqs if r.status == "in_progress"],
+        "next_due": t["next_due"],
+        "open_gaps": [{"gap": g.gap, "severity": g.severity} for g in applications.open_gaps(db, app)],
+        "gaps_reviewed_at": app.gaps_reviewed_at,
+    }
+
+
+def application_status(db, application: str | None = None):
+    """Where an application stands (or all of them). Read-only."""
+    if application:
+        app, problem = _pick_application(db, application)
+        if app is None:
+            return problem
+        view = _application_view(db, app)
+        missing = len(view["missing"])
+        when = f"{view['days_to_deadline']} days to the deadline" if app.deadline else "deadline unknown"
+        return view, f"{app.name}: {missing} missing, {when}"
+    rows = db.query(models.Application).all()
+    rows.sort(key=lambda a: (a.deadline is None, a.deadline or date.max, a.id))
+    return ({"applications": [_application_view(db, a) for a in rows]},
+            f"{len(rows)} application(s)")
+
+
+_register(
+    "add_application",
+    lambda db, a: add_application(db, name=a.get("name", ""), institution=a.get("institution"),
+                                  programme=a.get("programme"), kind=a.get("kind"), deadline=a.get("deadline"),
+                                  priority=a.get("priority"), portal_url=a.get("portal_url")),
+    "Start tracking an application (a university, scholarship, competition, programme or "
+    "job), or update the one the name already describes. Pass a deadline ONLY when Bandile "
+    "stated it; never supply one from your own knowledge.",
+    {"name": _str("What to call it, e.g. 'Wharton'."),
+     "institution": _str("The institution."), "programme": _str("The programme."),
+     "kind": _str("What kind of application.", ["university", "scholarship", "competition", "programme", "job", "other"]),
+     "deadline": _str("The deadline exactly as Bandile said it, e.g. '1 January'."),
+     "priority": _int("1 (high) to 3 (low)."), "portal_url": _str("The application portal.")},
+    ["name"],
+)
+
+_register(
+    "import_requirements",
+    lambda db, a: import_requirements(db, application=a.get("application", ""), text=a.get("text", "")),
+    "Turn requirements text into an application's checklist. ONLY when Bandile pastes or "
+    "dictates the requirements; pass his text unchanged. Never write requirements or dates "
+    "from your own knowledge.",
+    {"application": _str("Application name, part of it, or its id."),
+     "text": _str("The pasted requirements text, verbatim.")},
+    ["application", "text"],
+)
+
+_register(
+    "update_requirement",
+    lambda db, a: update_requirement(db, application=a.get("application", ""), requirement=a.get("requirement", ""),
+                                     status=a.get("status"), due_date=a.get("due_date"), details=a.get("details"),
+                                     make_todo=bool(a.get("make_todo", False))),
+    "Change one requirement of an application when Bandile reports progress on it, gives "
+    "it a date or asks for it to become a task.",
+    {"application": _str("Application name, part of it, or its id."),
+     "requirement": _str("The requirement's title or part of it."),
+     "status": _str("New status.", ["missing", "in_progress", "ready", "submitted", "not_required"]),
+     "due_date": _str("Its due date as Bandile said it."),
+     "details": _str("Details to store (word limit, prompt, who writes it)."),
+     "make_todo": {"type": "boolean", "description": "Also create a dated task for it."}},
+    ["application", "requirement"],
+)
+
+_register(
+    "application_status",
+    lambda db, a: application_status(db, application=a.get("application")),
+    "Where an application stands: deadline and where it came from, what is missing, the "
+    "next thing due and open gaps. Read-only. Omit application for all of them.",
+    {"application": _str("Application name, part of it, or its id.")},
 )

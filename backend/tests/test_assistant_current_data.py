@@ -170,6 +170,10 @@ def _run_every_tool(db) -> dict:
             ("agent_status", {}),
             ("run_agent", {"key": "portfolio_reviewer"}),
             ("set_agent_schedule", {"key": "lead_qualifier", "interval_minutes": 240}),
+            ("add_application", {"name": "Wharton", "institution": "University of Pennsylvania", "deadline": "1 January"}),
+            ("import_requirements", {"application": "Wharton", "text": "Two essays of 500 words each are required."}),
+            ("update_requirement", {"application": "Wharton", "requirement": "essays", "status": "in_progress"}),
+            ("application_status", {"application": "Wharton"}),
         ]
         for name, args in calls:
             result, _summary = ot.run_tool(name, args, db)
