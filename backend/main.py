@@ -85,6 +85,8 @@ from market_intel import objectives as _research_objectives
 app.include_router(_research_objectives.router)
 import applications as _applications
 app.include_router(_applications.router)
+import brand as _brand
+app.include_router(_brand.router)
 import agents as _agents
 from agents import api as _agents_api
 _agents.load_all()                       # every shipped agent registers itself
@@ -178,6 +180,8 @@ async def startup():
         run_m015(db)        # m015 — leads, lead_imports, outreach_messages, todos.lead_id/client_id
         from migrations.m016_crm import run as run_m016
         run_m016(db)        # m016 — contacts, deals, projects, payments, recurring_revenue, communications
+        from migrations.m017_brand import run as run_m017
+        run_m017(db)        # m017 — social_accounts, content_posts/metrics, account_metrics, content_ideas, brand_insights
         from migrations.m018_portfolio import run as run_m018
         run_m018(db)        # m018 — project_updates
         from migrations.m019_applications import run as run_m019

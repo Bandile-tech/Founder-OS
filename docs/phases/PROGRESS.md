@@ -657,6 +657,37 @@ Decisions where the spec was silent:
 - The countdown tile says where the deadline came from, because the page must never make a
   model-supplied date look like a fact.
 
+### S9 — 5D.1 brand schema, YouTube adapter, export importer, sync (done)
+
+Shipped: `SocialAccount`, `ContentPost`, `ContentMetric`, `AccountMetric`, `ContentIdea`,
+`BrandInsight` (m017, unique and plain indexes, RLS); `brand/adapters.py`
+(`PlatformAdapter`, `YouTubeAdapter`, `ExportAdapter`, `LinkedInExportAdapter`);
+`brand/sync.py` (`sync`, `import_export`); `brand/__init__.py` with `GET/POST
+/brand/accounts`, `POST /brand/accounts/{id}/sync`, `DELETE /brand/accounts/{id}`,
+`POST /brand/import`; the `brand_sync` agent now has a module to run; `YOUTUBE_API_KEY` in
+`CLAUDE.md`. Tests: `tests/test_phase5d_brand.py` (acceptance tests 1–4), fixture
+`tests/fixtures/linkedin_content_sample.csv`.
+
+Deferred to S10: performance analytics, the weekly insight, ideas and the calendar, the
+three tools, the briefing items.
+
+Not built: `XExportAdapter`. The spec says to build it only if X's analytics export can be
+verified as available, and that cannot be checked from here. `POST /brand/import` answers
+400 for `platform=x`.
+
+Decisions where the spec was silent:
+- A metric the platform does not supply is stored as NULL: YouTube gives no shares, saves,
+  impressions or watch time through the public API, and a channel that hides its subscriber
+  count has `followers: null`. A post with no numbers at all gets no snapshot row.
+- LinkedIn's own "Engagement rate" column is not stored; the rate is always computed from
+  the counts so every platform is measured the same way (S10).
+- The export's header row is the first row naming at least two known columns, so the title
+  lines LinkedIn puts above the table are skipped.
+- Connecting the same YouTube channel twice returns the existing account (reconnected).
+- `DELETE /brand/accounts/{id}` is change-logged, so a disconnect can be undone.
+- A sync that fails leaves stored posts and numbers alone and puts the adapter's message in
+  `last_error`; the next good sync clears it.
+
 ## Environment variables added so far
 
 | Var | Default | Session | Purpose |
@@ -666,6 +697,7 @@ Decisions where the spec was silent:
 | `FOUNDER_OS_TZ` | `Africa/Lusaka` | S13 | Zone for agent schedules and notification times |
 | `JOBS_TICK_BUDGET` | `80` | S13 | Seconds a tick may spend starting agents |
 | `JOBS_IN_PROCESS` | `1` | S13 (used from S14) | `0` turns off the in-process 15-minute tick |
+| `YOUTUBE_API_KEY` | unset | S9 | YouTube Data API v3 key for the Brand tab |
 
 ## VERIFY items (from the specs)
 
@@ -675,6 +707,21 @@ service after deployment.
 - 5A: the web adapter still posts to `https://html.duckduckgo.com/html/` with no key. Not
   checked in this build (tests never reach the network). If it blocks, the adapter returns
   `[]` and a run proceeds on War Room and vault evidence only.
+- 5D YouTube: the `forHandle` parameter of `channels.list`; the shape of the `search`
+  fallback (`items[0].id.channelId`); `snippet.customUrl` as the handle; that Shorts are
+  not flagged by the API (a duration of 60 seconds or less is the heuristic); quota cost
+  (about one unit per list call, five calls for 55 videos). Each is marked `# VERIFY` in
+  `backend/brand/adapters.py`. Not checked against the live API.
+- 5D LinkedIn: that the creator analytics export exists for the account type, and its
+  column names (`Post URL`, `Post publish date`, `Post title`, `Impressions`, `Reactions`,
+  `Comments`, `Reposts`). The parser accepts the synonyms listed in `LinkedInExportAdapter`.
+  Not checked against a real export.
+- 5D X: whether an analytics export is available on the account's tier. Not checked; the
+  adapter was not built.
+- 6B GitHub Actions: minimum schedule interval, delay under load, and the 60-day
+  inactivity rule. Moot while the schedule is switched off; check before switching it on.
+- 6B Render: the free tier's HTTP request timeout (the tick budget of 80 seconds assumes at
+  least 100) and current spin-down behaviour. Not checked.
 
 ## Follow-ups noticed (not done here)
 

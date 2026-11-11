@@ -47,6 +47,7 @@ Environment (`backend/.env` locally, Render env vars in production):
 | `FOUNDER_OS_TZ` | `Africa/Lusaka` | The zone agent schedules and notification times are read in |
 | `JOBS_TICK_BUDGET` | `80` | Seconds a tick may spend starting agents; the rest run on the next tick |
 | `JOBS_IN_PROCESS` | `1` | `0` turns off the in-process 15-minute tick (the external tick still works) |
+| `YOUTUBE_API_KEY` | unset | YouTube Data API v3 key for the Brand tab. Unset: the YouTube account shows an error and nothing is estimated |
 
 Tests (OpenAI is always mocked; the suite must pass with no key set):
 ```

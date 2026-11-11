@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Date, Float, Text, DateTime, ForeignKey, Boolean
+from sqlalchemy import Column, Integer, String, Date, Float, Text, DateTime, ForeignKey, Boolean, Index
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from database import Base
@@ -1135,3 +1135,108 @@ class ApplicationGap(Base):
     review_batch     = Column(String, nullable=True)
     created_at       = Column(DateTime, default=datetime.utcnow)
     updated_at       = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+# ── PHASE 5D: PERSONAL-BRAND ANALYTICS ───────────────────────
+# Real platform data only: a metric the platform does not give is NULL, never 0.
+
+class SocialAccount(Base):
+    """A connected platform account. access: api_key | export | oauth."""
+    __tablename__ = "social_accounts"
+
+    id             = Column(Integer, primary_key=True, index=True)
+    platform       = Column(String, nullable=False)        # youtube|linkedin|x|instagram|tiktok
+    handle         = Column(String, nullable=True)
+    external_id    = Column(String, nullable=True)         # e.g. the YouTube channel id
+    access         = Column(String, nullable=False, default="api_key")
+    config_json    = Column(Text, nullable=True)           # adapter config; never a secret
+    status         = Column(String, nullable=False, default="connected")   # connected|error|disconnected
+    last_synced_at = Column(DateTime, nullable=True)
+    last_error     = Column(Text, nullable=True)
+    created_at     = Column(DateTime, default=datetime.utcnow)
+    updated_at     = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ContentPost(Base):
+    """A post or video on a platform. kind: video|short|post|article|thread."""
+    __tablename__ = "content_posts"
+    __table_args__ = (Index("ux_content_posts_account_external", "account_id", "external_id", unique=True),)
+
+    id          = Column(Integer, primary_key=True, index=True)
+    account_id  = Column(Integer, nullable=False)
+    external_id = Column(String, nullable=False)
+    url         = Column(String, nullable=True)
+    title       = Column(String, nullable=True)
+    kind        = Column(String, nullable=True)
+    posted_at   = Column(DateTime, nullable=True)
+    topic_tags  = Column(String, nullable=True)            # comma list
+    idea_id     = Column(Integer, nullable=True)           # content_ideas.id
+    created_at  = Column(DateTime, default=datetime.utcnow)
+    updated_at  = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ContentMetric(Base):
+    """An append-only snapshot of a post's numbers. source: api | export."""
+    __tablename__ = "content_metrics"
+    __table_args__ = (Index("ix_content_metrics_post_captured", "post_id", "captured_at"),)
+
+    id           = Column(Integer, primary_key=True, index=True)
+    post_id      = Column(Integer, nullable=False)
+    captured_at  = Column(DateTime, nullable=False, default=datetime.utcnow)
+    views        = Column(Integer, nullable=True)
+    likes        = Column(Integer, nullable=True)
+    comments     = Column(Integer, nullable=True)
+    shares       = Column(Integer, nullable=True)
+    saves        = Column(Integer, nullable=True)
+    impressions  = Column(Integer, nullable=True)
+    watch_time_s = Column(Integer, nullable=True)
+    source       = Column(String, nullable=True)
+    raw_json     = Column(Text, nullable=True)
+
+
+class AccountMetric(Base):
+    """An append-only snapshot of an account's numbers."""
+    __tablename__ = "account_metrics"
+
+    id          = Column(Integer, primary_key=True, index=True)
+    account_id  = Column(Integer, nullable=False)
+    captured_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    followers   = Column(Integer, nullable=True)
+    following   = Column(Integer, nullable=True)
+    posts_count = Column(Integer, nullable=True)
+    total_views = Column(Integer, nullable=True)
+    source      = Column(String, nullable=True)
+    raw_json    = Column(Text, nullable=True)
+
+
+class ContentIdea(Base):
+    """The idea backlog and the content calendar. status: idea → drafted → scheduled →
+    posted | dropped."""
+    __tablename__ = "content_ideas"
+    __table_args__ = (Index("ix_content_ideas_status_scheduled", "status", "scheduled_for"),)
+
+    id             = Column(Integer, primary_key=True, index=True)
+    title          = Column(String, nullable=False)
+    angle          = Column(Text, nullable=True)
+    platform       = Column(String, nullable=True)         # null = any
+    format         = Column(String, nullable=True)         # short|video|post|article|thread
+    status         = Column(String, nullable=False, default="idea")
+    scheduled_for  = Column(Date, nullable=True)
+    posted_post_id = Column(Integer, nullable=True)        # content_posts.id when linked
+    source         = Column(String, default="conversation")
+    score          = Column(Integer, nullable=True)        # optional 1-5
+    created_at     = Column(DateTime, default=datetime.utcnow)
+    updated_at     = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class BrandInsight(Base):
+    """Cached weekly insight text: one row per platform per ISO week."""
+    __tablename__ = "brand_insights"
+    __table_args__ = (Index("ux_brand_insights_week_platform", "week_start", "platform", unique=True),)
+
+    id         = Column(Integer, primary_key=True, index=True)
+    week_start = Column(Date, nullable=False)
+    platform   = Column(String, nullable=False)
+    text       = Column(Text, nullable=False)
+    model      = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)

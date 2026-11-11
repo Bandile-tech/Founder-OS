@@ -18,7 +18,7 @@ def run(ctx) -> AgentResult:
     except (ImportError, AttributeError):
         return AgentResult(status="skipped", summary="brand not built")
     accounts = ctx.db.query(accounts_model).filter(
-        accounts_model.status.in_(("connected", "error")), accounts_model.sync_mode == "api").all()
+        accounts_model.status.in_(("connected", "error")), accounts_model.access != "export").all()
     if not accounts:
         return AgentResult(status="skipped", summary="no connected accounts to sync")
     synced = failed = posts_new = 0
