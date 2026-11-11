@@ -182,6 +182,7 @@ def _run_every_tool(db) -> dict:
             ("notification_settings", {"morning_time": "05:45"}),
             ("calendar_today", {}),
             ("calendar_add_event", {"title": "Clinic demo", "when": "friday 14:00"}),
+            ("email_lookup", {"who": "Wamu"}),
         ]
         for name, args in calls:
             result, _summary = ot.run_tool(name, args, db)

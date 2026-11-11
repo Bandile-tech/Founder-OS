@@ -942,6 +942,51 @@ owner through the warning screen; the token endpoint's fields (`access_token`,
 (`start.dateTime`, `start.date`, `end`, `summary`, `status`, `htmlLink`, `updated`,
 `nextPageToken`); the revoke endpoint.
 
+### S19 — Phase 6C.3: email over IMAP and SMTP
+
+Shipped: `backend/integrations_email.py` (`configured`, `send`, `fetch`, `list_messages`;
+`POST /integrations/email/sync`, `POST /integrations/email/test`, `GET /email/messages`); the
+outreach `EmailChannel` now sends through it (it was already written against this interface);
+agent `email_sync` (every 30 minutes); tool `email_lookup`; the email bullets of the prompt
+section "CALENDAR AND EMAIL"; 9 more tests in `tests/test_phase6c_integrations.py` (spec tests
+5, 6 and the email half of 7) with fake IMAP and SMTP classes; the 5B email test now clears the
+email variables itself.
+
+Decisions where the spec was silent:
+- Clients have no email column, so "a client email" means the email of one of the client's
+  contacts. A sender is known when the address is a lead's or a contact's.
+- `CONTENT-TYPE` and `CONTENT-TRANSFER-ENCODING` are fetched with the listed headers, so the
+  snippet can be decoded (HTML, multipart, base64, quoted-printable). Quoted lines and
+  everything after "On … wrote:" are dropped from the snippet. A body that cannot be decoded
+  from its first 2,000 bytes gives an empty snippet.
+- `X-GM-THRID` is only requested when the IMAP host is Gmail; other servers reject it.
+- The inbox is opened read-only, so syncing never marks mail as read. At most the newest 200
+  messages of the three-day window are looked at.
+- `email_messages` rows and `outreach_messages.replied_at` are not change-logged (they are
+  facts from the mailbox). The communication, the lead's move to `replied` and the closed
+  follow-up are logged, in a batch with source `email_sync`.
+- A message with no `Message-ID` gets a stable one made from its sender, date and subject.
+- `send` strips line breaks from the subject and refuses anything that is not one address.
+  An SMTP sign-in failure marks the integration in error; other send failures only fail that
+  message.
+- `POST /integrations/email/test` sends to Bandile's own address and stores nothing.
+- `email_lookup` matches a lead, a client or a contact by name and returns the last five
+  snippets; it says "Email is not connected" when the variables are unset.
+
+External setup — Gmail (not done; nothing here was tested against Gmail):
+1. On the Google account turn on 2-Step Verification (Google Account → Security).
+2. Create an App Password (Google Account → Security → 2-Step Verification → App passwords),
+   name it "Founder OS". Copy the 16 characters.
+3. In Gmail → Settings → Forwarding and POP/IMAP, make sure IMAP is enabled (if the toggle is
+   still shown).
+4. On Render set `EMAIL_ADDRESS` (the Gmail address) and `EMAIL_APP_PASSWORD` (the 16
+   characters). Optional: `EMAIL_FROM_NAME`, `EMAIL_IMAP_HOST`, `EMAIL_SMTP_HOST`,
+   `EMAIL_SMTP_PORT`.
+5. In the app: Settings → Integrations → Email → Sync. Status should turn to connected.
+
+VERIFY (6C): that App Passwords are still offered on the account and IMAP is enabled; the
+`X-GM-THRID` fetch item; the IMAP fetch item syntax `BODY.PEEK[TEXT]<0.2000>`.
+
 ## Environment variables added so far
 
 | Var | Default | Session | Purpose |
@@ -958,6 +1003,12 @@ owner through the warning screen; the token endpoint's fields (`access_token`,
 | `GOOGLE_CLIENT_ID` | unset | S18 | Google OAuth client id for the calendar |
 | `GOOGLE_CLIENT_SECRET` | unset | S18 | Google OAuth client secret |
 | `GOOGLE_CALENDAR_ID` | `primary` | S18 | Which calendar to read and write |
+| `EMAIL_ADDRESS` | unset | S19 | The Gmail address mail is read from and sent as |
+| `EMAIL_APP_PASSWORD` | unset | S19 | That account's App Password (a secret) |
+| `EMAIL_IMAP_HOST` | `imap.gmail.com` | S19 | IMAP server |
+| `EMAIL_SMTP_HOST` | `smtp.gmail.com` | S19 | SMTP server |
+| `EMAIL_SMTP_PORT` | `465` | S19 | SMTP port (SSL) |
+| `EMAIL_FROM_NAME` | `Bandile Masocha` | S19 | The name on sent mail |
 | `YOUTUBE_API_KEY` | unset | S9 | YouTube Data API v3 key for the Brand tab |
 
 ## VERIFY items (from the specs)

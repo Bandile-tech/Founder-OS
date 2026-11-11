@@ -2962,3 +2962,57 @@ _register(
      "location": _str("Where, if he said."), "notes": _str("Anything to put in the description.")},
     ["title", "when"],
 )
+
+
+# ── 6C: email ────────────────────────────────────────────────
+
+def email_lookup(db, who: str):
+    """The last five stored email snippets from or to a lead, a client or a contact. Read-only."""
+    import business_common
+    import crm
+    import integrations_email
+    import leads
+    who = (who or "").strip()
+    if not who:
+        return {"error": "say whose email to look up"}, "say whose email to look up"
+    if not integrations_email.configured():
+        return {"connected": False, "message": "Email is not connected"}, "Email is not connected"
+    lead, lead_scored = leads.pick_lead(db, who)
+    client, client_scored = crm.find_client(db, who)
+    contact, contact_scored = business_common.fuzzy_pick(db.query(models.Contact).all(), lambda c: c.name, who)
+    if lead is None and client is None and contact is None:
+        candidates = ([{"kind": "lead", "id": l.id, "name": l.name} for _s, l in lead_scored[:3]]
+                      + [{"kind": "client", "id": c.id, "name": _client_label(c)} for _s, c in client_scored[:3]]
+                      + [{"kind": "contact", "id": c.id, "name": c.name} for _s, c in contact_scored[:3]])
+        if candidates:
+            return ({"needs_clarification": True, "candidates": candidates},
+                    f"more than one person matches '{who}'")
+        return {"error": f"nobody on file matches '{who}'"}, f"nobody on file matches '{who}'"
+    from sqlalchemy import or_
+    conditions = []
+    if lead is not None:
+        conditions.append(models.EmailMessage.lead_id == lead.id)
+    if client is not None:
+        conditions.append(models.EmailMessage.client_id == client.id)
+    if contact is not None:
+        conditions.append(models.EmailMessage.contact_id == contact.id)
+    rows = db.query(models.EmailMessage).filter(or_(*conditions)).order_by(
+        models.EmailMessage.received_at.desc(), models.EmailMessage.id.desc()).limit(5).all()
+    name = lead.name if lead is not None else (_client_label(client) if client is not None else contact.name)
+    messages = [{"direction": "from them" if m.direction == "in" else "to them", "subject": m.subject or "(no subject)",
+                 "snippet": m.snippet or "", "when": m.received_at.date().isoformat() if m.received_at else "unknown"}
+                for m in rows]
+    if not messages:
+        return ({"connected": True, "who": name, "messages": [],
+                 "message": f"No email from or to {name} has been stored."}, f"no stored email for {name}")
+    return {"connected": True, "who": name, "messages": messages}, f"{len(messages)} email(s) with {name}"
+
+
+_register(
+    "email_lookup", lambda db, a: email_lookup(db, who=a.get("who", "")),
+    "The last few emails stored from or to a lead, a client or a contact (subject and the "
+    "first lines only). Read-only. Use it when Bandile asks what someone wrote. Only mail "
+    "from people already on file is ever stored.",
+    {"who": _str("The person's or company's name, or part of it.")},
+    ["who"],
+)

@@ -806,3 +806,352 @@ def test_briefing_lists_timed_events_between_fifty_and_seventy(google):
     text = notify.render_briefing(b, suppressed_overnight=[])
     assert "TODAY\n" in text and "• 09:00 Past paper (calendar)" in text and "• 20:00 Evening call (calendar)" in text
     db.close()
+
+
+# ════════════════════════════════════════════════════════════════
+# 6C.3 — email over IMAP and SMTP (spec tests 5, 6 and the email half of 7)
+# ════════════════════════════════════════════════════════════════
+
+import base64
+import imaplib
+
+import integrations_email as mail
+from agents import email_sync
+
+MAILBOX = "bandile@example.com"
+APP_PASSWORD = "abcd efgh ijkl mnop"
+OUTREACH_ID = "<outreach-0001@example.com>"
+
+
+@pytest.fixture
+def mailbox(monkeypatch):
+    monkeypatch.setenv("EMAIL_ADDRESS", MAILBOX)
+    monkeypatch.setenv("EMAIL_APP_PASSWORD", APP_PASSWORD)
+    monkeypatch.setenv("FOUNDER_OS_TZ", "Africa/Lusaka")
+    with patch.object(runner, "SessionLocal", TestSessionLocal):
+        yield
+
+
+def _raw(sender, subject, body, *, message_id, in_reply_to=None, thread="1700",
+         content_type="text/plain; charset=utf-8", encoding=None, date_text="Thu, 12 Nov 2026 09:30:00 +0200"):
+    """One IMAP FETCH response, shaped as imaplib returns it."""
+    lines = [f"From: {sender}", f"To: {MAILBOX}", f"Subject: {subject}", f"Date: {date_text}",
+             f"Message-ID: {message_id}", f"Content-Type: {content_type}"]
+    if in_reply_to:
+        lines.append(f"In-Reply-To: {in_reply_to}")
+    if encoding:
+        lines.append(f"Content-Transfer-Encoding: {encoding}")
+    header = ("\r\n".join(lines) + "\r\n\r\n").encode("utf-8")
+    text = body if isinstance(body, bytes) else body.encode("utf-8")
+    return [(b"1 (X-GM-THRID " + thread.encode() + b" BODY[HEADER.FIELDS (FROM TO SUBJECT)] {" +
+             str(len(header)).encode() + b"}", header),
+            (b" BODY[TEXT]<0> {" + str(len(text)).encode() + b"}", text[:2000]), b")"]
+
+
+class FakeIMAP:
+    """Stands in for imaplib.IMAP4_SSL: the class is called with the host, then used."""
+
+    def __init__(self, messages, login_error=None):
+        self.messages, self.login_error = messages, login_error
+        self.calls, self.closed = [], False
+
+    def __call__(self, host, timeout=None):
+        self.calls.append(("connect", host))
+        return self
+
+    def login(self, user, password):
+        self.calls.append(("login", user, password))
+        if self.login_error:
+            raise self.login_error
+
+    def select(self, box, readonly=False):
+        self.calls.append(("select", box, readonly))
+        return "OK", [str(len(self.messages)).encode()]
+
+    def search(self, charset, *criteria):
+        self.calls.append(("search", criteria))
+        return "OK", [" ".join(str(n + 1) for n in range(len(self.messages))).encode()]
+
+    def fetch(self, number, items):
+        self.calls.append(("fetch", items))
+        return "OK", self.messages[int(number) - 1]
+
+    def logout(self):
+        self.closed = True
+
+
+class FakeSMTP:
+    """Stands in for smtplib.SMTP_SSL."""
+    sent = []
+    fail = None
+
+    def __init__(self, host, port, timeout=None):
+        self.host, self.port, self.timeout = host, port, timeout
+        FakeSMTP.last = self
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def login(self, user, password):
+        self.user, self.password = user, password
+        if FakeSMTP.fail:
+            raise FakeSMTP.fail
+
+    def send_message(self, message):
+        FakeSMTP.sent.append(message)
+
+
+@pytest.fixture
+def smtp():
+    FakeSMTP.sent, FakeSMTP.fail = [], None
+    with patch.object(mail.smtplib, "SMTP_SSL", FakeSMTP):
+        yield FakeSMTP
+    FakeSMTP.sent, FakeSMTP.fail = [], None
+
+
+def _people(db):
+    """A contacted lead with a sent outreach email and an open follow-up, and a client's contact."""
+    lead = models.Lead(name="Mercy Banda", company="Sunrise Pharmacy", email="mercy@sunrise.example",
+                       status="contacted")
+    wamu = models.Client(name="Wamu's Bakery", status="active")
+    db.add_all([lead, wamu])
+    db.commit()
+    contact = models.Contact(client_id=wamu.id, name="Wamu Phiri", email="Wamu@Bakery.Example", is_primary=True)
+    sent = models.OutreachMessage(lead_id=lead.id, channel="email", direction="out", subject="Stock alerts",
+                                  body="Dear Mercy,", status="sent", external_id=OUTREACH_ID)
+    follow_up = models.Todo(text="Follow up with Mercy Banda", done=False, category="outreach", lead_id=lead.id,
+                            priority=3)
+    db.add_all([contact, sent, follow_up])
+    db.commit()
+    return lead.id, wamu.id, contact.id, sent.id, follow_up.id
+
+
+def _inbox():
+    long_body = ("Hello Bandile, yes we would like the stock alerts. " * 30 +
+                 "\r\n> Dear Mercy,\r\n> an earlier line\r\nOn Wed, 11 Nov 2026 at 10:00, Bandile wrote:\r\nold thread")
+    return [
+        _raw("Mercy Banda <Mercy@Sunrise.example>", "Re: Stock alerts", long_body,
+             message_id="<reply-1@sunrise.example>", in_reply_to=OUTREACH_ID),
+        _raw("wamu@bakery.example", "Invoice question", "Can you resend the October invoice?",
+             message_id="<q-2@bakery.example>", thread="1701"),
+        _raw("Newsletter <news@shop.example>", "50% off everything", "Buy now. " * 50,
+             message_id="<spam-3@shop.example>", thread="1702"),
+    ]
+
+
+# ── 5. Fetch ─────────────────────────────────────────────────
+
+def test_fetch_keeps_mail_from_known_people_and_nothing_else(mailbox):
+    db = _db()
+    lead_id, client_id, contact_id, outreach_id, todo_id = _people(db)
+    imap = FakeIMAP(_inbox())
+    with patch.object(mail.imaplib, "IMAP4_SSL", imap):
+        counts = mail.fetch(db, since=date(2026, 11, 9))
+    assert counts == {"ok": True, "fetched": 3, "stored": 2, "matched_leads": 1, "matched_clients": 1,
+                      "ignored": 1, "error": None}
+    assert ("connect", "imap.gmail.com") in imap.calls and ("login", MAILBOX, APP_PASSWORD) in imap.calls
+    assert ("select", "INBOX", True) in imap.calls                          # read-only: nothing is marked read
+    assert ("search", ("SINCE", "09-Nov-2026")) in imap.calls and imap.closed
+    items = next(c[1] for c in imap.calls if c[0] == "fetch")
+    assert "BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID IN-REPLY-TO" in items
+    assert "BODY.PEEK[TEXT]<0.2000>" in items and "X-GM-THRID" in items
+
+    stored = {m.message_id: m for m in db.query(models.EmailMessage).all()}
+    assert set(stored) == {"<reply-1@sunrise.example>", "<q-2@bakery.example>"}       # the newsletter is not kept
+    reply = stored["<reply-1@sunrise.example>"]
+    assert reply.direction == "in" and reply.from_addr == "mercy@sunrise.example" and reply.lead_id == lead_id
+    assert reply.outreach_message_id == outreach_id and reply.thread_key == "1700"
+    assert reply.received_at == datetime(2026, 11, 12, 7, 30)                          # UTC
+    assert reply.snippet.startswith("Hello Bandile, yes we would like the stock alerts.")
+    assert len(reply.snippet) <= 500 and "Dear Mercy" not in reply.snippet and "old thread" not in reply.snippet
+    question = stored["<q-2@bakery.example>"]
+    assert question.client_id == client_id and question.contact_id == contact_id and question.lead_id is None
+    assert question.snippet == "Can you resend the October invoice?"
+
+    # The lead replied: status, follow-up, the outreach message, the event.
+    db.expire_all()
+    assert db.query(models.Lead).filter_by(id=lead_id).one().status == "replied"
+    assert db.query(models.Todo).filter_by(id=todo_id).one().done is True
+    assert db.query(models.OutreachMessage).filter_by(id=outreach_id).one().replied_at == datetime(2026, 11, 12, 7, 30)
+    events = db.query(models.AgentEvent).filter_by(kind="lead.replied").all()
+    assert len(events) == 1 and json.loads(events[0].payload_json) == {"lead_id": lead_id, "email_message_id": reply.id}
+
+    comms = db.query(models.Communication).order_by(models.Communication.id).all()
+    assert [(c.channel, c.direction, c.source) for c in comms] == [("email", "in", "email_sync")] * 2
+    assert comms[0].lead_id == lead_id and comms[0].summary.startswith("Re: Stock alerts: Hello Bandile")
+    assert len(comms[0].summary) <= len("Re: Stock alerts: ") + 140
+    assert comms[1].client_id == client_id and comms[1].contact_id == contact_id
+    assert comms[1].summary == "Invoice question: Can you resend the October invoice?"
+    assert "Buy now" not in json.dumps([m.snippet for m in stored.values()])
+
+    item = {i["provider"]: i for i in client.get("/integrations").json()}["email"]
+    assert item["status"] == "connected" and item["account_label"] == MAILBOX and item["last_sync_at"]
+    assert APP_PASSWORD not in client.get("/integrations").text
+
+    # A second run stores nothing new and announces nothing twice.
+    with patch.object(mail.imaplib, "IMAP4_SSL", FakeIMAP(_inbox())):
+        again = mail.fetch(db, since=date(2026, 11, 9))
+    assert again["stored"] == 0 and again["fetched"] == 3 and again["ignored"] == 1
+    assert db.query(models.EmailMessage).count() == 2 and db.query(models.Communication).count() == 2
+    assert db.query(models.AgentEvent).filter_by(kind="lead.replied").count() == 1
+    db.close()
+
+
+def test_fetch_decodes_html_multipart_and_base64(mailbox):
+    db = _db()
+    _people(db)
+    html = "<html><style>p{color:red}</style><body><p>Thanks, <b>Tuesday</b> works.</p></body></html>"
+    multipart = ("--BOUND\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nSee you on Tuesday.\r\n"
+                 "--BOUND\r\nContent-Type: text/html\r\n\r\n<p>See you</p>\r\n--BOUND--\r\n")
+    encoded = base64.b64encode("Zikomo kwambiri — sent from my phone".encode("utf-8"))
+    inbox = [
+        _raw("mercy@sunrise.example", "Re: demo", html, message_id="<h-1@x>", content_type="text/html; charset=utf-8"),
+        _raw("mercy@sunrise.example", "Re: demo 2", multipart, message_id="<m-2@x>",
+             content_type='multipart/alternative; boundary="BOUND"'),
+        _raw("mercy@sunrise.example", "=?utf-8?B?" + base64.b64encode("Zikomo".encode()).decode() + "?=", encoded,
+             message_id="<b-3@x>", encoding="base64"),
+        _raw("mercy@sunrise.example", "No id at all", "Plain.", message_id=""),
+    ]
+    with patch.object(mail.imaplib, "IMAP4_SSL", FakeIMAP(inbox)):
+        counts = mail.fetch(db)
+    assert counts["stored"] == 4
+    by = {m.subject: m for m in db.query(models.EmailMessage).all()}
+    assert by["Re: demo"].snippet == "Thanks, Tuesday works."
+    assert by["Re: demo 2"].snippet == "See you on Tuesday."
+    assert by["Zikomo"].snippet == "Zikomo kwambiri — sent from my phone"
+    assert by["No id at all"].message_id.startswith("<no-id-")
+    db.close()
+
+
+def test_a_failed_sign_in_is_recorded_without_the_password(mailbox, capsys):
+    db = _db()
+    refused = imaplib.IMAP4.error(f"[AUTHENTICATIONFAILED] Invalid credentials for {MAILBOX} / {APP_PASSWORD}")
+    with patch.object(mail.imaplib, "IMAP4_SSL", FakeIMAP([], login_error=refused)):
+        counts = mail.fetch(db)
+    assert counts["ok"] is False and APP_PASSWORD not in counts["error"] and "AUTHENTICATIONFAILED" in counts["error"]
+    row = integrations.get_or_create(db, "email")
+    assert row.status == "error" and APP_PASSWORD not in row.last_error and "***" in row.last_error
+    assert APP_PASSWORD not in capsys.readouterr().out
+    item = {i["provider"]: i for i in client.get("/integrations").json()}["email"]
+    assert item["status"] == "error" and APP_PASSWORD not in item["last_error"]
+    with patch.object(mail.imaplib, "IMAP4_SSL", side_effect=OSError("network unreachable")):
+        assert mail.fetch(db)["ok"] is False                                  # a socket error does not raise either
+    db.close()
+
+
+def test_email_sync_agent_stays_inside_its_tables(mailbox, monkeypatch):
+    db = _db()
+    spec = email_sync.SPEC
+    assert spec.schedule.interval_minutes == 30 and spec.permissions.max_llm_calls == 0
+    assert spec.permissions.tables_write == ["email_messages", "communications", "leads", "todos", "integrations"]
+    assert spec.permissions.may_emit == ["lead.replied"]
+    _people(db)
+    with patch.object(mail.imaplib, "IMAP4_SSL", FakeIMAP(_inbox())):
+        out = runner.run_agent(spec, "schedule")
+    assert out["status"] == "completed" and out["changes_count"] >= 3        # two communications, the lead, the task
+    assert out["summary"] == "2 new message(s): 1 from leads, 1 from clients"
+    with patch.object(mail.imaplib, "IMAP4_SSL", FakeIMAP(_inbox())):
+        assert runner.run_agent(spec, "schedule")["status"] == "skipped"
+    monkeypatch.delenv("EMAIL_APP_PASSWORD")
+    assert runner.run_agent(spec, "schedule")["summary"] == "email not configured"
+    db.close()
+
+
+# ── 6. Send ──────────────────────────────────────────────────
+
+def test_send_goes_through_smtp_and_stores_an_out_row(mailbox, smtp):
+    db = _db()
+    lead_id, client_id, *_ = _people(db)
+    out = mail.send(db, to="Mercy Banda <mercy@sunrise.example>", subject="Stock\r\nalerts", body="Dear Mercy,\n\nHello.",
+                    lead_id=lead_id, outreach_message_id=7)
+    db.commit()
+    assert out["ok"] is True and out["error"] is None and out["message_id"].endswith("@example.com>")
+    assert (smtp.last.host, smtp.last.port, smtp.last.timeout) == ("smtp.gmail.com", 465, 20)
+    assert (smtp.last.user, smtp.last.password) == (MAILBOX, APP_PASSWORD)
+    sent = smtp.sent[0]
+    assert sent["From"] == f"Bandile Masocha <{MAILBOX}>" and sent["To"] == "mercy@sunrise.example"
+    assert sent["Subject"] == "Stock alerts" and sent["Message-ID"] == out["message_id"]    # no header injection
+    assert sent.get_content_type() == "text/plain" and "Dear Mercy," in sent.get_content()
+    row = db.query(models.EmailMessage).one()
+    assert row.direction == "out" and row.message_id == out["message_id"] and row.to_addr == "mercy@sunrise.example"
+    assert row.lead_id == lead_id and row.outreach_message_id == 7 and row.snippet == "Dear Mercy, Hello."
+
+    assert mail.send(db, to="not an address", subject="x", body="y")["ok"] is False
+    assert mail.send(db, to="a@b.example", subject="x", body="  ")["ok"] is False
+    smtp.fail = OSError(f"connection reset while sending {APP_PASSWORD}")
+    failed = mail.send(db, to="a@b.example", subject="x", body="y")
+    assert failed["ok"] is False and APP_PASSWORD not in failed["error"]
+    assert len(smtp.sent) == 1 and db.query(models.EmailMessage).count() == 1
+    db.close()
+
+
+def test_send_says_so_when_email_is_not_configured(smtp, monkeypatch):
+    monkeypatch.delenv("EMAIL_ADDRESS", raising=False)
+    monkeypatch.delenv("EMAIL_APP_PASSWORD", raising=False)
+    db = _db()
+    assert mail.send(db, to="a@b.example", subject="x", body="y") == {
+        "ok": False, "message_id": None, "error": "email sending is not configured"}
+    assert smtp.sent == [] and mail.fetch(db)["error"] == "Email is not configured"
+    assert client.post("/integrations/email/sync").status_code == 503
+    assert client.post("/integrations/email/test").status_code == 503
+    db.close()
+
+
+def test_approved_outreach_email_now_sends(mailbox, smtp):
+    import outreach
+    db = _db()
+    lead = models.Lead(name="Mercy Banda", company="Sunrise Pharmacy", email="mercy@sunrise.example", status="qualified")
+    db.add(lead)
+    db.commit()
+    lead_id = lead.id
+    with patch("llm.chat_text", return_value=json.dumps({"subject": "Stock alerts", "body": "Dear Mercy,"})):
+        mid = outreach.draft(db, lead, "email", "intro")["id"]
+    db.commit()
+    db.close()
+
+    out = client.post(f"/outreach/{mid}/send").json()
+    assert out["message"]["status"] == "sent" and out["message"]["error"] is None
+    assert out["message"]["external_id"] == smtp.sent[0]["Message-ID"]
+    assert smtp.sent[0]["To"] == "mercy@sunrise.example" and smtp.sent[0]["Subject"] == "Stock alerts"
+    db = _db()
+    assert db.query(models.Lead).filter_by(id=lead_id).one().status == "contacted"
+    stored = db.query(models.EmailMessage).one()
+    assert stored.direction == "out" and stored.outreach_message_id == mid and stored.lead_id == lead_id
+    assert db.query(models.Todo).filter_by(lead_id=lead_id, category="outreach").count() == 1   # the follow-up
+    db.close()
+
+
+def test_email_endpoints_and_lookup_tool(mailbox, smtp):
+    db = _db()
+    lead_id, client_id, *_ = _people(db)
+    off, summary = ot.run_tool("email_lookup", {"who": "Mercy"}, db)
+    assert off["messages"] == [] and summary == "no stored email for Mercy Banda"
+    with patch.object(mail.imaplib, "IMAP4_SSL", FakeIMAP(_inbox())):
+        synced = client.post("/integrations/email/sync").json()
+    assert synced["stored"] == 2
+    assert [m["subject"] for m in client.get("/email/messages", params={"lead_id": lead_id}).json()] == ["Re: Stock alerts"]
+    assert [m["subject"] for m in client.get("/email/messages", params={"client_id": client_id}).json()] == ["Invoice question"]
+    listed = client.get("/email/messages").json()
+    assert len(listed) == 2 and all("body" not in m and len(m["snippet"]) <= 500 for m in listed)
+
+    found, summary = ot.run_tool("email_lookup", {"who": "Wamu"}, db)
+    assert summary == "1 email(s) with Wamu's Bakery"
+    assert found["messages"] == [{"direction": "from them", "subject": "Invoice question",
+                                  "snippet": "Can you resend the October invoice?", "when": "2026-11-12"}]
+    nobody, _ = ot.run_tool("email_lookup", {"who": "Zacharias Quillfeather"}, db)
+    assert "error" in nobody
+
+    tested = client.post("/integrations/email/test").json()
+    assert tested == {"ok": True, "error": None} and smtp.sent[-1]["To"] == MAILBOX
+    assert db.query(models.EmailMessage).filter_by(direction="out").count() == 0       # the test message is not kept
+    db.close()
+
+
+def test_email_lookup_says_when_email_is_not_connected():
+    db = _db()
+    out, summary = ot.run_tool("email_lookup", {"who": "Mercy"}, db)
+    assert out == {"connected": False, "message": "Email is not connected"} and summary == "Email is not connected"
+    db.close()

@@ -54,6 +54,9 @@ Environment (`backend/.env` locally, Render env vars in production):
 | `TELEGRAM_WEBHOOK_SECRET` | unset | Random string Telegram must send back with each update |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | unset | The Google OAuth client for the calendar. Unset: the calendar shows "not connected" |
 | `GOOGLE_CALENDAR_ID` | `primary` | Which calendar to read and write |
+| `EMAIL_ADDRESS` / `EMAIL_APP_PASSWORD` | unset | The Gmail address and its App Password. Unset: email shows "not connected" and outreach email cannot send |
+| `EMAIL_IMAP_HOST` / `EMAIL_SMTP_HOST` / `EMAIL_SMTP_PORT` | `imap.gmail.com` / `smtp.gmail.com` / `465` | Mail servers |
+| `EMAIL_FROM_NAME` | `Bandile Masocha` | The name on sent mail |
 
 Tests (OpenAI is always mocked; the suite must pass with no key set):
 ```

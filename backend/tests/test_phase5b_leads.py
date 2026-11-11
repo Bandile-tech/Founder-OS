@@ -468,9 +468,13 @@ def test_manual_channel_and_dismiss():
     assert client.post("/outreach/9999/send").status_code == 404
 
 
-# ── 6. email before the integration exists ────────────────────
+# ── 6. email before it is configured ──────────────────────────
+# With EMAIL_ADDRESS and EMAIL_APP_PASSWORD set the same send reaches ``sent``:
+# tests/test_phase6c_integrations.py::test_approved_outreach_email_now_sends.
 
-def test_email_send_fails_cleanly_until_email_is_configured():
+def test_email_send_fails_cleanly_until_email_is_configured(monkeypatch):
+    monkeypatch.delenv("EMAIL_ADDRESS", raising=False)
+    monkeypatch.delenv("EMAIL_APP_PASSWORD", raising=False)
     db = _db()
     lead = _lead(db, email="mercy@sunrise.example")
     lead.status = "qualified"

@@ -504,6 +504,22 @@ end_at (naive UTC), location, html_link, created_by_us}`.
 `today_events` (all-day titles) and `integrations: {email, telegram, google_calendar}`; timed
 events today are items of category `event` (target type `calendar_event`).
 
+### Email (Phase 6C — `backend/integrations_email.py`)
+
+A stored message: `{id, message_id, thread_key, direction (in|out), from_addr, to_addr,
+subject, snippet (at most 500 characters), received_at, lead_id, client_id, contact_id,
+outreach_message_id}`. Bodies are never stored; mail from unknown senders is never stored.
+
+| Method & path | Body / query | Returns |
+|---|---|---|
+| `POST /integrations/email/sync` | | `{ok, fetched, stored, matched_leads, matched_clients, ignored, error}`; 503 until `EMAIL_ADDRESS` and `EMAIL_APP_PASSWORD` are set |
+| `POST /integrations/email/test` | | `{ok, error}` — sends a test message to `EMAIL_ADDRESS` |
+| `GET /email/messages` | `lead_id?`, `client_id?`, `limit=50` | `[message]`, newest first |
+
+An outreach message on the `email` channel is now really sent when it is approved
+(`POST /outreach/{id}/send`); `external_id` is the `Message-ID`, and a reply to it sets
+`replied_at` on the outreach message.
+
 ### Notifications (Phase 6D — `backend/notify.py`, `backend/telegram_inbound.py`)
 
 A notification: `{id, created_at, channel, kind (briefing|evening|alert|deadline|reminder|
