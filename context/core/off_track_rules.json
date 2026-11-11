@@ -42,6 +42,16 @@
         "min_topics": 1
       },
       "message": "Red or yellow syllabus topics remain with an exam inside 60 days. Revise them before anything else academic."
+    },
+    {
+      "id": "payment_overdue_14d",
+      "severity": "critical",
+      "enabled": true,
+      "check": "payment_overdue",
+      "params": {
+        "days": 14
+      },
+      "message": "A client payment is more than 14 days overdue. Chase it today."
     }
   ]
 }

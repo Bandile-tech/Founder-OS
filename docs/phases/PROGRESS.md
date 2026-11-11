@@ -147,6 +147,40 @@ Decisions where the spec was silent:
   yesterday, weekday names, "in N days", "N days ago", "end of month" and "end of week". With
   `past=True` (communications, payments received) a date never resolves to the future.
 
+### S7 — 5C.2 payments, recurring revenue, reconciliation, summary, briefing (done)
+
+Shipped: `crm.record_payment`, `mark_paid`, `add_recurring`, `generate_due`,
+`refresh_statuses`, `reconcile`, `refresh_health`, `housekeeping`, `summary`; endpoints
+`GET/POST /payments`, `POST /payments/{id}/paid`, `POST /payments/{id}/cancel`,
+`GET/POST /recurring`, `PATCH /recurring/{id}`, `GET /crm/summary`; tools `record_payment`
+and `crm_summary`; briefing `_crm_items`, `business_detail`, `counts.payments_overdue` in
+`attention_count`; alert `payment_overdue_14d` with `_check_payment_overdue`; the 5C
+endpoint shapes in `docs/REBUILD_HANDOFF.md` §2. Tests: acceptance tests 2–5 and 8–10 in
+`tests/test_phase5c_crm.py`.
+
+Deferred: nothing from §5C.
+
+Decisions where the spec was silent:
+- The `record_payment` tool with status `paid` first looks for the client's oldest open
+  payment in the same currency within 5 % of the amount and settles that one (the same rule
+  as reconciliation), so "they paid" after "I invoiced them" does not create a second
+  payment and a second revenue row. The result carries `settled_existing: true`.
+- `refresh_statuses` and `refresh_health` are not written to the change log: both values are
+  derived from dates and other rows. Generated instalments, the `next_due` move and
+  reconciled payments are logged, with source `job:crm`.
+- `generate_due` catches up at most 60 periods per recurring row per call, and stops at
+  `ended_at`.
+- A paid payment cannot be cancelled (409); the way back is Undo on the payment's change.
+- `GET /payments` takes `status` as a comma-separated list (default `due,overdue`), and
+  `from` / `to` filter on the due date, or the paid date when there is no due date.
+- The health counts in `GET /crm/summary` cover clients that are not `closed` or `lost`.
+- `business_detail.revenue_pct` is the revenue annual target's progress (what
+  `progress.business` shows today), or null when no revenue target is set. The spec's
+  "$10K scoreboard" wording predates the current-data fix; the legacy scoreboard is not read.
+- The briefing runs `crm.housekeeping` before it builds the CRM items, so `GET
+  /briefing/today` can write (generated instalments, overdue flags). A failure there is
+  logged and the briefing still renders.
+
 ## Environment variables added so far
 
 | Var | Default | Session | Purpose |

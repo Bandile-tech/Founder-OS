@@ -152,6 +152,8 @@ def _run_every_tool(db) -> dict:
             ("log_communication", {"who": "Bel Baby", "summary": "Called about the delivery date"}),
             ("update_deal", {"deal": "Website build", "client": "Bel Baby", "amount": 4000, "create": True}),
             ("add_contact", {"client": "Bel Baby", "name": "Mrs Banda", "phone": "0977 000 222"}),
+            ("record_payment", {"client": "Bel Baby", "amount": 1500, "status": "due", "due_date": "tomorrow"}),
+            ("crm_summary", {}),
         ]
         for name, args in calls:
             result, _summary = ot.run_tool(name, args, db)

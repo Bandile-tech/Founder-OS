@@ -1742,3 +1742,88 @@ _register(
      "is_primary": {"type": "boolean", "description": "True if this is now the main contact."}},
     ["client", "name"],
 )
+
+
+# ── 5C: payments and the CRM summary ─────────────────────────
+
+def record_payment(db, client: str, amount: float, currency: str = "ZMW", status: str = "paid",
+                   due_date: str | None = None, title: str | None = None):
+    """Record money invoiced to (due) or received from (paid) a client."""
+    import business_common
+    import change_log
+    import crm
+    owner, scored = crm.find_client(db, client)
+    if owner is None:
+        if scored:
+            return _ambiguous("client", client, scored, _client_label)
+        return {"error": f"no client matches '{client}'"}, f"no client matches '{client}'"
+    status = "due" if str(status or "paid").lower() == "due" else "paid"
+    due = None
+    if due_date:
+        due = business_common.parse_day(due_date)
+        if due is None:
+            msg = f"could not read the date '{due_date}'"
+            return {"error": msg}, msg
+    import main
+    cur = main._normalise_currency(currency or "ZMW")
+    with change_log.batch_scope(db, "assistant"):
+        try:
+            existing = crm.find_open_payment(db, owner.id, float(amount or 0), cur) if status == "paid" else None
+            if existing is not None:
+                # He was already invoiced for this: settle that payment, do not add a second.
+                result = crm.mark_paid(db, existing)
+                result["settled_existing"] = True
+            else:
+                result = crm.record_payment(db, owner, amount, cur, status=status, title=title, due_date=due)
+        except (ValueError, TypeError) as exc:
+            return {"error": str(exc)}, str(exc)
+        crm.refresh_statuses(db)
+        db.commit()
+    label = crm.money_label(result["amount"], result["currency"])
+    result["client_name"] = owner.name
+    if status == "paid":
+        return result, f"{label} received from {owner.name}"
+    return result, f"{label} due from {owner.name}" + (f" on {due.isoformat()}" if due else "")
+
+
+def crm_summary(db):
+    import crm
+    crm.housekeeping(db)
+    result = crm.summary(db)
+    p = result["payments"]
+    return result, (f"{result['clients']['active']} active client(s), "
+                    f"${p['overdue_usd']:,.0f} overdue, ${result['mrr']['total_usd']:,.0f} MRR")
+
+
+_register(
+    "record_payment",
+    lambda db, a: record_payment(db, client=a.get("client", ""), amount=a.get("amount"),
+                                 currency=a.get("currency", "ZMW"), status=a.get("status", "paid"),
+                                 due_date=a.get("due_date"), title=a.get("title")),
+    "Record money a client was invoiced (status due) or has paid (status paid, which also "
+    "logs the revenue). ONLY when Bandile states an invoice or a payment for a named client.",
+    {"client": _str("Client name or part of it."), "amount": _num("The amount."),
+     "currency": _str("ZMW or USD (default ZMW)."),
+     "status": _str("paid when the money arrived, due when it was invoiced (default paid).", ["paid", "due"]),
+     "due_date": _str("When it is due, as he said it (for status due)."),
+     "title": _str("What it is for, e.g. 'Deposit'.")},
+    ["client", "amount"],
+)
+
+_register(
+    "crm_summary", lambda db, a: crm_summary(db),
+    "Clients, deals by stage, what is due and overdue, monthly recurring revenue and client "
+    "health, in one picture. Read-only.",
+)
+
+
+def _check_payment_overdue(db, params):
+    """True when any open client payment is more than ``days`` days past its due date."""
+    days = int(params.get("days", 14))
+    cutoff = date.today() - timedelta(days=days)
+    return db.query(models.Payment).filter(
+        models.Payment.status.in_(("due", "overdue")), models.Payment.due_date.isnot(None),
+        models.Payment.due_date < cutoff).first() is not None
+
+
+_RULE_CHECKS["payment_overdue"] = _check_payment_overdue

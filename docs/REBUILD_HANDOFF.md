@@ -186,6 +186,45 @@ All responses are JSON. Dates are ISO strings. `changes` entries have the shape
 ### Usage
 - `GET /usage/summary?days=90` → `{days, total{calls,input_tokens,cached_input_tokens,output_tokens,estimated_cost_usd}, by_day[], by_month[], by_model[]}`
 
+### CRM (Phase 5C — `backend/crm.py`)
+
+Money is always `amount` + `currency` (`USD` | `ZMW`); serialised money rows also carry
+`amount_usd` (converted at `ZMW_PER_USD`). Totals are `{by_currency: {ZMW: n, USD: n},
+total_usd: n}`. Every write returns `change` (one entry) and, where more than one row was
+written, `changes`.
+
+| Method & path | Body / query | Returns |
+|---|---|---|
+| `GET /clients` | `status?`, `q?` | the existing fields plus `currency`, `health` (`green\|amber\|red`, computed live), `tags[]`, `lead_id`, `contacts_count`, `open_deals`, `outstanding{…}`, `mrr{…}`, `last_contact_at` |
+| `GET /clients/{id}` | | the list row plus `contacts[]`, `deals[]`, `projects[]`, `payments[]`, `recurring[]`, `communications[]` (last 50) |
+| `PATCH /clients/{id}` | existing `status?`, `value?`, `notes?`, `service?` plus `currency?`, `tags?: [str]` | `{id, status, currency, tags, change}`; status must be `prospect\|active\|paused\|closed\|lost` (400 otherwise) |
+| `POST /clients/{id}/contacts` | `{name, role?, email?, phone?, whatsapp?, is_primary?}` | 201 contact + `change`, `changes` |
+| `PATCH /contacts/{id}` | any contact field | contact + `change` |
+| `GET /deals` | `stage?`, `client_id?` | `[deal]` with `client_name`, `amount_usd` |
+| `POST /deals` | `{client_id, title, amount?, currency?, stage?, expected_close?}` | 201 deal + `change`, `changes` (+ `project` when created as won) |
+| `PATCH /deals/{id}` | `{stage?, amount?, currency?, probability?, expected_close?, lost_reason?, notes?}` | deal + `change`, `changes` (+ `project` the first time the stage becomes `won`) |
+| `GET /payments` | `status?` (comma list, default `due,overdue`; `all` for everything), `client_id?`, `from?`, `to?` | `[payment]` with `client_name`, `amount_usd` |
+| `POST /payments` | `{client_id, amount, currency?, status?: due\|paid, title?, due_date?, deal_id?, project_id?}` | 201 payment + `change`, `changes` (a `paid` payment also creates its `revenue` row) |
+| `POST /payments/{id}/paid` | `{paid_at?}` | payment with `revenue_id` + `changes`; a second call returns `already_paid: true` and writes nothing; 409 for a cancelled payment |
+| `POST /payments/{id}/cancel` | | payment + `change`; 409 when it is already paid |
+| `GET /recurring` | | `[recurring]` with `client_name`, `monthly_amount` |
+| `POST /recurring` | `{client_id, title, amount, currency?, interval?: monthly\|quarterly\|annual, day_of_month?, start?}` | 201 + `change` |
+| `PATCH /recurring/{id}` | `{active?, amount?, currency?, interval?, day_of_month?, ended_at?}` | + `change` |
+| `GET /communications` | `client_id?`, `lead_id?`, `limit=50` | `[communication]` newest first |
+| `POST /communications` | `{client_id?, lead_id?, contact_id?, channel, direction?, summary, occurred_at?}` | 201 + `change` |
+| `GET /crm/summary` | | `{clients:{active, paused, total}, deals:{by_stage:{stage:{count, amount_usd}}, weighted_pipeline_usd}, payments:{due_usd, overdue_usd, overdue_count, paid_30d_usd}, mrr:{by_currency, total_usd}, revenue_30d_usd, health:{green, amber, red}}` |
+
+`GET /crm/summary` and `GET /briefing/today` first run `crm.housekeeping` (create the due
+payment for each recurring period that has arrived, flip `due` to `overdue`, link stray
+revenue rows to open payments, store client health), so both can write. Deal stages:
+`lead → proposal → negotiation → won | lost`; a stage change sets the default probability
+(10 / 40 / 70 / 100 / 0) unless one is given. `GET /revenue` is unchanged.
+
+Briefing additions: items with category `payment` (overdue: score 72 + min(days, 14);
+due within 7 days: 42), `deal` (40) and `client` (26, at most three); `counts.payments_overdue`
+(included in `attention_count`); a new top-level `business_detail: {revenue_pct, mrr_usd,
+outstanding_usd, overdue_count}`. `progress.business` is unchanged.
+
 ### Tool registry (for the UI's reference)
 `route_brain_dump, get_dashboard_state, detect_off_track, synthesize_weekly_review,
 surface_weakest_topics, query_war_room, add_todos, query_cold_archive,

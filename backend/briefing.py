@@ -18,8 +18,13 @@ Response shape (the target home screen is built against this):
               target_type, target_id, completable, score}, ... ],
   "attention_count": int, "alert_count": int, "alerts": [...],
   "progress": {"academics": int|null, "business": int, "targets": int|null, "habits": int},
+  "business_detail": {"revenue_pct": int|null, "mrr_usd": float, "outstanding_usd": float,
+                      "overdue_count": int},
   "counts": {...}, "exams": [...], "non_negotiables": [...], "weakness_notes": [...]
 }
+
+Phase 5 adds the item categories ``payment``, ``deal`` and ``client`` (target types of the
+same names); none of them is completable from a checkbox.
 """
 
 import re
@@ -200,6 +205,66 @@ def _alert_items(db: Session, today: date) -> tuple[list, list]:
     return alerts, items
 
 
+def _crm_items(db: Session, today: date) -> tuple[list, dict]:
+    """Payments, deals and quiet clients. Runs the CRM housekeeping first (recurring
+    instalments that have fallen due, overdue flags) so the list is current."""
+    import crm
+    try:
+        crm.housekeeping(db, "job:crm")
+    except Exception as exc:  # noqa: BLE001 — the briefing must still render
+        db.rollback()
+        print(f"[briefing] crm housekeeping failed: {exc}")
+    names = {c.id: c.name for c in db.query(models.Client).all()}
+    items, overdue_count = [], 0
+    open_payments = db.query(models.Payment).filter(models.Payment.status.in_(crm.OPEN_PAYMENT)).all()
+    for p in open_payments:
+        if p.due_date is None:
+            continue
+        who = names.get(p.client_id, "a client")
+        label = crm.money_label(p.amount, p.currency)
+        if p.due_date < today:
+            days = (today - p.due_date).days
+            overdue_count += 1
+            items.append(_item(title=f"{label} from {who}", category="payment", due=p.due_date, today=today,
+                               due_label=f"{days}d overdue", reason=f"{label} from {who} overdue",
+                               action="Chase it or mark paid", target_type="payment", target_id=p.id,
+                               score=72 + min(days, 14)))
+        elif p.due_date <= today + timedelta(days=7):
+            items.append(_item(title=f"{label} from {who}", category="payment", due=p.due_date, today=today,
+                               reason=f"{label} from {who} is due", action="Expect payment",
+                               target_type="payment", target_id=p.id, score=42))
+    now = datetime.utcnow()
+    for d in db.query(models.Deal).filter(models.Deal.stage.notin_(("won", "lost"))).all():
+        stale = (d.stage == "negotiation" and d.updated_at is not None
+                 and (now - d.updated_at).days > crm.AMBER_NEGOTIATION_DAYS)
+        late = d.expected_close is not None and d.expected_close < today
+        if stale or late:
+            who = names.get(d.client_id, "a client")
+            reason = ("Expected to close by now" if late
+                      else f"In negotiation for {(now - d.updated_at).days} days")
+            items.append(_item(title=f"{d.title} — {who}", category="deal", due=d.expected_close, today=today,
+                               reason=reason, action="Close or mark lost", target_type="deal",
+                               target_id=d.id, score=40))
+    quiet = []
+    for c in db.query(models.Client).filter(models.Client.status == "active").all():
+        last = crm.last_contact_at(db, c) or c.created_at
+        if last is not None and (now - last).days >= crm.AMBER_SILENCE_DAYS:
+            quiet.append(((now - last).days, c))
+    quiet.sort(key=lambda pair: -pair[0])
+    for days, c in quiet[:3]:
+        items.append(_item(title=f"Check in with {c.name}", category="client", today=today, due_label="",
+                           reason=f"No contact in {days} days", action="Check in", target_type="client",
+                           target_id=c.id, score=26))
+    recurring = db.query(models.RecurringRevenue).filter(models.RecurringRevenue.active == True).all()   # noqa: E712
+    detail = {
+        "revenue_pct": _business_pct(db),
+        "mrr_usd": crm._totals(recurring, amount_of=crm.monthly_amount)["total_usd"],
+        "outstanding_usd": crm._totals(open_payments)["total_usd"],
+        "overdue_count": overdue_count,
+    }
+    return items, detail
+
+
 def _business_pct(db: Session) -> int | None:
     """Progress of the revenue annual target, or None when no revenue target is set.
     (The old $10K scoreboard is no longer read.)"""
@@ -280,12 +345,16 @@ def build_briefing(db: Session, *, refresh: bool = False, now: datetime | None =
     exams, exam_items = _exam_items(db, today)
     syl_items, weakness_notes = _syllabus_items(db, today)
     target_items, targets_pct = _target_items(db, today)
+    crm_items, business_detail = _crm_items(db, today)
     alerts, alert_items = _alert_items(db, today)
 
-    items = task_items + nn_items + exam_items + syl_items + target_items + alert_items
+    items = task_items + nn_items + exam_items + syl_items + target_items + alert_items + crm_items
     items.sort(key=lambda i: i["score"], reverse=True)
 
-    attention = counts["overdue"] + len(target_items) + sum(1 for a in alerts if a.get("severity") == "critical")
+    counts["payments_overdue"] = business_detail["overdue_count"]
+    attention = (counts["overdue"] + len(target_items)
+                 + sum(1 for a in alerts if a.get("severity") == "critical")
+                 + counts["payments_overdue"])
 
     core = {
         "date": today.isoformat(), "today_date": today, "weekday": today.strftime("%A"), "badge": _badge(today),
@@ -300,6 +369,7 @@ def build_briefing(db: Session, *, refresh: bool = False, now: datetime | None =
             "targets": targets_pct,
             "habits": habits_pct,
         },
+        "business_detail": business_detail,
         "counts": {**counts, "items": len(items), "non_negotiables_done": sum(1 for r in nn_rows if r["done"]),
                    "non_negotiables_total": len(nn_rows), "exams_upcoming": len(exams)},
         "exams": exams[:6],
