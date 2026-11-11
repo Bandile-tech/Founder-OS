@@ -1,0 +1,432 @@
+"""
+Leads — the prospect database (Phase 5B).
+
+Primitives: serialize, find_duplicate, create_lead, find_leads, pick_lead, import_csv, segments
+Endpoints:  GET /leads, GET /leads/segments, GET /leads/{id}, POST /leads,
+            PATCH /leads/{id}, POST /leads/import
+
+A lead is a person or business Bandile intends to approach. Leads arrive by CSV import
+(an upsert with counts) or from conversation, never through a form. Every write is in the
+change log.
+"""
+
+import csv
+import io
+import json
+from datetime import datetime
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
+from pydantic import BaseModel
+from sqlalchemy import func
+from sqlalchemy.orm import Session
+
+import business_common
+import change_log
+import models
+from database import get_db
+
+router = APIRouter()
+
+STATUSES = ("new", "qualified", "disqualified", "contacted", "replied", "converted", "lost")
+
+# Columns a caller may set, in the order they are reported.
+FIELDS = ("name", "company", "role", "email", "phone", "whatsapp", "linkedin_url", "website",
+          "location", "segment", "notes")
+
+# CSV header (lower-cased, trimmed) → lead column.
+HEADER_SYNONYMS = {
+    "name": "name", "full name": "name", "contact": "name", "contact name": "name", "owner": "name",
+    "company": "company", "business": "company", "organisation": "company",
+    "organization": "company", "org": "company",
+    "role": "role", "title": "role", "position": "role",
+    "email": "email", "e-mail": "email", "mail": "email",
+    "phone": "phone", "tel": "phone", "telephone": "phone", "mobile": "phone", "cell": "phone",
+    "number": "phone",
+    "whatsapp": "whatsapp", "wa": "whatsapp",
+    "linkedin": "linkedin_url", "linkedin url": "linkedin_url", "profile": "linkedin_url",
+    "website": "website", "site": "website", "url": "website",
+    "location": "location", "city": "location", "town": "location", "area": "location",
+    "segment": "segment", "industry": "segment", "category": "segment", "type": "segment",
+    "notes": "notes", "comment": "notes", "comments": "notes",
+}
+
+
+# ── Normalisation ────────────────────────────────────────────
+
+def normalise_email(value) -> str | None:
+    v = (str(value or "")).strip().lower()
+    return v or None
+
+
+def normalise_phone(value) -> str | None:
+    """Digits and one leading '+' only. A local number stays as typed ('0977…'); no country
+    code is added."""
+    raw = (str(value or "")).strip()
+    digits = "".join(ch for ch in raw if ch.isdigit())
+    if not digits:
+        return None
+    return ("+" if raw.startswith("+") else "") + digits
+
+
+def normalise_segment(value) -> str | None:
+    v = " ".join((str(value or "")).split()).lower()
+    return v or None
+
+
+def _clean(fields: dict) -> dict:
+    """Trim, normalise and drop empty values from a dict of lead fields."""
+    out = {}
+    for key in FIELDS:
+        value = fields.get(key)
+        if value is None:
+            continue
+        if key == "email":
+            value = normalise_email(value)
+        elif key in ("phone", "whatsapp"):
+            value = normalise_phone(value)
+        elif key == "segment":
+            value = normalise_segment(value)
+        else:
+            value = str(value).strip() or None
+        if value:
+            out[key] = value
+    return out
+
+
+# ── Serialisation ────────────────────────────────────────────
+
+def _qualification(lead: models.Lead):
+    try:
+        return json.loads(lead.qualification_json) if lead.qualification_json else None
+    except (ValueError, TypeError):
+        return None
+
+
+def open_follow_up(db: Session, lead_id: int):
+    """The lead's open follow-up todo (earliest due first), or None."""
+    todos = db.query(models.Todo).filter(
+        models.Todo.lead_id == lead_id, models.Todo.done == False,   # noqa: E712
+        models.Todo.category == "outreach",
+    ).all()
+    if not todos:
+        return None
+    todos.sort(key=lambda t: (t.due_date is None, t.due_date, t.id))
+    return todos[0]
+
+
+def serialize(db: Session, lead: models.Lead) -> dict:
+    follow = open_follow_up(db, lead.id)
+    last = db.query(models.OutreachMessage).filter(
+        models.OutreachMessage.lead_id == lead.id,
+    ).order_by(models.OutreachMessage.id.desc()).first()
+    return {
+        "id": lead.id, "name": lead.name, "company": lead.company, "role": lead.role,
+        "email": lead.email, "phone": lead.phone, "whatsapp": lead.whatsapp,
+        "linkedin_url": lead.linkedin_url, "website": lead.website, "location": lead.location,
+        "segment": lead.segment, "source": lead.source, "status": lead.status,
+        "qualification_score": lead.qualification_score,
+        "qualification": _qualification(lead),
+        "opportunity_id": lead.opportunity_id, "client_id": lead.client_id,
+        "notes": lead.notes, "last_contact_at": lead.last_contact_at,
+        "next_follow_up_at": lead.next_follow_up_at,
+        "created_at": lead.created_at, "updated_at": lead.updated_at,
+        "open_follow_up": {"todo_id": follow.id, "due_date": follow.due_date} if follow else None,
+        "last_message": ({"id": last.id, "channel": last.channel, "status": last.status,
+                          "created_at": last.created_at} if last else None),
+    }
+
+
+def serialize_message(db: Session, m: models.OutreachMessage, *, lead_name: bool = False) -> dict:
+    out = {
+        "id": m.id, "lead_id": m.lead_id, "channel": m.channel, "direction": m.direction,
+        "subject": m.subject, "body": m.body, "status": m.status, "version": m.version,
+        "supersedes_id": m.supersedes_id, "brief": m.brief,
+        "pending_action_id": m.pending_action_id, "approved_at": m.approved_at,
+        "sent_at": m.sent_at, "external_id": m.external_id, "error": m.error,
+        "created_by": m.created_by, "created_at": m.created_at, "updated_at": m.updated_at,
+    }
+    if lead_name:
+        lead = db.query(models.Lead).filter(models.Lead.id == m.lead_id).first()
+        out["lead_name"] = lead.name if lead else None
+    return out
+
+
+# ── Primitives ───────────────────────────────────────────────
+
+def find_duplicate(db: Session, fields: dict):
+    """The lead these fields already describe, by the dedupe key: the email when there is
+    one, else the WhatsApp or phone number, else the lower-cased name and company."""
+    email = fields.get("email")
+    if email:
+        return db.query(models.Lead).filter(models.Lead.email == email).order_by(models.Lead.id).first()
+    numbers = [n for n in (fields.get("whatsapp"), fields.get("phone")) if n]
+    if numbers:
+        return db.query(models.Lead).filter(
+            models.Lead.phone.in_(numbers) | models.Lead.whatsapp.in_(numbers)
+        ).order_by(models.Lead.id).first()
+    name = (fields.get("name") or "").lower()
+    company = (fields.get("company") or "").lower()
+    for lead in db.query(models.Lead).filter(func.lower(models.Lead.name) == name).order_by(models.Lead.id).all():
+        if (lead.company or "").lower() == company:
+            return lead
+    return None
+
+
+def _merge_notes(existing: str | None, incoming: str) -> str:
+    """Append the incoming lines that are not already there."""
+    have = [line for line in (existing or "").split("\n")]
+    seen = {line.strip() for line in have if line.strip()}
+    for line in incoming.split("\n"):
+        if line.strip() and line.strip() not in seen:
+            have.append(line)
+            seen.add(line.strip())
+    return "\n".join(line for line in have if line.strip())
+
+
+def create_lead(db: Session, fields: dict, *, source: str = "manual") -> tuple:
+    """Create a lead, or update the one these fields already describe.
+
+    Returns ``(lead, deduped, change)``. On a duplicate, non-empty incoming values replace
+    what is stored (blanks never overwrite data, notes are appended). The caller commits."""
+    data = _clean(fields)
+    if not data.get("name"):
+        if not data.get("company"):
+            raise ValueError("a lead needs a name or a company")
+        data["name"] = data["company"]
+    if data.get("phone") and not data.get("whatsapp"):
+        data["whatsapp"] = data["phone"]
+
+    existing = find_duplicate(db, data)
+    if existing is not None:
+        before = change_log.snapshot(existing)
+        for key, value in data.items():
+            if key == "notes":
+                existing.notes = _merge_notes(existing.notes, value)
+            elif key == "whatsapp" and "whatsapp" not in _clean(fields) and existing.whatsapp:
+                continue          # a defaulted WhatsApp number never replaces a stored one
+            else:
+                setattr(existing, key, value)
+        if change_log.snapshot(existing) != before:
+            existing.updated_at = datetime.utcnow()
+        change = change_log.record_update(db, existing, before, f"Updated lead: {existing.name[:70]}")
+        return existing, True, change
+
+    lead = models.Lead(source=source, status="new", created_at=datetime.utcnow(),
+                       updated_at=datetime.utcnow(), **data)
+    db.add(lead)
+    change = change_log.record_create(db, lead, f"Added lead: {lead.name[:70]}")
+    return lead, False, change
+
+
+def find_leads(db: Session, *, query: str | None = None, segment: str | None = None,
+               status: str | None = None, limit: int = 100) -> list:
+    q = db.query(models.Lead)
+    if status:
+        q = q.filter(models.Lead.status == status)
+    if segment:
+        q = q.filter(models.Lead.segment == normalise_segment(segment))
+    if query and query.strip():
+        frag = query.strip().lower()
+        q = q.filter(func.lower(models.Lead.name).contains(frag)
+                     | func.lower(func.coalesce(models.Lead.company, "")).contains(frag))
+    return q.order_by(models.Lead.updated_at.desc(), models.Lead.id.desc()).limit(max(1, min(int(limit), 500))).all()
+
+
+def pick_lead(db: Session, ref):
+    """Resolve a lead from an id or a name fragment. Returns ``(lead, candidates)`` with the
+    same accept rule as task completion (top >= 0.75 and >= 0.2 clear of the runner-up)."""
+    if isinstance(ref, int) or (isinstance(ref, str) and ref.strip().isdigit()):
+        lead = db.query(models.Lead).filter(models.Lead.id == int(ref)).first()
+        return lead, ([(1.0, lead)] if lead else [])
+    rows = db.query(models.Lead).all()
+    return business_common.fuzzy_pick(
+        rows, lambda l: [l.name, l.company, f"{l.name} {l.company or ''}"], str(ref or ""))
+
+
+def segments(db: Session) -> list:
+    out = {}
+    for lead in db.query(models.Lead).all():
+        key = lead.segment or ""
+        entry = out.setdefault(key, {"segment": lead.segment, "total": 0, "by_status": {}})
+        entry["total"] += 1
+        entry["by_status"][lead.status] = entry["by_status"].get(lead.status, 0) + 1
+    return sorted(out.values(), key=lambda e: (-e["total"], e["segment"] or ""))
+
+
+# ── CSV import ───────────────────────────────────────────────
+
+def import_csv(db: Session, text: str, *, segment: str | None = None,
+               mapping: dict | None = None, filename: str | None = None) -> dict:
+    """Upsert leads from CSV text. One ``lead_imports`` row, one change-log batch, commits.
+
+    ``mapping`` ({csv header: lead column}) overrides the header synonyms. Columns that map
+    to nothing are kept in ``notes`` as ``Header: value`` lines. Rows with neither a name
+    nor a company are skipped; a row matching an existing lead updates it."""
+    reader = csv.reader(io.StringIO(text or ""))
+    rows = [r for r in reader]
+    header = [h.strip() for h in rows[0]] if rows else []
+    override = {str(k).strip().lower(): str(v).strip() for k, v in (mapping or {}).items()}
+    columns = {}
+    for h in header:
+        target = override.get(h.lower()) or HEADER_SYNONYMS.get(h.lower())
+        if target in FIELDS:
+            columns[h] = target
+    default_segment = normalise_segment(segment)
+
+    with change_log.batch_scope(db, "ui"):
+        record = models.LeadImport(filename=filename, segment=default_segment,
+                                   mapping_json=json.dumps(columns), created_at=datetime.utcnow())
+        db.add(record)
+        db.flush()
+        created = updated = skipped = 0
+        data_rows = rows[1:]
+        for raw in data_rows:
+            fields, extra = {}, []
+            for i, h in enumerate(header):
+                value = (raw[i] if i < len(raw) else "").strip()
+                if not value:
+                    continue
+                target = columns.get(h)
+                if target is None:
+                    extra.append(f"{h}: {value}")
+                elif target == "notes" and fields.get("notes"):
+                    fields["notes"] += "\n" + value
+                elif target not in fields:
+                    fields[target] = value
+                else:
+                    extra.append(f"{h}: {value}")     # a second column for the same field is kept
+            if not fields.get("name") and not fields.get("company"):
+                skipped += 1
+                continue
+            if extra:
+                fields["notes"] = "\n".join(([fields["notes"]] if fields.get("notes") else []) + extra)
+            if default_segment and not fields.get("segment"):
+                fields["segment"] = default_segment
+            _lead, deduped, _change = create_lead(db, fields, source=f"csv:{record.id}")
+            if deduped:
+                updated += 1
+            else:
+                created += 1
+        record.created, record.updated, record.skipped = created, updated, skipped
+        record.total_rows = len(data_rows)
+        batch_id = change_log.current_batch_id(db)
+        db.commit()
+        return {"import_id": record.id, "created": created, "updated": updated, "skipped": skipped,
+                "total_rows": len(data_rows), "segment": default_segment,
+                "columns_mapped": columns, "batch_id": batch_id}
+
+
+# ── Endpoints ────────────────────────────────────────────────
+
+class LeadCreate(BaseModel):
+    name: str
+    company: str | None = None
+    role: str | None = None
+    email: str | None = None
+    phone: str | None = None
+    whatsapp: str | None = None
+    linkedin_url: str | None = None
+    website: str | None = None
+    location: str | None = None
+    segment: str | None = None
+    notes: str | None = None
+
+
+class LeadPatch(BaseModel):
+    name: str | None = None
+    company: str | None = None
+    role: str | None = None
+    email: str | None = None
+    phone: str | None = None
+    whatsapp: str | None = None
+    linkedin_url: str | None = None
+    website: str | None = None
+    location: str | None = None
+    segment: str | None = None
+    notes: str | None = None
+    status: str | None = None
+
+
+def _get(db: Session, lead_id: int) -> models.Lead:
+    lead = db.query(models.Lead).filter(models.Lead.id == lead_id).first()
+    if lead is None:
+        raise HTTPException(404, "Lead not found")
+    return lead
+
+
+@router.get("/leads")
+def list_leads(status: str | None = None, segment: str | None = None, q: str | None = None,
+               limit: int = 100, db: Session = Depends(get_db)):
+    return [serialize(db, l) for l in find_leads(db, query=q, segment=segment, status=status, limit=limit)]
+
+
+@router.get("/leads/segments")
+def list_segments(db: Session = Depends(get_db)):
+    return segments(db)
+
+
+@router.post("/leads/import")
+async def import_leads(file: UploadFile = File(...), segment: str | None = Form(None),
+                       mapping: str | None = Form(None), db: Session = Depends(get_db)):
+    """Multipart: file (CSV), optional segment, optional mapping (JSON {csv header: column})."""
+    raw = await file.read()
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = raw.decode("latin-1")
+    parsed_mapping = None
+    if mapping:
+        try:
+            parsed_mapping = json.loads(mapping)
+        except ValueError:
+            raise HTTPException(400, "mapping must be a JSON object")
+        if not isinstance(parsed_mapping, dict):
+            raise HTTPException(400, "mapping must be a JSON object")
+    return import_csv(db, text, segment=segment, mapping=parsed_mapping, filename=file.filename)
+
+
+@router.get("/leads/{lead_id}")
+def get_lead(lead_id: int, db: Session = Depends(get_db)):
+    lead = _get(db, lead_id)
+    messages = db.query(models.OutreachMessage).filter(
+        models.OutreachMessage.lead_id == lead.id).order_by(models.OutreachMessage.id).all()
+    follow_ups = db.query(models.Todo).filter(
+        models.Todo.lead_id == lead.id, models.Todo.done == False).order_by(models.Todo.id).all()   # noqa: E712
+    return {**serialize(db, lead),
+            "messages": [serialize_message(db, m) for m in messages],
+            "follow_ups": [{"todo_id": t.id, "text": t.text, "due_date": t.due_date} for t in follow_ups]}
+
+
+@router.post("/leads", status_code=201)
+def post_lead(payload: LeadCreate, response: Response, db: Session = Depends(get_db)):
+    with change_log.batch_scope(db, "ui"):
+        try:
+            lead, deduped, change = create_lead(db, payload.model_dump(exclude_none=True), source="manual")
+        except ValueError as exc:
+            raise HTTPException(400, str(exc))
+        db.commit()
+    if deduped:
+        response.status_code = 200
+    return {**serialize(db, lead), "change": change, "deduped": deduped}
+
+
+@router.patch("/leads/{lead_id}")
+def patch_lead(lead_id: int, payload: LeadPatch, db: Session = Depends(get_db)):
+    lead = _get(db, lead_id)
+    data = payload.model_dump(exclude_unset=True)
+    status = data.pop("status", None)
+    if status is not None and status not in STATUSES:
+        raise HTTPException(400, f"Invalid status. Must be one of: {', '.join(STATUSES)}")
+    with change_log.batch_scope(db, "ui"):
+        before = change_log.snapshot(lead)
+        cleaned = _clean(data)
+        for key in data:
+            if key == "name" and not cleaned.get("name"):
+                continue                      # a lead always keeps a name
+            setattr(lead, key, cleaned.get(key))
+        if status is not None:
+            lead.status = status
+        lead.updated_at = datetime.utcnow()
+        change = change_log.record_update(db, lead, before, f"Updated lead: {lead.name[:70]}")
+        db.commit()
+    return {**serialize(db, lead), "change": change}

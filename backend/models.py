@@ -143,6 +143,8 @@ class Todo(Base):
     source = Column(String)
     roadmap_id = Column(String, nullable=True)
     completed_at = Column(Date, nullable=True)
+    lead_id = Column(Integer, nullable=True)     # follow-up for a lead (category 'outreach')
+    client_id = Column(Integer, nullable=True)   # task tied to a client
 
 
 class ChatMessage(Base):
@@ -779,3 +781,77 @@ class BriefingSummary(Base):
     greeting_line = Column(String, nullable=True)
     model         = Column(String, nullable=True)
     created_at    = Column(DateTime, default=datetime.utcnow)
+
+
+# ── PHASE 5B: PROSPECTING AND OUTREACH ───────────────────────
+
+class Lead(Base):
+    """A prospect: a person or business Bandile intends to approach.
+
+    status: new → qualified | disqualified → contacted → replied → converted | lost."""
+    __tablename__ = "leads"
+
+    id                  = Column(Integer, primary_key=True, index=True)
+    name                = Column(String, nullable=False)
+    company             = Column(String, nullable=True)
+    role                = Column(String, nullable=True)
+    email               = Column(String, nullable=True)     # lower-cased on write
+    phone               = Column(String, nullable=True)     # digits and a leading '+' only
+    whatsapp            = Column(String, nullable=True)     # same; defaults to phone
+    linkedin_url        = Column(String, nullable=True)
+    website             = Column(String, nullable=True)
+    location            = Column(String, nullable=True)
+    segment             = Column(String, nullable=True)     # free text, lower-cased
+    source              = Column(String, nullable=False, default="manual")
+    status              = Column(String, nullable=False, default="new")
+    qualification_score = Column(Integer, nullable=True)    # 0-100
+    qualification_json  = Column(Text, nullable=True)
+    opportunity_id      = Column(Integer, nullable=True)    # research_findings.id
+    client_id           = Column(Integer, nullable=True)    # clients.id, set on convert
+    notes               = Column(Text, nullable=True)
+    last_contact_at     = Column(DateTime, nullable=True)
+    next_follow_up_at   = Column(Date, nullable=True)       # mirrors the open follow-up todo
+    created_at          = Column(DateTime, default=datetime.utcnow)
+    updated_at          = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class LeadImport(Base):
+    """One row per CSV import of leads, with its counts and column mapping."""
+    __tablename__ = "lead_imports"
+
+    id           = Column(Integer, primary_key=True, index=True)
+    filename     = Column(String, nullable=True)
+    created      = Column(Integer, default=0)
+    updated      = Column(Integer, default=0)
+    skipped      = Column(Integer, default=0)
+    total_rows   = Column(Integer, default=0)
+    mapping_json = Column(Text, nullable=True)
+    segment      = Column(String, nullable=True)
+    created_at   = Column(DateTime, default=datetime.utcnow)
+
+
+class OutreachMessage(Base):
+    """A drafted, sent or received message for a lead. Nothing reaches `sent` without a
+    human approval (a tap, or a confirmed pending action).
+
+    status: draft → approved → sent | failed; cancelled; inbound rows are `received`."""
+    __tablename__ = "outreach_messages"
+
+    id                = Column(Integer, primary_key=True, index=True)
+    lead_id           = Column(Integer, nullable=False)
+    channel           = Column(String, nullable=False)       # whatsapp|email|linkedin|call|other
+    direction         = Column(String, nullable=False, default="out")
+    subject           = Column(String, nullable=True)        # email only
+    body              = Column(Text, nullable=False)
+    status            = Column(String, nullable=False, default="draft")
+    version           = Column(Integer, default=1)
+    supersedes_id     = Column(Integer, nullable=True)
+    brief             = Column(Text, nullable=True)
+    pending_action_id = Column(Integer, nullable=True)
+    approved_at       = Column(DateTime, nullable=True)
+    sent_at           = Column(DateTime, nullable=True)
+    external_id       = Column(String, nullable=True)        # SMTP message-id
+    error             = Column(Text, nullable=True)
+    created_by        = Column(String, nullable=False, default="assistant")
+    created_at        = Column(DateTime, default=datetime.utcnow)
+    updated_at        = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

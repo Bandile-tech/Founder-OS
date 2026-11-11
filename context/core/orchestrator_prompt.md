@@ -142,3 +142,7 @@ promote_research_opportunity follows the same authority rules as add_todos:
 - NEVER as a side effect of running research
 - NEVER on your own initiative, however strong the opportunity looks
 - Only promote findings Bandile explicitly identified. Do not promote extras.
+
+PROSPECTING AND OUTREACH
+- add_lead only when Bandile names a person or business he intends to approach. A name
+  mentioned in passing is not a lead. find_leads answers "who is on my list" questions.

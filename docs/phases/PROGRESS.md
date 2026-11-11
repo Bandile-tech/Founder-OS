@@ -72,6 +72,42 @@ Decisions where the spec was silent:
 - The two inline fake model functions in `tests/test_market_intel.py` also accept `**_`
   (the spec names only `_fake_llm`; all three receive the new `purpose` argument).
 
+### S3 — 5B.1 lead database, CSV import, segmentation (done)
+
+Shipped: `business_common.py` (`fuzzy_pick`, `money`, `sum_usd`, `days_since`);
+`context/core/icp.md`; `Lead`, `LeadImport`, `OutreachMessage` models and
+`todos.lead_id` / `todos.client_id` (m015, with RLS on the three tables); `leads.py` with
+normalisation, the dedupe key, `create_lead`, `import_csv`, segments and the endpoints
+`GET /leads`, `GET /leads/segments`, `GET /leads/{id}`, `POST /leads`, `PATCH /leads/{id}`,
+`POST /leads/import`; tools `add_lead` and `find_leads`; the "PROSPECTING AND OUTREACH"
+prompt section (first bullet); `leads` and `outreach_messages` are deletable through the
+confirmation flow. Tests: `tests/test_phase5_common.py`, `tests/test_phase5b_leads.py`
+(acceptance tests 1–2), fixture `tests/fixtures/leads_sample.csv`.
+
+Deferred: qualification, drafts, the approval gate and follow-ups (S4); replies, conversion,
+stats, briefing and the alert (S5).
+
+Decisions where the spec was silent:
+- New tools are registered at the end of `orchestrator_tools.py` through a small
+  `_register(name, fn, description, properties, required)` helper, so the rebuild's schema
+  list stays byte-stable (prompt caching) and each tool's dispatch and schema sit together.
+- Every new tool is also exercised in `tests/test_assistant_current_data.py`, whose guard
+  requires every registered tool to run without touching a legacy table.
+- The dedupe key is strict: an incoming row with an email is matched on the email only;
+  a row with no email is matched on its WhatsApp or phone number against either stored
+  number; a row with neither is matched on lower-cased name and company.
+- A row with a company and no name is stored with the company as its name (`name` is
+  `NOT NULL`).
+- On a duplicate, incoming notes are appended line by line (lines already present are not
+  repeated), so a re-import is idempotent. A re-import counts every matched row as
+  `updated` even when nothing changed, and writes no change-log row for it.
+- A phone number supplied without a WhatsApp number fills WhatsApp on create, and never
+  replaces a stored WhatsApp number on update.
+- When two CSV columns map to the same lead field, the first wins and the second is kept
+  in `notes` as `Header: value`.
+- `GET /leads?q=` is a case-insensitive contains match on name or company; the fuzzy
+  accept rule (`fuzzy_pick`) is used where a write depends on the match.
+
 ## Environment variables added so far
 
 | Var | Default | Session | Purpose |

@@ -43,6 +43,8 @@ DELETABLE = {
     "clients": (models.Client, "name"),
     "lift_logs": (models.LiftLog, "lift_name"),
     "daily_logs": (models.DailyLog, "entry"),
+    "leads": (models.Lead, "name"),
+    "outreach_messages": (models.OutreachMessage, "body"),
 }
 
 

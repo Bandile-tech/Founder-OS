@@ -1198,7 +1198,8 @@ TOOL_SCHEMAS = [
                     "table": {
                         "type": "string",
                         "enum": ["todos", "notes", "revenue", "ai_memory", "books",
-                                 "daily_bible_log", "clients", "lift_logs", "daily_logs"],
+                                 "daily_bible_log", "clients", "lift_logs", "daily_logs",
+                                 "leads", "outreach_messages"],
                         "description": "Which table the record lives in.",
                     },
                     "record_id": {"type": "integer", "description": "The record's id."},
@@ -1421,3 +1422,112 @@ TOOL_SCHEMAS = [
         },
     },
 ]
+
+
+# ════════════════════════════════════════════════════════════════
+# Phase 5 and 6 tools
+#
+# Registered here, after the rebuild's tools, so the earlier schema list stays
+# byte-stable. Each tool is a thin wrapper over its module's primitives.
+# ════════════════════════════════════════════════════════════════
+
+def _register(name: str, fn, description: str, properties: dict | None = None,
+              required: list | None = None) -> None:
+    """Add a tool to the dispatch table and the schema list in one place."""
+    _TOOL_DISPATCH[name] = fn
+    parameters = {"type": "object", "properties": properties or {}}
+    if required:
+        parameters["required"] = required
+    TOOL_SCHEMAS.append({"type": "function", "function": {
+        "name": name, "description": description, "parameters": parameters}})
+
+
+def _str(description: str, enum: list | None = None) -> dict:
+    out = {"type": "string", "description": description}
+    if enum:
+        out["enum"] = enum
+    return out
+
+
+def _int(description: str) -> dict:
+    return {"type": "integer", "description": description}
+
+
+def _num(description: str) -> dict:
+    return {"type": "number", "description": description}
+
+
+def _candidates(scored, label) -> list:
+    return [{"id": row.id, "name": label(row)} for _score, row in scored[:3]]
+
+
+# ── 5B: prospecting ──────────────────────────────────────────
+
+_LEAD_FIELDS = ("name", "company", "role", "email", "phone", "whatsapp", "linkedin_url",
+                "website", "location", "segment", "notes")
+
+
+def _lead_brief(lead) -> dict:
+    return {"id": lead.id, "name": lead.name, "company": lead.company, "segment": lead.segment,
+            "status": lead.status, "qualification_score": lead.qualification_score,
+            "email": lead.email, "whatsapp": lead.whatsapp or lead.phone,
+            "location": lead.location, "next_follow_up": lead.next_follow_up_at}
+
+
+def add_lead(db, **fields):
+    """Create a lead, or update the one the details already describe."""
+    import change_log
+    import leads
+    with change_log.batch_scope(db, "assistant"):
+        try:
+            lead, deduped, change = leads.create_lead(
+                db, {k: v for k, v in fields.items() if k in _LEAD_FIELDS}, source="conversation")
+        except ValueError as exc:
+            return {"error": str(exc)}, str(exc)
+        db.commit()
+    result = {**_lead_brief(lead), "deduped": deduped, "change": change}
+    return result, (f"updated lead {lead.name}" if deduped else f"added lead {lead.name}")
+
+
+def find_leads(db, query: str | None = None, segment: str | None = None,
+               status: str | None = None, limit: int = 10):
+    """Read-only list of leads for the model."""
+    import leads
+    rows = leads.find_leads(db, query=query, segment=segment, status=status, limit=limit)
+    return ({"leads": [_lead_brief(l) for l in rows], "count": len(rows)},
+            f"{len(rows)} lead(s) found")
+
+
+_register(
+    "add_lead", lambda db, a: add_lead(db, **{k: a.get(k) for k in _LEAD_FIELDS if a.get(k)}),
+    "Add a prospect to the lead database, or update the lead the details already describe. "
+    "ONLY when Bandile names a person or business he intends to approach.",
+    {
+        "name": _str("The person's or business's name."),
+        "company": _str("Business name, if the lead is a person."),
+        "role": _str("Their role, e.g. owner."),
+        "email": _str("Email address."),
+        "phone": _str("Phone number as given."),
+        "whatsapp": _str("WhatsApp number if different from the phone."),
+        "linkedin_url": _str("LinkedIn profile URL."),
+        "website": _str("Website."),
+        "location": _str("Town or area."),
+        "segment": _str("Free-text segment, e.g. 'lusaka pharmacies'."),
+        "notes": _str("Anything else Bandile said about them."),
+    },
+    ["name"],
+)
+
+_register(
+    "find_leads",
+    lambda db, a: find_leads(db, query=a.get("query"), segment=a.get("segment"),
+                             status=a.get("status"), limit=int(a.get("limit", 10))),
+    "List leads from the prospect database. Read-only.",
+    {
+        "query": _str("Part of a name or company."),
+        "segment": _str("Segment to filter by."),
+        "status": _str("Lead status.", ["new", "qualified", "disqualified", "contacted",
+                                         "replied", "converted", "lost"]),
+        "limit": _int("How many to return (default 10)."),
+    },
+)

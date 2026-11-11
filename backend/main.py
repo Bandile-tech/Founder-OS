@@ -73,6 +73,8 @@ app.include_router(_briefing.router)
 app.include_router(_voice_realtime.router)
 import conversation as _conversation
 app.include_router(_conversation.router)
+import leads as _leads
+app.include_router(_leads.router)
 
 # Serve frontend from ../frontend if it exists
 FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend")
@@ -156,6 +158,8 @@ async def startup():
         run_m013(db)        # m013 — syllabus_points, briefing_summaries
         from migrations.m014_market_intel_v2 import run as run_m014
         run_m014(db)        # m014 — research cost/recommendation/dedup columns, research_objectives
+        from migrations.m015_leads_outreach import run as run_m015
+        run_m015(db)        # m015 — leads, lead_imports, outreach_messages, todos.lead_id/client_id
         _validate_schema(engine)   # raises if any ORM column is absent from the live DB
         _seed_non_negotiables_if_empty(db)
         _verify_seed_integrity(db)

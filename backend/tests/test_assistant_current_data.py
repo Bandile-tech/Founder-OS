@@ -145,6 +145,8 @@ def _run_every_tool(db) -> dict:
             ("update_syllabus", {"topic": "Coordinate geometry", "status": "revised"}),
             ("set_exam_date", {"subject": "Maths", "date": (TODAY + timedelta(days=30)).isoformat(), "paper": "P1"}),
             ("show_view", {"view": "history", "params": {"q": "probability"}}),
+            ("add_lead", {"name": "Mercy Banda", "company": "Sunrise Pharmacy", "segment": "lusaka pharmacies"}),
+            ("find_leads", {"segment": "lusaka pharmacies"}),
         ]
         for name, args in calls:
             result, _summary = ot.run_tool(name, args, db)
