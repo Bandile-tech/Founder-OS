@@ -795,6 +795,58 @@ Decisions where the spec was silent:
 
 VERIFY: Telegram `setWebhook` parameter names (`url`, `secret_token`, `allowed_updates`).
 
+### S16 — Phase 6D.1: notifications queue, Telegram channel, couriers
+
+Shipped: `notifications` and `notification_settings` (migration `m022`, which creates settings
+row 1; RLS on both); `backend/notify.py` (`settings`, `update_settings`, `is_quiet`,
+`quiet_ends`, `sent_today`, `queue`, `dispatch`, `split_message`, `TelegramChannel`,
+`render_briefing`, `render_evening`, `suppressed_overnight`, `briefing_text`, `delivery`,
+`send_now`, `send_test`, `brief_now`; `GET`/`PATCH /notifications/settings`, `GET /notifications`,
+`POST /notifications/test`, `/notifications/brief-now`, `/notifications/{id}/cancel`); agents
+`briefing_courier`, `alert_courier`, `reminder_courier`; tools `set_reminder` and
+`notification_settings`; `business_common.parse_when`; prompt section "REMINDERS AND
+NOTIFICATIONS"; `build_briefing` returns `delivery`; 37 tests in `tests/test_phase6d_notify.py`
+(spec tests 1, 2, 3, 6, 7, 8, 10, 11).
+
+Decisions where the spec was silent:
+- Reminders are sent at the moment asked, inside quiet hours and past the daily cap, because
+  Bandile chose the time himself. A mute (`muted_until`) still holds them. Cost if wrong: a
+  reminder set for 23:30 buzzes at 23:30.
+- `test` messages are treated like replies: they ignore quiet hours and the cap and do not
+  count towards it. With notifications switched off (`enabled` false) only replies and test
+  messages still go out.
+- Not paired gives `suppressed(not_paired)`; paired but the channel switched off or
+  `TELEGRAM_BOT_TOKEN` unset gives `suppressed(channel_disabled)`.
+- The briefing and alert couriers skip their run ("Telegram is not paired") instead of
+  queueing rows that could only be suppressed. Events they receive in that state are consumed
+  and not notified; overdue payments are re-emitted daily, so they notify once paired.
+- `dispatch` takes `only=<id>`: Send test, Brief now and (in S17) replies dispatch just their
+  own row, so a forced send never drags other queued rows through quiet hours. A process lock
+  stops two dispatches sending the same row.
+- A failed send keeps the row queued with `attempt N/3: …` in `error`; the third failure marks
+  it failed.
+- Briefing text: ATTENTION lists items scoring 40 or more that are not non-negotiables, exams,
+  calendar events, syllabus priorities, opportunities or content, and its number is how many
+  such items there are (six are shown). TODAY lists calendar events (from S18) and the
+  non-negotiables line. OVERNIGHT lists what the cap or quiet hours suppressed in the last 24
+  hours, five at most.
+- The evening review lists tasks that are overdue or due today and still open, then asks
+  "What did you get done? Reply here."
+- `parse_when`: a bare hour from 1 to 12 with no am/pm means the next time the clock shows it
+  today ("at 5" said at 14:00 is 17:00); on another day 1–6 means the afternoon; a day with no
+  time means 09:00; a time that has passed means tomorrow.
+- `schedule.due` allows 30 seconds of slack on interval schedules, so a timer firing a few
+  milliseconds early does not push an every-tick agent to the following tick.
+- The couriers pass the local clock to `build_briefing`, so the Telegram briefing is for the
+  local day.
+
+Limits to know:
+- Reminders and briefings go out on the tick, so up to 15 minutes late, and not at all while
+  the instance is asleep and the external schedule is off.
+
+VERIFY: Telegram `sendMessage` parameter names and the 4,096-character limit (messages are
+split at 4,000).
+
 ## Environment variables added so far
 
 | Var | Default | Session | Purpose |
@@ -834,7 +886,11 @@ service after deployment.
 - 6B Render: the free tier's HTTP request timeout (the tick budget of 80 seconds assumes at
   least 100) and current spin-down behaviour. Not checked.
 
-## Follow-ups noticed (not done here)
+## Follow-ups noticed
+
+- `GET /briefing/today` uses the server's clock (`datetime.now()`), which is UTC on Render:
+  between 00:00 and 02:00 in Lusaka the home screen briefing is still yesterday's. The
+  couriers already pass the local clock; the endpoint should do the same. (not done here)
 
 - Brand tab: a Disconnect control behind a confirm dialog (`DELETE /brand/accounts/{id}`
   exists), and a way to drop an idea from the screen.

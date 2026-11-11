@@ -86,7 +86,9 @@ def due(spec, row, now_local: datetime) -> bool:
         if last is None:
             return True
         now_utc = to_utc(now_local)
-        return now_utc - last >= timedelta(minutes=int(s.interval_minutes))
+        # Half a minute of slack: a timer that fires a few milliseconds early must not push
+        # an every-tick agent to the tick after.
+        return now_utc - last >= timedelta(minutes=int(s.interval_minutes)) - timedelta(seconds=30)
     return False
 
 

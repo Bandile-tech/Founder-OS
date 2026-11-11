@@ -91,6 +91,8 @@ import integrations as _integrations
 import integrations_telegram as _integrations_telegram
 app.include_router(_integrations.router)
 app.include_router(_integrations_telegram.router)
+import notify as _notify
+app.include_router(_notify.router)
 import agents as _agents
 from agents import api as _agents_api
 _agents.load_all()                       # every shipped agent registers itself
@@ -194,6 +196,8 @@ async def startup():
         run_m020(db)        # m020 — agents, agent_runs, agent_events, job_ticks, llm_usage.agent_run_id
         from migrations.m021_integrations import run as run_m021
         run_m021(db)        # m021 — integrations, calendar_events, email_messages, outreach_messages.replied_at
+        from migrations.m022_notifications import run as run_m022
+        run_m022(db)        # m022 — notifications, notification_settings (row 1)
         _validate_schema(engine)   # raises if any ORM column is absent from the live DB
         _seed_non_negotiables_if_empty(db)
         _verify_seed_integrity(db)

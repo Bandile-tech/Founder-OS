@@ -130,3 +130,71 @@ def parse_day(text, today: date | None = None, *, past: bool = False) -> date | 
     if parsed is not None and past and parsed > today and not re.search(r"\d{4}", t):
         parsed = parsed.replace(year=parsed.year - 1)
     return parsed
+
+
+_UNITS = {"minute": 1, "minutes": 1, "min": 1, "mins": 1, "hour": 60, "hours": 60, "hr": 60, "hrs": 60}
+_CLOCK = re.compile(r"(?:^|\s)(at\s+)?(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)?$")
+DEFAULT_REMINDER_HOUR = 9
+
+
+def parse_when(text, now_local):
+    """A spoken moment → a naive UTC datetime, or None when it cannot be read or has passed.
+
+    Reads "17:00", "5pm", "at 5", "in 2 hours", "in 30 minutes", "tomorrow 17:00",
+    "friday at 9", "12 May 14:30", and anything ``parse_day`` reads on its own (a day with
+    no time means 09:00). A bare hour from 1 to 12 with no am/pm is the next time the clock
+    shows it today; on another day 1–6 means the afternoon. ``now_local`` is an aware
+    datetime in the user's zone."""
+    from datetime import datetime, time, timedelta
+
+    from agents import schedule
+
+    t = " ".join(str(text or "").lower().replace(",", " ").split())
+    if not t:
+        return None
+    m = re.fullmatch(r"in (\d+|an|a|half an) (minute|minutes|min|mins|hour|hours|hr|hrs)", t)
+    if m:
+        amount = {"an": 1.0, "a": 1.0, "half an": 0.5}.get(m.group(1)) or float(m.group(1))
+        return schedule.to_utc(now_local + timedelta(minutes=amount * _UNITS[m.group(2)]))
+
+    today = now_local.date()
+    day_text, clock = t, None
+    m = _CLOCK.search(t)
+    if m:
+        hour, minute, meridiem = int(m.group(2)), int(m.group(3) or 0), m.group(4)
+        explicit = bool(m.group(1) or m.group(3) or meridiem)
+        rest = t[:m.start()].strip()
+        if rest.endswith(" at") or rest == "at":
+            rest, explicit = rest[:-2].strip(), True
+        # "May 12" ends in a number too: read a bare number as a time only when what is
+        # left of it is a day on its own (or nothing).
+        if hour <= 23 and minute <= 59 and (explicit or not rest or parse_day(rest, today) is not None):
+            if not (meridiem and not 1 <= hour <= 12):
+                day_text, clock = rest, (hour, minute, meridiem, m.group(2).startswith("0"))
+
+    day = parse_day(day_text, today) if day_text else today
+    if day is None:
+        return None
+
+    def at(d, hour, minute):
+        return datetime.combine(d, time(hour, minute), tzinfo=now_local.tzinfo)
+
+    if clock is None:
+        moment = at(day, DEFAULT_REMINDER_HOUR, 0)
+    else:
+        hour, minute, meridiem, zero_padded = clock
+        if meridiem:
+            hour = hour % 12 + (12 if meridiem == "pm" else 0)
+            moment = at(day, hour, minute)
+        elif hour == 0 or hour >= 13 or zero_padded:
+            moment = at(day, hour, minute)
+        elif day == today and not day_text:
+            # "at 5" said today: the next time the clock reads 5.
+            options = [at(day, hour % 12, minute), at(day, hour % 12 + 12, minute)]
+            later = [o for o in options if o > now_local]
+            moment = min(later) if later else options[0] + timedelta(days=1)
+        else:
+            moment = at(day, hour + 12 if hour <= 6 else hour, minute)
+        if not day_text and moment <= now_local:
+            moment += timedelta(days=1)             # a time alone that has passed means tomorrow
+    return schedule.to_utc(moment) if moment > now_local else None

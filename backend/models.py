@@ -1308,3 +1308,45 @@ class EmailMessage(Base):
     outreach_message_id = Column(Integer, nullable=True)
     processed_at        = Column(DateTime, nullable=True)
     created_at          = Column(DateTime, default=datetime.utcnow)
+
+
+# ── PHASE 6D: NOTIFICATIONS ──────────────────────────────────
+
+class Notification(Base):
+    """One message to Bandile: the outbox row and its outcome. Nothing sends directly;
+    ``notify.dispatch`` decides each queued row."""
+    __tablename__ = "notifications"
+
+    id                = Column(Integer, primary_key=True, index=True)
+    created_at        = Column(DateTime, default=datetime.utcnow)
+    channel           = Column(String, nullable=False, default="telegram")
+    kind              = Column(String, nullable=False)     # briefing|evening|alert|deadline|reminder|reply|test
+    title             = Column(String, nullable=True)
+    body              = Column(Text, nullable=False)       # plain text
+    dedupe_key        = Column(String, nullable=True, unique=True)
+    send_at           = Column(DateTime, nullable=True)    # naive UTC; null = now
+    status            = Column(String, nullable=False, default="queued")   # queued|sent|failed|suppressed|cancelled
+    sent_at           = Column(DateTime, nullable=True)
+    error             = Column(Text, nullable=True)
+    external_id       = Column(String, nullable=True)
+    agent_run_id      = Column(Integer, nullable=True)
+    source            = Column(String, nullable=True)
+    suppressed_reason = Column(String, nullable=True)      # quiet_hours|daily_cap|channel_disabled|not_paired
+
+
+class NotificationSettings(Base):
+    """Exactly one row (id=1). Times are local, "HH:MM"."""
+    __tablename__ = "notification_settings"
+
+    id                 = Column(Integer, primary_key=True)
+    enabled            = Column(Boolean, default=True)
+    morning_time       = Column(String, default="06:00")
+    evening_time       = Column(String, nullable=True)     # null = no evening review
+    quiet_start        = Column(String, default="22:00")
+    quiet_end          = Column(String, default="05:00")
+    alert_min_severity = Column(String, default="warn")    # info|warn|critical
+    daily_cap          = Column(Integer, default=12)
+    channels_json      = Column(Text, nullable=True)       # {"telegram": true}
+    deadline_days_json = Column(Text, nullable=True)       # [30, 14, 7, 3, 1]
+    muted_until        = Column(DateTime, nullable=True)   # naive UTC; /mute sets it
+    updated_at         = Column(DateTime, default=datetime.utcnow)

@@ -20,7 +20,8 @@ Response shape (the target home screen is built against this):
   "progress": {"academics": int|null, "business": int, "targets": int|null, "habits": int},
   "business_detail": {"revenue_pct": int|null, "mrr_usd": float, "outstanding_usd": float,
                       "overdue_count": int},
-  "counts": {...}, "exams": [...], "non_negotiables": [...], "weakness_notes": [...]
+  "counts": {...}, "exams": [...], "non_negotiables": [...], "weakness_notes": [...],
+  "delivery": {"last_sent_at": datetime|null, "channel": "telegram", "paired": bool}
 }
 
 Phase 5 adds the item categories ``payment``, ``deal``, ``client``, ``project`` (target
@@ -554,6 +555,15 @@ def _summary(db: Session, core: dict, refresh: bool) -> tuple[str | None, str | 
     return text, greeting_line, False
 
 
+def _delivery(db: Session, today: date) -> dict:
+    """When today's briefing went to Telegram, for "Sent to Telegram at 06:00"."""
+    try:
+        import notify
+        return notify.delivery(db, today)
+    except Exception:  # noqa: BLE001 — the briefing never fails over its delivery note
+        return {"last_sent_at": None, "channel": "telegram", "paired": False}
+
+
 # ── Assemble ─────────────────────────────────────────────────
 
 def build_briefing(db: Session, *, refresh: bool = False, now: datetime | None = None, with_summary: bool = True) -> dict:
@@ -618,6 +628,7 @@ def build_briefing(db: Session, *, refresh: bool = False, now: datetime | None =
     core["summary_cached"] = cached
     core["greeting_line"] = greeting_line or _deterministic_greeting_line(core)
     core.pop("today_date")
+    core["delivery"] = _delivery(db, today)
     return core
 
 

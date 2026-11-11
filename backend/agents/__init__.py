@@ -27,7 +27,7 @@ REGISTRY: dict[str, AgentSpec] = {}
 # the rest of the registry still works.
 _MODULES: list[str] = [
     "crm_housekeeper", "lead_qualifier", "follow_up_sentinel", "portfolio_reviewer", "brand_sync",
-    "market_intel", "application_watch",
+    "market_intel", "application_watch", "briefing_courier", "alert_courier", "reminder_courier",
 ]
 
 EVENT_KINDS = (

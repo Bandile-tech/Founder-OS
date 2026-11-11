@@ -178,6 +178,8 @@ def _run_every_tool(db) -> dict:
             ("brand_performance", {}),
             ("add_content_idea", {"title": "A short on how I built the bakery site", "format": "short", "scheduled_for": "friday"}),
             ("mark_posted", {"idea": "bakery site"}),
+            ("set_reminder", {"text": "call the clinic", "when": "in 2 hours"}),
+            ("notification_settings", {"morning_time": "05:45"}),
         ]
         for name, args in calls:
             result, _summary = ot.run_tool(name, args, db)

@@ -2785,3 +2785,94 @@ _register(
      "url": _str("The post's URL, if he gave it.")},
     ["idea"],
 )
+
+
+# ── 6D: reminders and notification settings ──────────────────
+
+def _when_label(send_at, now_local) -> str:
+    """'17:00', 'tomorrow 09:00' or 'Fri 14 Nov 09:00' in local time."""
+    from agents import schedule
+    local = schedule.to_local(send_at)
+    clock = local.strftime("%H:%M")
+    gap = (local.date() - now_local.date()).days
+    if gap == 0:
+        return clock
+    if gap == 1:
+        return f"tomorrow {clock}"
+    return f"{local.strftime('%a')} {local.day} {local.strftime('%b')} {clock}"
+
+
+def set_reminder(db, text: str, when: str):
+    """Queue a reminder for a moment. Sent to Telegram by the reminder courier."""
+    import business_common
+    import change_log
+    import notify
+    from agents import schedule
+    text = (text or "").strip()
+    if not text:
+        return {"error": "a reminder needs something to say"}, "a reminder needs something to say"
+    now_local = schedule.to_local(datetime.utcnow())
+    send_at = business_common.parse_when(when, now_local)
+    if send_at is None:
+        msg = f"could not read '{when}' as a time that is still to come"
+        return {"error": msg}, msg
+    label = _when_label(send_at, now_local)
+    with change_log.batch_scope(db, "assistant"):
+        queued = notify.queue(db, kind="reminder", title="Reminder", body=text, send_at=send_at, source="assistant")
+        if queued.get("error"):
+            return {"error": queued["error"]}, queued["error"]
+        row = db.query(models.Notification).filter(models.Notification.id == queued["id"]).first()
+        change = change_log.record_create(db, row, f"Reminder set for {label}: {text}")
+        db.commit()
+    paired = notify.integrations_telegram.is_paired(db)
+    out = {"reminder_id": queued["id"], "text": text, "when": label, "change": change}
+    if not paired:
+        out["note"] = "Telegram is not paired yet, so this reminder cannot be delivered until it is."
+    return out, f"reminder set for {label}"
+
+
+def notification_settings(db, **fields):
+    """Read the notification settings, or change the ones given."""
+    import change_log
+    import notify
+    changes = {k: v for k, v in fields.items() if v is not None}
+    with change_log.batch_scope(db, "assistant"):
+        try:
+            result = notify.update_settings(db, changes)
+        except ValueError as exc:
+            db.rollback()
+            return {"error": str(exc)}, str(exc)
+        db.commit()
+    s = result["settings"]
+    out = {"enabled": s["enabled"], "morning_time": s["morning_time"],
+           "evening_time": s["evening_time"] or "off", "quiet_hours": f"{s['quiet_start']} to {s['quiet_end']}",
+           "alert_min_severity": s["alert_min_severity"], "daily_cap": s["daily_cap"],
+           "telegram_paired": s["paired"], "change": result["change"]}
+    return out, result["summary"]
+
+
+_register(
+    "set_reminder",
+    lambda db, a: set_reminder(db, text=a.get("text", ""), when=a.get("when", "")),
+    "Set a reminder for a moment; it is sent to Bandile's Telegram then. ONLY when he asks to "
+    "be reminded at a time. Something to do on a day, with no time, is a task, not a reminder.",
+    {"text": _str("What to remind him of, in his words."),
+     "when": _str("The moment as he said it: '17:00', 'at 5', 'in 2 hours', 'tomorrow 17:00'.")},
+    ["text", "when"],
+)
+
+_register(
+    "notification_settings",
+    lambda db, a: notification_settings(
+        db, morning_time=a.get("morning_time"), evening_time=a.get("evening_time"),
+        quiet_start=a.get("quiet_start"), quiet_end=a.get("quiet_end"),
+        alert_min_severity=a.get("alert_min_severity"), daily_cap=a.get("daily_cap"), enabled=a.get("enabled")),
+    "Read the notification settings, or change them when Bandile says to (\"send the briefing "
+    "at 5:45\", \"no messages after 9pm\"). With no arguments it only reads.",
+    {"morning_time": _str("When the morning briefing goes out, HH:MM."),
+     "evening_time": _str("When the evening review goes out, HH:MM, or 'off'."),
+     "quiet_start": _str("Start of quiet hours, HH:MM."), "quiet_end": _str("End of quiet hours, HH:MM."),
+     "alert_min_severity": _str("The least serious alert worth a message.", ["info", "warn", "critical"]),
+     "daily_cap": _int("The most messages in a day."),
+     "enabled": {"type": "boolean", "description": "Turn notifications on or off."}},
+)
