@@ -491,6 +491,22 @@ Known limit:
   cap of 12 the later embedding calls are refused and the run falls back to keyword
   dedup for those findings (the run still completes).
 
+### Note — a red smoke run after S14, and its fix
+
+The S14 commit (`8752e5a`) was pushed while the smoke test showed one failed check
+("seeded a client with a due payment"). The pytest suite and the startup chain were green.
+The failure was in the test script, not the product: `tests/e2e/smoke.js` took "today" from
+`toISOString()`, which is the UTC date, and the run happened at 00:05 local time (UTC+2),
+so the payment it seeded as due today was a day old and correctly came back `overdue`.
+Both e2e scripts now use the local date; the fix is its own commit straight after S14. The
+check script used during this build now exits non-zero on any red, and every commit is
+chained behind it, so a red tree cannot be committed again.
+
+Also seen at the same moment: one pytest run that started at 23:59:50 and finished after
+midnight failed a single date assertion (a test's module-level "today" against the code's
+"today"). It passed on the rerun. Tests that hold `date.today()` at import can do this for
+a few seconds a day; not changed.
+
 ## Environment variables added so far
 
 | Var | Default | Session | Purpose |

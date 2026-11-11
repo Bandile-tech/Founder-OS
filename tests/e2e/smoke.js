@@ -84,7 +84,10 @@ async function api(token, method, p, body, isForm) {
     const login = await api("", "POST", "/auth/login", { password: PASSWORD });
     check(login.status === 200 && login.json.token, "API login returns a token");
     const token = login.json.token;
-    const today = new Date().toISOString().slice(0, 10);
+    // The local date, as the backend sees it (toISOString() alone is UTC, which is still
+    // yesterday for the first hours after local midnight).
+    const now = new Date();
+    const today = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
     const todo = await api(token, "POST", "/todos", { text: "Finalise Bel Baby delivery", due: today, priority: 1, category: "business" });
     check(todo.status === 200 && todo.json.id, "seeded a task due today");
     const csv = fs.readFileSync(path.join(ROOT, "backend", "tests", "fixtures", "syllabus_sample.csv"));

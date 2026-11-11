@@ -71,8 +71,15 @@ async function waitForServer(ms = 60000) {
   throw new Error("backend did not start");
 }
 
+// A date n days from today in local time, as the backend sees it (toISOString() alone is
+// UTC, which is still yesterday for the first hours after local midnight).
+function localDay(n) {
+  const d = new Date(Date.now() + n * 86400000);
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+}
+
 async function seed() {
-  const due = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+  const due = localDay(1);
   await api("POST", "/todos", { text: "Finalise Bel Baby delivery", priority: 1, category: "business", due, source: "manual" });
   await api("POST", "/todos", { text: "Economics P1 prep", priority: 2, category: "academics", due, source: "manual" });
   await api("POST", "/annual-targets", { name: "AI services revenue", target_value: 2000, current_value: 520 });
@@ -94,7 +101,7 @@ async function seed() {
 
 // Leads, a draft, a client with a contact, a deal, payments and a conversation (all synthetic).
 async function seedBusiness() {
-  const day = (n) => new Date(Date.now() + n * 86400000).toISOString().slice(0, 10);
+  const day = localDay;
   const leads = [
     { name: "Mercy Banda", company: "Sunrise Pharmacy", segment: "Lusaka pharmacies", location: "Lusaka", whatsapp: "+260 977 123 456" },
     { name: "Joseph Phiri", company: "Golden Crust Bakery", segment: "Kitwe bakeries", location: "Kitwe", email: "joseph@goldencrust.example" },
