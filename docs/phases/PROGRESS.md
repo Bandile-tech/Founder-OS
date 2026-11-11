@@ -790,8 +790,8 @@ Decisions where the spec was silent:
   show "pending" when their env vars are set but nothing is paired or synced yet; YouTube reads
   the Brand tab's `social_accounts` row.
 - The pairing code is derived from the server secret. With neither `FOUNDER_OS_SECRET` nor
-  `FOUNDER_OS_PASSWORD` set that secret is a public constant, so S17 must refuse pairing in that
-  case and limit wrong attempts per chat.
+  `FOUNDER_OS_PASSWORD` set that secret is a public constant; in that state the whole API is
+  open anyway, so pairing is not refused. S17 limits wrong attempts per chat.
 
 VERIFY: Telegram `setWebhook` parameter names (`url`, `secret_token`, `allowed_updates`).
 
@@ -846,6 +846,44 @@ Limits to know:
 
 VERIFY: Telegram `sendMessage` parameter names and the 4,096-character limit (messages are
 split at 4,000).
+
+### S17 — Phase 6D.2: two-way Telegram into the orchestrator
+
+Shipped: `orchestrator._turn_events` (the one implementation of a turn), `orchestrator_stream`
+re-built on it (the existing orchestrator tests pass unchanged), `orchestrator.run_turn`;
+`backend/telegram_inbound.py` (`POST /integrations/telegram/webhook`, pairing, `/brief`,
+`/undo`, `/yes`, `/no`, `/mute`, `/start`, `/help`, plain text → `run_turn`); the webhook is
+exempt from the session check and verified by the secret header; 11 more tests in
+`tests/test_phase6d_notify.py` (spec tests 4, 5 and 9); REBUILD_HANDOFF §2 sections for
+Integrations and Notifications.
+
+Decisions where the spec was silent:
+- The webhook answers `200 {}` at once and runs the update after the response, in its own
+  session, one update at a time (a process lock). A slow assistant turn therefore cannot make
+  Telegram retry. Cost if wrong: an update is lost if the process dies mid-turn.
+- Repeated updates are dropped by an in-memory list of the last 200 `update_id`s. It is lost
+  on a restart; a `telegram_updates` table replaces it if Telegram's retries prove common.
+- Only private chats are served. Nothing is ever said to a chat that is not paired, except the
+  confirmation when the right code arrives. `/start <code>` pairs too (Telegram's Start button
+  sends `/start`). Five wrong codes from one chat lock that chat out for an hour (in memory).
+- `/yes` and `/no` act on the newest pending action whose `thread_id` is `telegram:<chat>`;
+  the inbound turn stamps that on the actions it proposed. A proposal made on the dock is not
+  Telegram's to confirm. `/yes` counts as Bandile's own approval (`human=True`), so it may
+  confirm an outreach send.
+- `/yes`, `/no` and `/undo` are saved in the conversation thread with their outcome, so the
+  assistant knows they happened and `/undo` can reverse a delete confirmed by `/yes`.
+- `/mute` takes hours or minutes (`2h`, `30m`), up to 72 hours; `/mute off` ends it. Replies
+  still come through a mute.
+- `run_turn` also returns `batch_id`. Its `context` argument is ignored, as on
+  `POST /orchestrator`.
+
+Limits to know:
+- If a Telegram turn asks to delete a row that already has an open proposal from the dock,
+  the reply has no `/yes` hint and `/yes` does not find it; confirm it in the app.
+- Voice notes and photos get "Text only for now."
+
+VERIFY: the header name `X-Telegram-Bot-Api-Secret-Token`; Telegram's webhook timeout and
+retry behaviour.
 
 ## Environment variables added so far
 

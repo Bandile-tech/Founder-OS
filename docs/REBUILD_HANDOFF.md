@@ -470,6 +470,49 @@ Agent `application_watch` (daily at 05:45) emits `application.deadline_near` onc
 application, mark (30, 14, 7, 3, 1 days) and deadline, and refreshes stale gap reviews (at
 most two a run).
 
+### Integrations (Phase 6C — `backend/integrations.py`, `backend/integrations_telegram.py`)
+
+An integration: `{provider (google_calendar|email|telegram|youtube), label, status
+(disconnected|pending|connected|error), account_label, connected_at, last_sync_at,
+last_error (only while failing), configured (are its env vars set), actions[]}`. `actions`
+is the list of buttons the Settings card may show: `connect`, `sync`, `disconnect`, `pair`,
+`set_webhook`. Tokens live in `integrations.secret_json`, which no endpoint returns; every
+stored error and log line goes through `integrations.redact()`.
+
+| Method & path | Body / query | Returns |
+|---|---|---|
+| `GET /integrations` | | `[integration]`, always the four providers in the order above |
+| `POST /integrations/telegram/set-webhook` | | `{ok, description, url}`; 503 naming the missing env var (`TELEGRAM_BOT_TOKEN`, `FOUNDER_OS_API_URL`, `TELEGRAM_WEBHOOK_SECRET`) |
+| `POST /integrations/telegram/unpair` | | the telegram integration |
+
+### Notifications (Phase 6D — `backend/notify.py`, `backend/telegram_inbound.py`)
+
+A notification: `{id, created_at, channel, kind (briefing|evening|alert|deadline|reminder|
+reply|test), title, body, dedupe_key, send_at, status (queued|sent|failed|suppressed|
+cancelled), sent_at, error, source, agent_run_id, suppressed_reason (quiet_hours|daily_cap|
+channel_disabled|not_paired)}`. Settings: `{enabled, morning_time, evening_time | null,
+quiet_start, quiet_end, alert_min_severity (info|warn|critical), daily_cap, channels,
+deadline_days, muted_until, updated_at, paired, pair_code, bot_link | null,
+channel_configured}`. Times are local `HH:MM`.
+
+| Method & path | Body / query | Returns |
+|---|---|---|
+| `GET /notifications/settings` | | settings |
+| `PATCH /notifications/settings` | any of `enabled`, `morning_time`, `evening_time` (`"off"` or null turns it off), `quiet_start`, `quiet_end`, `alert_min_severity`, `daily_cap` | settings + `change`; 422 for a bad value |
+| `GET /notifications` | `limit=50`, `status?`, `kind?` | `[notification]`, newest first |
+| `POST /notifications/test` | | `{status, error}` — sends "Founder OS connected" |
+| `POST /notifications/brief-now` | | `{status, error}` — sends today's briefing now |
+| `POST /notifications/{id}/cancel` | | notification; 409 unless it is queued |
+| `POST /integrations/telegram/webhook` | a Telegram `Update`; header `X-Telegram-Bot-Api-Secret-Token` | `{}`; 403 unless the header equals `TELEGRAM_WEBHOOK_SECRET`. No session needed |
+
+`GET /briefing/today` now carries `delivery: {last_sent_at, channel, paired}`.
+
+Telegram commands: the six-character code (or `/start <code>`) pairs; then `/brief`,
+`/undo`, `/yes`, `/no`, `/mute 2h` (`/mute off`), `/help`. Any other text is an assistant
+turn (`orchestrator.run_turn`), saved in the one thread with `session_id =
+telegram:<chat_id>`; the reply ends with `Changed: …` and `/undo to reverse` when something
+changed, and `Reply /yes to confirm or /no.` when a delete or a send was proposed.
+
 ### Tool registry (for the UI's reference)
 `route_brain_dump, get_dashboard_state, detect_off_track, synthesize_weekly_review,
 surface_weakest_topics, query_war_room, add_todos, query_cold_archive,

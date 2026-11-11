@@ -767,3 +767,300 @@ def test_migration_creates_the_settings_row_once():
                                  "channels_json, deadline_days_json FROM notification_settings")).fetchall()
     assert len(rows) == 1
     assert tuple(rows[0]) == (1, "06:00", "22:00", "05:00", "warn", 12, '{"telegram": true}', "[30, 14, 7, 3, 1]")
+
+
+# ════════════════════════════════════════════════════════════════
+# 6D.2 — two-way Telegram (spec tests 4, 5 and 9)
+# ════════════════════════════════════════════════════════════════
+
+import conversation
+import orchestrator
+import telegram_inbound
+
+HOOK_SECRET = "hook-secret-0123456789"
+OTHER_CHAT = 9988776655
+
+
+@pytest.fixture
+def hook(monkeypatch):
+    """The webhook, configured, with the background handler on the test database."""
+    monkeypatch.setenv("TELEGRAM_WEBHOOK_SECRET", HOOK_SECRET)
+    monkeypatch.setenv("FOUNDER_OS_SECRET", "server-secret-for-pairing")
+    telegram_inbound.reset_state()
+    counter = {"id": 5000}
+
+    def send(text=None, chat_id=CHAT, **message):
+        counter["id"] += 1
+        body = {"update_id": counter["id"],
+                "message": {"message_id": counter["id"], "chat": {"id": chat_id, "type": "private"},
+                            "from": {"id": chat_id, "username": "bandile"}, **message}}
+        if text is not None:
+            body["message"]["text"] = text
+        return client.post("/integrations/telegram/webhook", json=body,
+                           headers={"X-Telegram-Bot-Api-Secret-Token": HOOK_SECRET})
+
+    with patch.object(telegram_inbound, "SessionLocal", TestSessionLocal):
+        yield send
+    telegram_inbound.reset_state()
+
+
+def _scripted(rounds):
+    state = {"i": 0}
+
+    def fake(convo, tools):
+        i = min(state["i"], len(rounds) - 1)
+        state["i"] += 1
+        yield from rounds[i]
+
+    return fake
+
+
+def _tool_round(tool, args, call_id="call_0"):
+    return [{"tool_calls": [{"index": 0, "id": call_id, "name": tool, "arguments": json.dumps(args)}]},
+            {"finish_reason": "tool_calls"}]
+
+
+def _final_round(text):
+    return [{"content": text}, {"finish_reason": "stop"}]
+
+
+def _texts(sends):
+    return [c["json"]["text"] for c in sends]
+
+
+# ── 5. The secret header ─────────────────────────────────────
+
+def test_webhook_needs_the_secret_header(hook, sends, monkeypatch):
+    update = {"update_id": 1, "message": {"chat": {"id": CHAT, "type": "private"}, "text": "hello"}}
+    assert client.post("/integrations/telegram/webhook", json=update).status_code == 403
+    wrong = client.post("/integrations/telegram/webhook", json=update,
+                        headers={"X-Telegram-Bot-Api-Secret-Token": "wrong"})
+    assert wrong.status_code == 403
+    right = client.post("/integrations/telegram/webhook", json=update,
+                        headers={"X-Telegram-Bot-Api-Secret-Token": HOOK_SECRET})
+    assert right.status_code == 200 and right.json() == {}
+    # With no secret configured nothing is accepted, whatever header arrives.
+    monkeypatch.delenv("TELEGRAM_WEBHOOK_SECRET")
+    assert client.post("/integrations/telegram/webhook", json=update,
+                       headers={"X-Telegram-Bot-Api-Secret-Token": ""}).status_code == 403
+    assert sends == []
+
+
+def test_webhook_is_reachable_without_a_session_when_a_password_is_set(hook, monkeypatch):
+    import auth
+    assert "/integrations/telegram/webhook" in auth.EXEMPT_EXACT
+    monkeypatch.setenv("FOUNDER_OS_PASSWORD", "a-long-password")
+    assert client.get("/notifications/settings").status_code == 401          # everything else is gated
+    assert hook("hello").status_code == 200
+    assert client.post("/integrations/telegram/webhook", json={}).status_code == 403
+
+
+def test_webhook_answers_200_for_bodies_it_cannot_use(hook, sends):
+    headers = {"X-Telegram-Bot-Api-Secret-Token": HOOK_SECRET}
+    for body in ({}, {"update_id": 3}, {"update_id": 4, "edited_message": {"text": "x"}}, [1, 2]):
+        r = client.post("/integrations/telegram/webhook", json=body, headers=headers)
+        assert r.status_code == 200 and r.json() == {}
+    r = client.post("/integrations/telegram/webhook", content=b"not json", headers=headers)
+    assert r.status_code == 200 and sends == []
+
+
+# ── 4. Pairing ───────────────────────────────────────────────
+
+def test_pairing_needs_the_right_code_and_a_second_chat_is_ignored(hook, sends):
+    db = _db()
+    queued = _queue(db, kind="alert", body="Payment overdue.")
+    notify.dispatch(db, NOON)
+    assert _row(db, queued["id"]).suppressed_reason == "not_paired"
+
+    assert hook("WRONG1").status_code == 200
+    assert hook("hello there").status_code == 200
+    assert tg.is_paired(db) is False and sends == []                         # nothing is said to a stranger
+
+    assert hook(tg.pair_code().lower()).status_code == 200                   # case does not matter
+    db.expire_all()
+    assert tg.is_paired(db) is True and tg.chat_id(db) == CHAT
+    assert _texts(sends)[0].startswith("Paired. You'll get your briefing at 06:00.")
+    assert sends[0]["json"]["chat_id"] == CHAT
+
+    assert notify.send_test(db)["status"] == "sent"
+    assert _texts(sends)[-1] == "Founder OS connected"
+
+    # Another chat — even with the right code — is ignored and told nothing.
+    before = len(sends)
+    hook(tg.pair_code(), chat_id=OTHER_CHAT)
+    hook("show me everything", chat_id=OTHER_CHAT)
+    db.expire_all()
+    assert tg.chat_id(db) == CHAT and len(sends) == before
+    assert db.query(models.ChatMessage).count() == 0                         # and never reaches the assistant
+    db.close()
+
+
+def test_pairing_accepts_the_code_after_start_and_locks_out_guessing(hook, sends):
+    db = _db()
+    hook("/start")                                                           # Telegram's Start button: not a guess
+    for n in range(5):
+        hook(f"GUESS{n}", chat_id=OTHER_CHAT)
+    hook(tg.pair_code(), chat_id=OTHER_CHAT)                                 # locked out after five wrong codes
+    assert tg.is_paired(db) is False
+    hook(f"/start {tg.pair_code()}")
+    db.expire_all()
+    assert tg.chat_id(db) == CHAT and _texts(sends)[0].startswith("Paired.")
+    db.close()
+
+
+def test_group_chats_and_repeated_updates_are_ignored(hook, sends):
+    db = _db()
+    headers = {"X-Telegram-Bot-Api-Secret-Token": HOOK_SECRET}
+    group = {"update_id": 77, "message": {"chat": {"id": -100123, "type": "group"}, "text": tg.pair_code()}}
+    client.post("/integrations/telegram/webhook", json=group, headers=headers)
+    assert tg.is_paired(db) is False
+
+    _pair(db)
+    with patch.object(telegram_inbound, "handle_update", wraps=telegram_inbound.handle_update) as handled:
+        update = {"update_id": 78, "message": {"chat": {"id": CHAT, "type": "private"}, "text": "/help"}}
+        for _ in range(3):                                                   # Telegram retrying the same update
+            client.post("/integrations/telegram/webhook", json=update, headers=headers)
+    assert handled.call_count == 1 and len(sends) == 1
+    assert _texts(sends)[0].startswith("You're paired.")
+    db.close()
+
+
+# ── 9. A turn, /undo, /yes, /no ──────────────────────────────
+
+def test_a_message_runs_a_turn_and_replies_with_what_changed(hook, sends):
+    db = _db()
+    _pair(db)
+    essay = models.Todo(text="Business essay", done=False, due_date=date.today(), priority=3)
+    db.add(essay)
+    db.commit()
+    essay_id = essay.id
+    rounds = [_tool_round("complete_task", {"todo_id": essay_id}), _final_round("Marked the business essay done.")]
+    with patch("openai_client._stream_completion", _scripted(rounds)):
+        assert hook("finished the business essay").status_code == 200
+
+    reply = _texts(sends)[-1]
+    assert reply.startswith("Marked the business essay done.\nChanged: ")
+    assert "Business essay" in reply and reply.endswith("\n/undo to reverse")
+    db.expire_all()
+    assert db.query(models.Todo).filter_by(id=essay_id).one().done is True
+
+    # The turn is in the one thread, tagged as Telegram's, like a dock turn.
+    rows = conversation.thread_rows(db)
+    assert [r.role for r in rows] == ["user", "assistant", "tool", "assistant"]
+    assert {r.session_id for r in rows} == {f"telegram:{CHAT}"}
+    assert rows[0].content == "finished the business essay" and rows[-1].changes_json
+    sent = db.query(models.Notification).filter_by(kind="reply").one()
+    assert sent.status == "sent" and sent.source == "telegram"
+
+    # /undo reverses that batch and says what was restored.
+    hook("/undo")
+    db.expire_all()
+    assert db.query(models.Todo).filter_by(id=essay_id).one().done is False
+    assert _texts(sends)[-1].startswith("Undone: ") and "Business essay" in _texts(sends)[-1]
+    hook("/undo")
+    assert _texts(sends)[-1] == "Nothing to undo from the last 24 hours."
+    db.close()
+
+
+def test_yes_and_no_answer_what_the_bot_proposed(hook, sends):
+    db = _db()
+    _pair(db)
+    hook("/yes")
+    assert _texts(sends)[-1] == "Nothing is waiting for a yes."
+    hook("/no")
+    assert _texts(sends)[-1] == "Nothing is waiting for an answer."
+
+    dentist = models.Todo(text="Book the dentist", done=False, priority=5)
+    gym = models.Todo(text="Renew the gym", done=False, priority=5)
+    db.add_all([dentist, gym])
+    db.commit()
+    dentist_id, gym_id = dentist.id, gym.id
+
+    rounds = [_tool_round("propose_delete", {"table": "todos", "record_id": dentist_id}),
+              _final_round("I can delete 'Book the dentist'.")]
+    with patch("openai_client._stream_completion", _scripted(rounds)):
+        hook("delete the dentist task")
+    assert _texts(sends)[-1] == "I can delete 'Book the dentist'.\nReply /yes to confirm or /no."
+    assert db.query(models.Todo).filter_by(id=dentist_id).count() == 1       # nothing deleted yet
+    assert db.query(models.PendingAction).one().thread_id == f"telegram:{CHAT}"
+
+    hook("/yes")
+    db.expire_all()
+    assert db.query(models.Todo).filter_by(id=dentist_id).count() == 0
+    assert _texts(sends)[-1].startswith("Done: Delete todo 'Book the dentist'") and "/undo" in _texts(sends)[-1]
+    hook("/undo")                                                            # and a confirmed delete can come back
+    db.expire_all()
+    assert db.query(models.Todo).filter_by(id=dentist_id).count() == 1
+
+    rounds = [_tool_round("propose_delete", {"table": "todos", "record_id": gym_id}), _final_round("Shall I?")]
+    with patch("openai_client._stream_completion", _scripted(rounds)):
+        hook("delete the gym task")
+    hook("/no")
+    db.expire_all()
+    assert _texts(sends)[-1].startswith("Cancelled: Delete todo 'Renew the gym'")
+    assert db.query(models.Todo).filter_by(id=gym_id).count() == 1
+    assert db.query(models.PendingAction).filter_by(record_id=gym_id).one().status == "cancelled"
+
+    # A proposal made on the dock is not Telegram's to confirm.
+    ot.run_tool("propose_delete", {"table": "todos", "record_id": gym_id}, db)
+    hook("/yes")
+    assert _texts(sends)[-1] == "Nothing is waiting for a yes."
+    db.close()
+
+
+def test_commands_brief_mute_and_text_only(hook, sends):
+    db = _db()
+    _pair(db)
+    hook("/brief")
+    assert "Reply here to log anything." in _texts(sends)[-1] and len(sends) == 1
+
+    hook("/mute 2h")
+    assert _texts(sends)[-1].startswith("Muted until ")                      # the answer itself gets through
+    db.expire_all()
+    muted = notify.settings(db).muted_until
+    assert timedelta(minutes=119) < muted - datetime.utcnow() <= timedelta(hours=2)
+    held = _queue(db, kind="alert", body="Payment overdue.")
+    assert notify.dispatch(db)["held"] == 1 and _row(db, held["id"]).status == "queued"
+    hook("/mute off")
+    db.expire_all()
+    assert notify.settings(db).muted_until is None and _texts(sends)[-1] == "Unmuted."
+    hook("/mute forever")
+    assert _texts(sends)[-1].startswith("Say how long")
+
+    hook(voice={"file_id": "abc", "duration": 4})                            # a voice note
+    assert _texts(sends)[-1] == "Text only for now."
+    hook("/dance")
+    assert _texts(sends)[-1].startswith("I don't know that command.")
+    assert db.query(models.ChatMessage).count() == 0                         # none of this reached the assistant
+    db.close()
+
+
+def test_a_turn_with_no_key_still_answers(hook, sends):
+    db = _db()
+    _pair(db)
+    hook("what is on today?")
+    assert len(sends) == 1 and _texts(sends)[0]                              # the friendly unavailable reply
+    assert db.query(models.Notification).filter_by(kind="reply").one().status == "sent"
+    db.close()
+
+
+def test_run_turn_returns_the_same_things_a_dock_turn_saves():
+    db = _db()
+    task = models.Todo(text="Send the invoice", done=False, priority=4)
+    db.add(task)
+    db.commit()
+    rounds = [_tool_round("complete_task", {"todo_id": task.id}), _final_round("Done.")]
+    with patch("openai_client._stream_completion", _scripted(rounds)):
+        out = orchestrator.run_turn("sent the invoice", db, source="telegram", session_id="telegram:1")
+    assert out["final"] == "Done." and out["tool_calls"] == ["complete_task"]
+    assert len(out["changes"]) == 1 and out["changes"][0]["batch_id"] == out["batch_id"]
+    assert out["pending"] == [] and out["suggestions"] == []
+    assert not change_log.in_batch(db)                                       # the batch is closed
+    assert [r.role for r in conversation.thread_rows(db)] == ["user", "assistant", "tool", "assistant"]
+
+    rounds = [_tool_round("propose_delete", {"table": "todos", "record_id": task.id}), _final_round("Shall I?")]
+    with patch("openai_client._stream_completion", _scripted(rounds)):
+        out = orchestrator.run_turn("delete it", db)
+    assert [p["table"] for p in out["pending"]] == ["todos"] and out["changes"] == []
+    assert conversation.thread_rows(db)[-1].session_id == conversation.DEFAULT_THREAD_ID
+    db.close()
