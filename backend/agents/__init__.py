@@ -25,7 +25,10 @@ REGISTRY: dict[str, AgentSpec] = {}
 
 # Shipped agent modules, imported by load_all(). A module that fails to import is skipped:
 # the rest of the registry still works.
-_MODULES: list[str] = []
+_MODULES: list[str] = [
+    "crm_housekeeper", "lead_qualifier", "follow_up_sentinel", "portfolio_reviewer", "brand_sync",
+    "market_intel",
+]
 
 EVENT_KINDS = (
     "lead.replied", "lead.stale", "payment.overdue", "research.completed", "email.received",

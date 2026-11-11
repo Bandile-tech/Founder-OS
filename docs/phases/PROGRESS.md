@@ -440,6 +440,57 @@ Decisions where the spec was silent:
 - `FOUNDER_OS_TZ` falls back to a fixed UTC+2 when the machine has no time-zone database
   and the zone is the default; `tzdata` is already pinned in `requirements.txt`.
 
+### S14 — 6B.2 shipped agents, agents API and tools, in-process tick, workflow (done)
+
+Shipped: six agents in `backend/agents/` (`crm_housekeeper`, `lead_qualifier`,
+`follow_up_sentinel`, `portfolio_reviewer`, `brand_sync`, `market_intel`) with the default
+schedules, permissions and caps from the §6B table; `agents/api.py` (`GET /agents`,
+`GET /agents/runs`, `GET/PATCH /agents/{key}`, `POST /agents/{key}/run`,
+`GET /agents/{key}/runs`, `POST /agents/runs/{id}/undo`); tools `agent_status`, `run_agent`,
+`set_agent_schedule` and the "AGENTS" prompt section; the in-process tick job (every 15
+minutes, `JOBS_IN_PROCESS`); `.github/workflows/jobs-tick.yml`; the ADR-0001 amendment;
+endpoint shapes in the hand-off doc. Tests: acceptance tests 9–10 and the API, tool,
+workflow and in-process tests in `tests/test_phase6b_agents.py`.
+
+Hosting decision for this run (recorded in ADR-0001): the workflow ships with
+`workflow_dispatch` only and its `schedule` block commented out, because a call every 15
+minutes would keep the free Render instance awake and use up its free hours. Agents run
+from the in-process tick while the app is open.
+
+To turn the external schedule on later:
+1. On Render, set `JOBS_TOKEN` to a random value of 32 or more characters.
+2. In the GitHub repository, Settings → Secrets and variables → Actions, add
+   `FOUNDER_OS_URL` (the backend's base URL, no trailing slash) and `JOBS_TOKEN` (the same
+   value as on Render).
+3. In `.github/workflows/jobs-tick.yml`, uncomment the two `schedule` lines and push.
+Before step 3 the workflow can be run by hand from the Actions tab once steps 1–2 are done.
+
+Decisions where the spec was silent:
+- `brand_sync` is registered now and reports `skipped` ("brand not built") until S9 adds
+  the module; it syncs accounts whose `sync_mode` is `api`.
+- `lead_qualifier` only takes leads that have never been scored, so a lead that stays `new`
+  after a low score is not re-scored (and re-billed) every three hours.
+- `follow_up_sentinel` emits `lead.stale` only when it adds a follow-up, so a quiet lead is
+  flagged once, not daily.
+- `crm_housekeeper`'s once-a-day rule for `payment.overdue` is read from `agent_events`
+  (any event for that payment in the last 24 hours, consumed or not).
+- `market_intel` (the agent) emits `research.completed` with the project id.
+- The briefing's "research due" item (score 12) is shown only while the `market_intel`
+  agent cannot run objectives itself (it is disabled, or there is no AI key).
+- `GET /agents` adds `cost_usd_month`, `events` and `schedule.overridden` to the spec's
+  shape (the Agents page needs the monthly cost).
+- Run now ignores the Enabled toggle and the schedule: it is an explicit instruction.
+- The `run_agent` tool commits the assistant's session first, because the agent works in
+  its own session and must see what the turn has already written.
+- `agents.load_all()` runs when `main` is imported, so the registry is complete before the
+  first request.
+
+Known limit:
+- Embedding calls count against an agent's model-call cap. A research run that surfaces
+  three new findings makes about nine role calls and up to six embedding calls; past the
+  cap of 12 the later embedding calls are refused and the run falls back to keyword
+  dedup for those findings (the run still completes).
+
 ## Environment variables added so far
 
 | Var | Default | Session | Purpose |

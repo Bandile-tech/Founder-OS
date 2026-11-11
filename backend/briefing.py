@@ -241,7 +241,11 @@ def _opportunity_items(db: Session, today: date) -> tuple[list, int]:
                                reason=f"Pipeline entry stale for {idle} days",
                                action=e.next_action or "Decide: validate or reject",
                                target_type="opportunity_pipeline", target_id=e.id, score=30))
-    for o in objectives.due_objectives(db, now):
+    # Once the market-intelligence agent can run them itself (enabled, with an AI key), due
+    # objectives are its job and need no tap.
+    agent = db.query(models.Agent).filter(models.Agent.key == "market_intel").first()
+    agent_runs_them = llm.is_configured() and (agent is None or bool(agent.enabled))
+    for o in ([] if agent_runs_them else objectives.due_objectives(db, now)):
         items.append(_item(title=f"Research due: {o.objective[:70]}", category="opportunity", today=today,
                            due_label="", reason=f"Runs every {o.cadence_days} days and is due",
                            action="Run it (one tap on Agents)", target_type="research_objective",

@@ -344,6 +344,44 @@ Briefing additions: items with category `project` — blocked (62), overdue (70 
 active, null with no projects). Alert `projects_blocked` (warn) at two blocked active
 projects.
 
+### Agents and the scheduler (Phase 6B — `backend/agents/`)
+
+An agent in the registry: `{key, name, description, phase, enabled, schedule: {interval_minutes,
+at_time, weekdays, effective, overridden}, events[], permissions: {tools[], tables_write[],
+may_notify, may_emit[], max_llm_calls, max_seconds}, last_run: {at, status, summary,
+cost_usd} | null, runs_count, cost_usd_total, cost_usd_month, next_due_estimate}`.
+`schedule.effective` is a phrase: `every 60 min`, `daily at 06:00`, `Sun at 07:00`, or
+`on events only`.
+
+A run: `{id, agent_key, agent_name, trigger (schedule|event|manual|in_process), tick_id,
+started_at, finished_at, duration_ms, status (running|completed|skipped|failed|violation),
+summary, result, error, log, llm_calls, cost_usd, changes_count, batch_id, over_time,
+changes[]}` (`changes` — at most ten change entries — on the listing endpoints).
+
+| Method & path | Body / query | Returns |
+|---|---|---|
+| `GET /agents` | | `[agent]` in run order (couriers last) |
+| `GET /agents/{key}` | | agent + `config` + `runs` (the last 20) |
+| `PATCH /agents/{key}` | `{enabled?, interval_minutes?, at_time?, weekdays?, config?}` | agent + `change` (the toggle is change-logged, so it can be undone). `interval_minutes: 0`, `at_time: ""` and `weekdays: []` clear an override; 400 for a bad time or weekday |
+| `POST /agents/{key}/run` | | runs now (`trigger: manual`), whatever the schedule or the toggle say → the run |
+| `GET /agents/{key}/runs` | `limit=20` | `[run]` |
+| `GET /agents/runs` | `limit=50`, `status?` | the activity log across agents, newest first |
+| `POST /agents/runs/{id}/undo` | | undoes the run's whole batch; 409 when the run changed nothing |
+| `GET /jobs/status` | | `{last_tick: {id, trigger, started_at, finished_at, agents_run, agents_skipped, events_consumed, errors, duration_ms} \| null, ticks_24h, agents_due_now: [keys], token_configured, in_process_scheduler}` |
+| `POST /jobs/tick` | header `X-Jobs-Token` | `{tick_id, trigger, ran: [{key, status, summary}], skipped: [{key, reason}], deferred: [keys], events_consumed, events_dropped, errors, duration_ms}`; 401 for a wrong or missing token; 503 while `JOBS_TOKEN` is unset. Exempt from the session login |
+
+Shipped agents and their defaults: `crm_housekeeper` (every 60 min), `lead_qualifier`
+(every 180 min, at most 20 model calls), `follow_up_sentinel` (daily at 05:30, and on
+`lead.replied`), `portfolio_reviewer` (daily at 05:40), `brand_sync` (daily at 04:00),
+`market_intel` (every 60 min; one due objective per run, at most 12 model calls). Times are
+in `FOUNDER_OS_TZ`. An agent whose module is not built reports `skipped`.
+
+How agents run: the in-process scheduler calls the tick every 15 minutes while the process
+is awake (`JOBS_IN_PROCESS`, default on); `POST /jobs/tick` does the same when called.
+`.github/workflows/jobs-tick.yml` calls that endpoint but ships with its schedule commented
+out (see ADR-0001's amendment). A write by an agent outside its `tables_write` undoes the
+run's whole batch and marks the run `violation`.
+
 ### Tool registry (for the UI's reference)
 `route_brain_dump, get_dashboard_state, detect_off_track, synthesize_weekly_review,
 surface_weakest_topics, query_war_room, add_todos, query_cold_archive,

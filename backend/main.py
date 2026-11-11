@@ -83,6 +83,10 @@ import portfolio as _portfolio
 app.include_router(_portfolio.router)
 from market_intel import objectives as _research_objectives
 app.include_router(_research_objectives.router)
+import agents as _agents
+from agents import api as _agents_api
+_agents.load_all()                       # every shipped agent registers itself
+app.include_router(_agents_api.router)
 
 # Serve frontend from ../frontend if it exists
 FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend")
@@ -306,8 +310,14 @@ async def start_vault_scheduler():
         id="vault_sync",
         replace_existing=True,
     )
+    if _jobs_in_process():
+        # Best effort while the process is awake; POST /jobs/tick is the scheduler of record.
+        scheduler.add_job(_jobs_tick_job, "interval", minutes=JOBS_TICK_MINUTES, id="jobs_tick",
+                          replace_existing=True)
     scheduler.start()
     print(f"[vault_sync] Scheduler started — every {VAULT_SYNC_INTERVAL_HOURS}h.")
+    if _jobs_in_process():
+        print(f"[jobs] In-process tick every {JOBS_TICK_MINUTES} min (JOBS_IN_PROCESS=0 turns it off).")
 
 
 # ── SEED HELPERS ─────────────────────────────────────────────
@@ -2521,8 +2531,24 @@ def research_memory(db: Session = Depends(get_db)):
 
 # ── JOBS — the scheduler of record (ADR-0001) ─────────────────
 
+JOBS_TICK_MINUTES = 15
+
+
 def _jobs_in_process() -> bool:
     return (os.getenv("JOBS_IN_PROCESS", "1") or "1").strip().lower() not in ("0", "false", "no", "off")
+
+
+def _jobs_tick_job():
+    """The in-process tick. Never raises into the scheduler thread."""
+    try:
+        from agents import runner
+        _agents.load_all()
+        out = runner.tick("in_process")
+        if out.get("ran") or out.get("errors"):
+            ran = ", ".join(f"{r['key']}:{r['status']}" for r in out.get("ran", []))
+            print(f"[jobs] in-process tick: {ran or 'nothing ran'} ({out.get('errors', 0)} error(s))")
+    except Exception as exc:  # noqa: BLE001
+        print(f"[jobs] in-process tick failed: {type(exc).__name__}: {exc}")
 
 
 @app.post("/jobs/tick")

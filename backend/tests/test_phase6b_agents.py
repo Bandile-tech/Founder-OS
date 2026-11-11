@@ -9,6 +9,10 @@ Phase 6B — agents acceptance tests.
   6. the tick budget defers what does not fit
   7. /jobs/tick: 503 unset, 401 wrong token, 200 with the token and no session
   8. an agent toggle is logged and undoable
+  9. crm_housekeeper generates due payments, flips overdue, emits payment.overdue once a day
+ 10. market_intel runs exactly one due objective per tick
+     plus the agents API (list, patch + undo, run now, activity log, undo a run), the tools,
+     the workflow file and the in-process tick
  11. the startup chain still passes; agents rows appear only on first use
 
 Fake agents are registered inside the tests (the registry is patched). No network.
@@ -456,3 +460,315 @@ def test_runner_and_tick_never_raise():
         assert runner.run_agent(agents.REGISTRY["loose"], "manual")["status"] == "failed"
         broken = runner.tick("manual")
         assert broken["errors"] == 1 and "database is gone" in broken["error"] and broken["ran"] == []
+
+
+# ════════════════════════════════════════════════════════════════
+# 6B.2 — the shipped agents, the agents API, the tools
+# ════════════════════════════════════════════════════════════════
+
+from datetime import date
+
+import orchestrator_tools as ot
+
+TODAY = date.today()
+
+
+def _use(*modules):
+    """Put shipped agents back in the (emptied) registry for one test."""
+    import importlib
+    for name in modules:
+        agents.register(importlib.import_module(f"agents.{name}").SPEC)
+
+
+def test_shipped_agents_have_the_documented_defaults():
+    _use("crm_housekeeper", "lead_qualifier", "follow_up_sentinel", "portfolio_reviewer", "brand_sync", "market_intel")
+    r = agents.REGISTRY
+    assert list(r) == ["crm_housekeeper", "lead_qualifier", "follow_up_sentinel", "portfolio_reviewer",
+                       "brand_sync", "market_intel"]
+    assert r["crm_housekeeper"].schedule.interval_minutes == 60 and r["crm_housekeeper"].permissions.max_llm_calls == 0
+    assert r["crm_housekeeper"].permissions.tables_write == ["payments", "recurring_revenue", "clients", "projects"]
+    assert r["lead_qualifier"].schedule.interval_minutes == 180 and r["lead_qualifier"].permissions.max_llm_calls == 20
+    assert r["lead_qualifier"].permissions.tables_write == ["leads"]
+    assert r["follow_up_sentinel"].schedule.at_time == "05:30" and r["follow_up_sentinel"].events == ["lead.replied"]
+    assert r["follow_up_sentinel"].permissions.tables_write == ["todos", "leads"]
+    assert r["portfolio_reviewer"].schedule.at_time == "05:40"
+    assert r["portfolio_reviewer"].permissions.tables_write == ["projects", "suggestions"]
+    assert r["brand_sync"].schedule.at_time == "04:00" and r["brand_sync"].permissions.max_llm_calls == 0
+    assert r["market_intel"].schedule.interval_minutes == 60 and r["market_intel"].permissions.max_llm_calls == 12
+    assert all(not s.permissions.may_notify for s in r.values())
+    assert all(not s.permissions.tools for s in r.values())      # no delete tool, no confirm_action, nothing
+
+
+# ── 9. crm_housekeeper ────────────────────────────────────────
+
+def test_crm_housekeeper_generates_flips_and_emits_once_per_payment():
+    _use("crm_housekeeper")
+    db = _db()
+    c = models.Client(name="Hope Clinic", status="active")
+    db.add(c)
+    db.commit()
+    start = TODAY - timedelta(days=45)
+    db.add(models.RecurringRevenue(client_id=c.id, title="Hosting", amount=600, currency="ZMW",
+                                   interval="monthly", day_of_month=start.day, next_due=start, active=True))
+    db.add(models.Payment(client_id=c.id, amount=2000, currency="ZMW", status="due", title="Deposit",
+                          due_date=TODAY - timedelta(days=3)))
+    db.add(models.Payment(client_id=c.id, amount=500, currency="ZMW", status="due", title="Later",
+                          due_date=TODAY + timedelta(days=9)))
+    db.commit()
+
+    out = runner.run_agent(agents.REGISTRY["crm_housekeeper"], "manual")
+    assert out["status"] == "completed", out
+    assert out["result"]["generated"] == 2 and out["result"]["overdue"] == 3      # the two instalments are late too
+    assert out["result"]["events_emitted"] == 3 and out["llm_calls"] == 0
+    db.expire_all()
+    statuses = sorted(p.status for p in db.query(models.Payment).all())
+    assert statuses == ["due", "overdue", "overdue", "overdue"]
+    events = db.query(models.AgentEvent).filter(models.AgentEvent.kind == "payment.overdue").all()
+    overdue_ids = {p.id for p in db.query(models.Payment).filter(models.Payment.status == "overdue").all()}
+    assert {json.loads(e.payload_json)["payment_id"] for e in events} == overdue_ids
+    assert db.query(models.Client).one().health == "red"                            # an instalment 45 days late
+    tables = {ch.table_name for ch in db.query(models.ChangeLog).all()}
+    assert tables <= {"payments", "recurring_revenue"}                              # inside its allow-list
+
+    again = runner.run_agent(agents.REGISTRY["crm_housekeeper"], "manual")
+    assert again["status"] == "skipped" and again["result"]["events_emitted"] == 0  # once per payment per day
+    assert db.query(models.AgentEvent).count() == 3
+
+    for e in db.query(models.AgentEvent).all():                                     # a day later: reminded again
+        e.created_at = datetime.utcnow() - timedelta(hours=25)
+    db.commit()
+    third = runner.run_agent(agents.REGISTRY["crm_housekeeper"], "manual")
+    assert third["result"]["events_emitted"] == 3
+    db.close()
+
+
+# ── 10. market_intel: one objective per tick ──────────────────
+
+def test_market_intel_runs_exactly_one_due_objective_per_tick(monkeypatch):
+    _use("market_intel")
+    db = _db()
+    older = models.ResearchObjective(objective="painful admin problems in Lusaka pharmacies", cadence_days=7,
+                                     enabled=True, last_run_at=datetime.utcnow() - timedelta(days=30))
+    newer = models.ResearchObjective(objective="what bakeries in Kitwe struggle with every week", cadence_days=7,
+                                     enabled=True, last_run_at=datetime.utcnow() - timedelta(days=10))
+    off = models.ResearchObjective(objective="something that is switched off for now", cadence_days=7, enabled=False)
+    db.add_all([older, newer, off])
+    db.commit()
+    older_id, newer_id = older.id, newer.id
+
+    idle = runner.run_agent(agents.REGISTRY["market_intel"], "manual")
+    assert idle["status"] == "skipped" and idle["summary"] == "no AI key configured"
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    calls = []
+
+    def fake_run(session, objective, max_opportunities=3):
+        calls.append(objective)
+        project = models.ResearchProject(title="t", objective=objective, status="completed")
+        session.add(project)
+        session.commit()
+        return {"project_id": project.id, "title": "t", "opportunities": [{"id": 1}], "repeated": [],
+                "rejected_count": 0, "lessons_updated": 0, "cost_usd": 0.02, "llm_calls": 6}
+
+    with patch("market_intel.agent.run_market_research", side_effect=fake_run):
+        out = runner.tick("manual", now=datetime.utcnow() + timedelta(minutes=61))   # an hour after the idle run
+        assert [r["key"] for r in out["ran"]] == ["market_intel"]
+        assert calls == ["painful admin problems in Lusaka pharmacies"]              # the longest-waiting one
+        db.expire_all()
+        run_row = db.query(models.AgentRun).order_by(models.AgentRun.id.desc()).first()
+        result = json.loads(run_row.result_json)
+        assert result["objective_id"] == older_id and result["deferred"] == [newer_id]
+        assert "1 objective(s) deferred" in run_row.summary
+        assert db.query(models.ResearchObjective).filter(models.ResearchObjective.id == older_id).one().last_project_id
+        assert db.query(models.AgentEvent).filter(models.AgentEvent.kind == "research.completed").count() == 1
+
+        runner.tick("manual", now=datetime.utcnow() + timedelta(minutes=125))        # the next tick takes the other
+        assert calls[1] == "what bakeries in Kitwe struggle with every week" and len(calls) == 2
+        final = runner.run_agent(agents.REGISTRY["market_intel"], "manual")
+        assert final["status"] == "skipped" and final["summary"] == "no research objective is due"
+    db.close()
+
+
+# ── the other shipped agents ──────────────────────────────────
+
+def test_follow_up_sentinel_adds_one_reminder_for_a_quiet_lead():
+    _use("follow_up_sentinel")
+    db = _db()
+    quiet = models.Lead(name="Mercy Banda", status="contacted", last_contact_at=datetime.utcnow() - timedelta(days=9))
+    recent = models.Lead(name="Ruth Zulu", status="contacted", last_contact_at=datetime.utcnow() - timedelta(days=3))
+    replied = models.Lead(name="Peter Lungu", status="replied", last_contact_at=datetime.utcnow() - timedelta(days=20))
+    db.add_all([quiet, recent, replied])
+    db.commit()
+
+    out = runner.run_agent(agents.REGISTRY["follow_up_sentinel"], "manual")
+    assert out["status"] == "completed" and out["result"] == {"quiet": 1, "created": 1}
+    todo = db.query(models.Todo).one()
+    assert todo.lead_id == quiet.id and todo.due_date is not None and todo.category == "outreach"
+    assert "no reply in 9 days" in todo.text
+    assert db.query(models.AgentEvent).filter(models.AgentEvent.kind == "lead.stale").count() == 1
+    again = runner.run_agent(agents.REGISTRY["follow_up_sentinel"], "manual")
+    assert again["status"] == "skipped" and db.query(models.Todo).count() == 1       # never a second one
+
+    agents.emit(db, "lead.replied", {"lead_id": quiet.id})
+    db.commit()
+    woken = runner.tick("manual", now=datetime.utcnow() + timedelta(minutes=30))
+    assert [r["key"] for r in woken["ran"]] == ["follow_up_sentinel"]
+    log = db.query(models.AgentRun).order_by(models.AgentRun.id.desc()).first().log_text
+    assert "replied; nothing to chase" in log
+    db.close()
+
+
+def test_lead_qualifier_scores_reachable_new_leads_once(monkeypatch):
+    _use("lead_qualifier")
+    db = _db()
+    db.add_all([
+        models.Lead(name="Mercy Banda", status="new", email="mercy@example.com", company="Sunrise Pharmacy",
+                    segment="lusaka pharmacies", location="Lusaka"),
+        models.Lead(name="No Channel", status="new"),
+        models.Lead(name="Already Contacted", status="contacted", email="x@example.com"),
+    ])
+    db.commit()
+    assert runner.run_agent(agents.REGISTRY["lead_qualifier"], "manual")["summary"] == "no AI key configured"
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test")
+    answer = json.dumps({"fit": 30, "reasons": ["fits"], "disqualifiers": [], "suggested_angle": "stock alerts"})
+    with patch("llm.chat_text", return_value=answer) as chat:
+        out = runner.run_agent(agents.REGISTRY["lead_qualifier"], "manual")
+        assert out["status"] == "completed" and out["result"]["scored"] == 1 and out["result"]["qualified"] == 1
+        assert chat.call_count == 1
+        again = runner.run_agent(agents.REGISTRY["lead_qualifier"], "manual")
+        assert again["status"] == "skipped" and chat.call_count == 1                 # scored once, not every run
+    db.expire_all()
+    assert db.query(models.Lead).filter(models.Lead.name == "Mercy Banda").one().status == "qualified"
+    db.close()
+
+
+def test_portfolio_reviewer_suggests_and_never_pauses():
+    _use("portfolio_reviewer", "brand_sync")
+    db = _db()
+    assert runner.run_agent(agents.REGISTRY["portfolio_reviewer"], "manual")["status"] == "skipped"
+    stale = models.Project(title="Newsletter", status="active", priority=4, kind="internal",
+                           last_activity_at=datetime.utcnow() - timedelta(days=20))
+    db.add(stale)
+    db.add(models.Project(title="Founder OS Phase 5", status="active", priority=1, kind="internal",
+                          last_activity_at=datetime.utcnow()))
+    db.commit()
+    out = runner.run_agent(agents.REGISTRY["portfolio_reviewer"], "manual")
+    assert out["status"] == "completed" and out["result"]["pause_suggestions_new"] == 1
+    assert "focus: Founder OS Phase 5" in out["summary"]
+    db.expire_all()
+    assert db.query(models.Project).filter(models.Project.title == "Newsletter").one().status == "active"
+    assert db.query(models.Suggestion).filter(models.Suggestion.kind == "project_pause").count() == 1
+    second = runner.run_agent(agents.REGISTRY["portfolio_reviewer"], "manual")
+    assert second["result"]["pause_suggestions_new"] == 0
+
+    brand = runner.run_agent(agents.REGISTRY["brand_sync"], "manual")               # its module comes later
+    assert brand["status"] == "skipped"
+    db.close()
+
+
+# ── the agents API ────────────────────────────────────────────
+
+def test_agents_api_lists_toggles_runs_and_undoes():
+    def run(ctx):
+        _add_todo(ctx, "from the agent")
+        return AgentResult(summary="added one task")
+
+    _spec("writer", run, tables=["todos"], schedule_=Schedule(at_time="06:00"))
+    _spec("briefing_courier", lambda ctx: AgentResult(summary="sent"))
+
+    listed = client.get("/agents").json()
+    assert [a["key"] for a in listed] == ["writer", "briefing_courier"]
+    a = listed[0]
+    assert a["enabled"] is True and a["last_run"] is None and a["runs_count"] == 0
+    assert a["schedule"] == {"interval_minutes": None, "at_time": "06:00", "weekdays": None,
+                             "effective": "daily at 06:00", "overridden": False}
+    assert a["permissions"]["tables_write"] == ["todos"] and a["phase"] == "test"
+    assert a["next_due_estimate"] is not None
+
+    off = client.patch("/agents/writer", json={"enabled": False, "at_time": "07:15", "weekdays": [6]})
+    assert off.status_code == 200
+    body = off.json()
+    assert body["enabled"] is False and body["schedule"]["effective"] == "Sun at 07:15"
+    assert body["schedule"]["overridden"] is True and body["next_due_estimate"] is None
+    assert body["change"]["table"] == "agents"
+    assert client.post(f"/changes/{body['change']['id']}/undo").status_code == 200
+    restored = client.get("/agents/writer").json()
+    assert restored["enabled"] is True and restored["schedule"]["effective"] == "daily at 06:00"
+    assert client.patch("/agents/writer", json={"at_time": "nope"}).status_code == 400
+    assert client.patch("/agents/nobody", json={"enabled": False}).status_code == 404
+
+    ran = client.post("/agents/writer/run")
+    assert ran.status_code == 200
+    run_row = ran.json()
+    assert (run_row["status"], run_row["trigger"], run_row["summary"]) == ("completed", "manual", "added one task")
+    assert run_row["changes_count"] == 1 and run_row["duration_ms"] is not None
+
+    detail = client.get("/agents/writer").json()
+    assert detail["last_run"]["status"] == "completed" and detail["runs_count"] == 1 and detail["config"] == {}
+    assert detail["runs"][0]["changes"][0]["summary"] == "Added task: from the agent"
+    assert [r["id"] for r in client.get("/agents/writer/runs").json()] == [run_row["id"]]
+    activity = client.get("/agents/runs").json()
+    assert activity[0]["agent_name"] == "Writer" and activity[0]["changes"][0]["table"] == "todos"
+    assert client.get("/agents/runs", params={"status": "failed"}).json() == []
+
+    db = _db()
+    assert db.query(models.Todo).count() == 1
+    undone = client.post(f"/agents/runs/{run_row['id']}/undo")
+    assert undone.status_code == 200
+    db.expire_all()
+    assert db.query(models.Todo).count() == 0
+    db.close()
+    client.post("/agents/briefing_courier/run")
+    quiet = client.get("/agents/briefing_courier/runs").json()[0]
+    assert client.post(f"/agents/runs/{quiet['id']}/undo").status_code == 409         # it changed nothing
+    assert client.post("/agents/runs/99999/undo").status_code == 404
+    assert client.post("/agents/nobody/run").status_code == 404
+
+
+def test_agent_tools_report_run_and_reschedule():
+    _spec("writer", lambda ctx: AgentResult(summary="did its thing"))
+    db = _db()
+    with patch.object(agents, "load_all", lambda: None):
+        status, summary = ot.run_tool("agent_status", {}, db)
+        assert summary == "1 agent(s), 1 enabled" and status["agents"][0]["schedule"] == "every 60 min"
+        ran, summary = ot.run_tool("run_agent", {"key": "Writer"}, db)
+        assert ran["status"] == "completed" and summary == "Writer: did its thing"
+        one, summary = ot.run_tool("agent_status", {"key": "writer"}, db)
+        assert one["last_status"] == "completed" and one["recent_runs"][0]["summary"] == "did its thing"
+
+        moved, summary = ot.run_tool("set_agent_schedule", {"key": "writer", "at_time": "07:00", "weekdays": [6]}, db)
+        assert summary == "Writer: on, Sun at 07:00" and moved["change"]["table"] == "agents"
+        off, summary = ot.run_tool("set_agent_schedule", {"key": "writer", "enabled": False}, db)
+        assert off["enabled"] is False and "off" in summary
+        nothing, _ = ot.run_tool("set_agent_schedule", {"key": "writer"}, db)
+        assert nothing["error"] == "nothing to change"
+        bad, _ = ot.run_tool("set_agent_schedule", {"key": "writer", "at_time": "25:00"}, db)
+        assert "error" in bad
+        unknown, summary = ot.run_tool("run_agent", {"key": "ghost"}, db)
+        assert "no agent called 'ghost'" in summary and unknown["agents"] == ["writer"]
+    db.close()
+
+
+def test_workflow_ships_with_the_schedule_switched_off():
+    text = (Path(__file__).parent.parent.parent / ".github" / "workflows" / "jobs-tick.yml").read_text(encoding="utf-8")
+    assert "workflow_dispatch: {}" in text
+    assert '  # schedule:\n  #   - cron: "*/15 * * * *"' in text                      # present, commented out
+    active = [line for line in text.splitlines() if not line.lstrip().startswith("#")]
+    assert not any("cron" in line or line.strip() == "schedule:" for line in active)
+    assert "for i in 1 2 3" in text and "sleep 20" in text and "-m 120" in text
+    assert "secrets.FOUNDER_OS_URL" in text and "X-Jobs-Token: ${{ secrets.JOBS_TOKEN }}" in text
+
+
+def test_in_process_tick_is_guarded_by_the_env_flag(monkeypatch):
+    import main
+    assert main._jobs_in_process() is True
+    monkeypatch.setenv("JOBS_IN_PROCESS", "0")
+    assert main._jobs_in_process() is False
+    _spec("writer", lambda ctx: AgentResult(summary="ran"))
+    with patch.object(agents, "load_all", lambda: None):
+        main._jobs_tick_job()                                                        # never raises
+    db = _db()
+    assert db.query(models.JobTick).one().trigger == "in_process"
+    assert db.query(models.AgentRun).one().trigger == "in_process"
+    db.close()

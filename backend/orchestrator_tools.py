@@ -2269,3 +2269,115 @@ _register(
      "reason": _str("Why, in his words. Optional.")},
     ["finding_id"],
 )
+
+
+# ── 6B: agents ───────────────────────────────────────────────
+
+def _agent_spec(key: str):
+    import agents
+    agents.load_all()
+    key = (key or "").strip().lower().replace(" ", "_").replace("-", "_")
+    if key in agents.REGISTRY:
+        return agents.REGISTRY[key], None
+    names = {s.name.lower(): s for s in agents.REGISTRY.values()}
+    if key.replace("_", " ") in names:
+        return names[key.replace("_", " ")], None
+    known = ", ".join(sorted(agents.REGISTRY))
+    return None, ({"error": f"no agent called '{key}'", "agents": sorted(agents.REGISTRY)},
+                  f"no agent called '{key}' (known: {known})")
+
+
+def _agent_line(a: dict) -> dict:
+    last = a.get("last_run") or {}
+    return {"key": a["key"], "name": a["name"], "enabled": a["enabled"],
+            "schedule": a["schedule"]["effective"], "last_run_at": last.get("at"),
+            "last_status": last.get("status"), "last_summary": last.get("summary"),
+            "runs": a["runs_count"], "cost_usd_this_month": a["cost_usd_month"]}
+
+
+def agent_status(db, key: str | None = None):
+    """What the agents are and what they last did. Read-only."""
+    import agents
+    from agents import api
+    agents.load_all()
+    if key:
+        spec, problem = _agent_spec(key)
+        if spec is None:
+            return problem
+        detail = api.serialize_agent(db, spec)
+        runs = [{"started_at": r["started_at"], "status": r["status"], "summary": r["summary"],
+                 "changes": r["changes_count"], "error": r["error"]} for r in api._runs(db, key=spec.key, limit=5)]
+        return {**_agent_line(detail), "description": detail["description"], "recent_runs": runs}, \
+            f"{spec.name}: {detail['last_run']['status'] if detail['last_run'] else 'never run'}"
+    listed = [_agent_line(a) for a in api.list_agents(db)]
+    last_tick = db.query(models.JobTick).order_by(models.JobTick.id.desc()).first()
+    return ({"agents": listed, "last_tick_at": last_tick.started_at if last_tick else None},
+            f"{len(listed)} agent(s), {sum(1 for a in listed if a['enabled'])} enabled")
+
+
+def run_agent(db, key: str):
+    """Run one agent now."""
+    from agents import runner
+    spec, problem = _agent_spec(key)
+    if spec is None:
+        return problem
+    db.commit()                      # the agent works in its own session: let it see this turn's writes
+    outcome = runner.run_agent(spec, "manual")
+    result = {"agent": spec.name, "status": outcome.get("status"), "summary": outcome.get("summary"),
+              "changes_made": outcome.get("changes_count"), "error": outcome.get("error")}
+    return result, f"{spec.name}: {outcome.get('summary') or outcome.get('status')}"
+
+
+def set_agent_schedule(db, key: str, enabled: bool | None = None, interval_minutes: int | None = None,
+                       at_time: str | None = None, weekdays: list | None = None):
+    """Enable or disable an agent, or change when it runs."""
+    import change_log
+    from agents import api, runner
+    spec, problem = _agent_spec(key)
+    if spec is None:
+        return problem
+    fields = {k: v for k, v in {"enabled": enabled, "interval_minutes": interval_minutes,
+                                "at_time": at_time, "weekdays": weekdays}.items() if v is not None}
+    if not fields:
+        return {"error": "nothing to change"}, "nothing to change"
+    with change_log.batch_scope(db, "assistant"):
+        try:
+            out = runner.update_agent(db, spec, **fields)
+        except (ValueError, TypeError) as exc:
+            return {"error": str(exc)}, str(exc)
+        db.commit()
+    detail = api.serialize_agent(db, spec, out["row"])
+    return ({**_agent_line(detail), "change": out["change"]},
+            f"{spec.name}: {'on' if detail['enabled'] else 'off'}, {detail['schedule']['effective']}")
+
+
+_register(
+    "agent_status", lambda db, a: agent_status(db, key=a.get("key")),
+    "What the agents are, when they run and what each last did. Read-only. Use it to answer "
+    "'did the research run?' or 'what did the agents do overnight?'.",
+    {"key": _str("One agent's key, e.g. market_intel. Omit for all of them.")},
+)
+
+_register(
+    "run_agent", lambda db, a: run_agent(db, key=a.get("key", "")),
+    "Run one agent now. ONLY when Bandile explicitly asks for that agent to run. NEVER on "
+    "your own initiative.",
+    {"key": _str("The agent's key, e.g. portfolio_reviewer.")},
+    ["key"],
+)
+
+_register(
+    "set_agent_schedule",
+    lambda db, a: set_agent_schedule(db, key=a.get("key", ""), enabled=a.get("enabled"),
+                                     interval_minutes=a.get("interval_minutes"), at_time=a.get("at_time"),
+                                     weekdays=a.get("weekdays")),
+    "Enable or disable an agent, or change when it runs. ONLY on Bandile's explicit "
+    "instruction. NEVER enable, disable or reschedule an agent on your own judgement.",
+    {"key": _str("The agent's key."),
+     "enabled": {"type": "boolean", "description": "Turn the agent on or off."},
+     "interval_minutes": _int("Run every this many minutes (0 clears the override)."),
+     "at_time": _str("Run once a day at this local time, HH:MM (empty clears the override)."),
+     "weekdays": {"type": "array", "items": {"type": "integer"},
+                  "description": "Days it may run: 0 Monday … 6 Sunday (empty list clears)."}},
+    ["key"],
+)

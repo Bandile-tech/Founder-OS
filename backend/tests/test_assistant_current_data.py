@@ -122,7 +122,9 @@ def _run_every_tool(db) -> dict:
     """Call every registered tool once with plausible arguments. Returns name → model text."""
     out = {}
     fake_research = {"opportunities": [], "project_id": 1, "rejected_count": 0}
+    import agents.runner
     with patch("main.get_parse_response", return_value=_parsed(habits_done=["ironing"])), \
+         patch.object(agents.runner, "SessionLocal", TestSessionLocal), \
          patch("market_intel.agent.run_market_research", return_value=fake_research):
         calls = [
             ("route_brain_dump", {"text": "ironed my clothes"}),
@@ -165,6 +167,9 @@ def _run_every_tool(db) -> dict:
             ("portfolio_review", {}),
             ("schedule_research", {"objective": "painful admin problems in Lusaka pharmacies", "cadence_days": 14}),
             ("dismiss_research_finding", {"finding_id": 999}),
+            ("agent_status", {}),
+            ("run_agent", {"key": "portfolio_reviewer"}),
+            ("set_agent_schedule", {"key": "lead_qualifier", "interval_minutes": 240}),
         ]
         for name, args in calls:
             result, _summary = ot.run_tool(name, args, db)

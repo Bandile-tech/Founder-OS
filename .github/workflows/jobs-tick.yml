@@ -1,0 +1,31 @@
+name: Founder OS jobs tick
+
+# Calls POST /jobs/tick, which runs every agent that is due (ADR-0001).
+#
+# The schedule is OFF on purpose. While the backend is on Render's free tier, a call every
+# 15 minutes would keep the instance awake around the clock and use up the month's free
+# instance hours. Until the hosting changes, agents run from the in-process tick while the
+# app is in use, and this workflow can be started by hand (Actions → Founder OS jobs tick →
+# Run workflow).
+#
+# To turn the schedule on: uncomment the two `schedule` lines below and push. It needs the
+# repository secrets FOUNDER_OS_URL (the backend's base URL, no trailing slash) and
+# JOBS_TOKEN (the same value as the JOBS_TOKEN env var on Render).
+on:
+  # schedule:
+  #   - cron: "*/15 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Tick (wakes Render if asleep)
+        run: |
+          for i in 1 2 3; do
+            curl -fsS -m 120 -X POST "${{ secrets.FOUNDER_OS_URL }}/jobs/tick" \
+              -H "X-Jobs-Token: ${{ secrets.JOBS_TOKEN }}" && exit 0
+            sleep 20
+          done
+          exit 1
