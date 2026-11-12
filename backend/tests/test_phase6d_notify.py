@@ -1091,7 +1091,12 @@ def test_yes_on_a_whatsapp_send_replies_with_the_link_to_tap(hook, sends):
     rounds = [_tool_round("request_send", {"message_id": message_id}), _final_round("Shall I send it to Mercy?")]
     with patch("openai_client._stream_completion", _scripted(rounds)):
         hook("send Mercy the intro")
-    assert _texts(sends)[-1] == "Shall I send it to Mercy?\nReply /yes to confirm or /no."
+    # The prompt spells out what /yes would send, in the code's own words.
+    assert _texts(sends)[-1] == ("Shall I send it to Mercy?\n\n"
+                                 "Waiting for your yes. Nothing has been sent.\n"
+                                 "WhatsApp to Mercy Banda <+260977123456>\n"
+                                 "Hi Mercy, quick question about stock alerts.\n"
+                                 "Reply /yes to confirm or /no.")
     assert db.query(models.OutreachMessage).one().status == "draft"            # nothing has left
 
     hook("/yes")
@@ -1166,4 +1171,59 @@ def test_a_duplicate_dedupe_key_never_rolls_back_the_callers_work():
     # The session is still usable, and a new key still queues.
     again = _queue(db, kind="alert", body="Another", dedupe_key="alert:overdue:2")
     assert again["deduped"] is False and db.query(models.Notification).count() == 2
+    db.close()
+
+
+# ── Review, part 3: /yes answers only what was just shown ─────
+
+def test_yes_does_not_fall_through_to_an_older_proposal(hook, sends):
+    """/yes took the newest pending action from the last 24 hours. When the one Bandile meant
+    was gone it silently confirmed the next older one."""
+    db = _db()
+    _pair(db)
+    todo = models.Todo(text="Renew domain", done=False, priority=5)
+    db.add(todo)
+    db.commit()
+    todo_id = todo.id
+    rounds = [_tool_round("propose_delete", {"table": "todos", "record_id": todo_id}), _final_round("Delete it?")]
+    with patch("openai_client._stream_completion", _scripted(rounds)):
+        hook("delete the todo Renew domain")                 # proposed, never answered
+    with patch("openai_client._stream_completion", _scripted([_final_round("Two things are due.")])):
+        hook("what is due today?")                           # the conversation moves on
+    hook("/yes")
+    db.expire_all()
+    assert _texts(sends)[-1] == "Nothing is waiting for a yes."
+    assert db.query(models.Todo).filter_by(id=todo_id).count() == 1
+    db.close()
+
+
+def test_yes_will_not_guess_between_two_proposals_and_the_prompt_lists_them(hook, sends):
+    """One turn proposed a delete and a send; the reply only had to mention the delete. /yes
+    confirmed the newest, the send, whose text had never been shown."""
+    db = _db()
+    _pair(db)
+    lead, message_id = _whatsapp_draft(db)
+    todo = models.Todo(text="Buy milk", done=False, priority=5)
+    db.add(todo)
+    db.commit()
+    rounds = [[{"tool_calls": [
+                   {"index": 0, "id": "c0", "name": "propose_delete",
+                    "arguments": json.dumps({"table": "todos", "record_id": todo.id})},
+                   {"index": 1, "id": "c1", "name": "request_send", "arguments": json.dumps({"message_id": message_id})}]},
+               {"finish_reason": "tool_calls"}],
+              _final_round("Delete 'Buy milk'?")]
+    with patch("openai_client._stream_completion", _scripted(rounds)):
+        hook("delete the milk task")
+    prompt = _texts(sends)[-1]
+    assert "2 things are waiting" in prompt and "Send whatsapp to Mercy Banda" in prompt and "Delete todo 'Buy milk'" in prompt
+    # The send is spelled out by the code: who it goes to and the whole text.
+    assert "+260977123456" in prompt and "Hi Mercy, quick question about stock alerts." in prompt
+    hook("/yes")
+    db.expire_all()
+    assert "will not guess" in _texts(sends)[-1]
+    assert db.query(models.OutreachMessage).one().status == "draft" and db.query(models.Todo).count() == 1
+    hook("/no")
+    db.expire_all()
+    assert _texts(sends)[-1].startswith("Cancelled: ")
+    assert {p.status for p in db.query(models.PendingAction).all()} == {"cancelled"}
     db.close()

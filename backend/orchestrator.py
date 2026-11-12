@@ -101,6 +101,7 @@ def _turn_events(request, db, outcome: dict | None = None):
     batch_id = change_log.begin_batch(db, "assistant")
     final_text = ""
     changes: list = []
+    pending_before = _max_id(db, models.PendingAction)
     try:
         try:
             for event in get_orchestrator_response(
@@ -108,6 +109,11 @@ def _turn_events(request, db, outcome: dict | None = None):
                 context={"message": ctx} if ctx else None,
             ):
                 if event.get("type") == "final":
+                    # A send asked for in this turn is shown in full by the code itself
+                    # (who it goes to, the whole text), whatever the model chose to say.
+                    shown = _approval_blocks(db, pending_before)
+                    if shown:
+                        event = {**event, "content": ((event.get("content") or "").rstrip() + "\n\n" + shown).strip()}
                     final_text = event.get("content", "")
                     changes = event.get("changes") or []
                 yield event
@@ -150,6 +156,24 @@ def orchestrator_stream(request, db):
             yield _sse(event)
     finally:
         events.close()      # a dropped connection must still close the turn (open tool calls, the batch)
+
+
+def _approval_blocks(db, pending_before: int) -> str:
+    """The sends this turn asked approval for, each spelled out. Empty when there are none."""
+    try:
+        import outreach
+        rows = db.query(models.PendingAction).filter(
+            models.PendingAction.id > pending_before, models.PendingAction.status == "pending",
+            models.PendingAction.kind == "send_outreach").order_by(models.PendingAction.id).all()
+        blocks = []
+        for p in rows:
+            message = db.query(models.OutreachMessage).filter(models.OutreachMessage.id == p.record_id).first()
+            if message is not None:
+                blocks.append(outreach.approval_text(db, message))
+        return "\n\n".join(blocks)
+    except Exception as exc:  # noqa: BLE001 — never lose a reply over its footer
+        print(f"[orchestrator] could not describe a pending send: {type(exc).__name__}")
+        return ""
 
 
 def _max_id(db, model) -> int:

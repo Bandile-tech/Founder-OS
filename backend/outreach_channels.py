@@ -44,6 +44,20 @@ def whatsapp_digits(number) -> str:
     return digits
 
 
+def recipient(lead, channel: str) -> str | None:
+    """Where a message on this channel would go for this lead, as it is shown to Bandile
+    before he approves: the WhatsApp number with its country code, or the email address.
+    None for a manual channel (nothing is sent) or when there is nothing on file."""
+    if lead is None:
+        return None
+    if channel == "whatsapp":
+        digits = whatsapp_digits(lead.whatsapp or lead.phone or "")
+        return f"+{digits}" if digits else None
+    if channel == "email":
+        return (lead.email or "").strip() or None
+    return None
+
+
 class Channel:
     name = "other"
 

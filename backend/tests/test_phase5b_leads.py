@@ -376,7 +376,7 @@ def test_nothing_is_sent_without_a_later_yes_or_a_tap():
     again, _ = ot.run_tool("request_send", {"message_id": mid}, s)
     assert again["id"] == pending.id and s.query(models.PendingAction).count() == 1
     direct, _ = ot.run_tool("confirm_action", {"pending_id": pending.id}, s)
-    assert direct["error"] == "confirmation must come in a later message" and direct["executed"] is False
+    assert direct["error"].startswith("confirmation must come in a later message") and direct["executed"] is False
     s.close()
     assert status() == "draft"
 

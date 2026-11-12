@@ -152,20 +152,31 @@ def _undo(db, chat_id) -> str:
     return "Nothing to undo from the last 24 hours."
 
 
-def _waiting(db):
-    """The newest pending action a Telegram turn proposed in the last 24 hours."""
+def _waiting(db) -> list:
+    """What the LAST Telegram turn proposed and is still waiting on. Proposals from earlier
+    turns are no longer Telegram's to answer (``_turn`` lets go of them), so a /yes can never
+    land on something Bandile is not looking at."""
     since = datetime.utcnow() - timedelta(hours=WINDOW_HOURS)
     return db.query(models.PendingAction).filter(
         models.PendingAction.status == "pending", models.PendingAction.thread_id.like("telegram:%"),
-        models.PendingAction.created_at >= since).order_by(models.PendingAction.id.desc()).first()
+        models.PendingAction.created_at >= since).order_by(models.PendingAction.id).all()
+
+
+def _several(waiting: list) -> str:
+    listed = "\n".join(f"{n}. {p.summary or 'an action'}" for n, p in enumerate(waiting, 1))
+    return (f"{len(waiting)} things are waiting, so /yes will not guess which you mean:\n{listed}\n"
+            "/no cancels them all. Then ask for one at a time.")
 
 
 def _yes(db) -> tuple[str, list]:
     import actions
     import change_log
-    pending = _waiting(db)
-    if pending is None:
+    waiting = _waiting(db)
+    if not waiting:
         return "Nothing is waiting for a yes.", []
+    if len(waiting) > 1:
+        return _several(waiting), []
+    pending = waiting[0]
     summary = pending.summary or "that"
     try:
         # A /yes from the paired chat is Bandile's own approval, in a later message.
@@ -187,11 +198,12 @@ def _yes(db) -> tuple[str, list]:
 
 def _no(db) -> str:
     import actions
-    pending = _waiting(db)
-    if pending is None:
+    waiting = _waiting(db)
+    if not waiting:
         return "Nothing is waiting for an answer."
-    actions.cancel_action(db, pending.id)
-    return f"Cancelled: {pending.summary or 'that'}"
+    for pending in waiting:
+        actions.cancel_action(db, pending.id)
+    return "Cancelled: " + "; ".join(p.summary or "that" for p in waiting)
 
 
 def _mute(db, argument: str) -> str:
@@ -260,14 +272,25 @@ def format_reply(result: dict) -> str:
             text += "/undo to reverse (a sent message cannot be undone)"
         else:
             text += "/undo to reverse"
-    if result.get("pending"):
+    waiting = result.get("pending") or []
+    if len(waiting) == 1:
         text += "\nReply /yes to confirm or /no."
+    elif waiting:
+        listed = "\n".join(f"{n}. {p.get('summary') or 'an action'}" for n, p in enumerate(waiting, 1))
+        text += (f"\n{len(waiting)} things are waiting for an answer:\n{listed}\n"
+                 "/yes takes one thing at a time, so it will not confirm these. /no cancels them all.")
     return text
 
 
 def _turn(db, chat_id, text: str) -> str:
     import orchestrator
     session_id = _session_id(chat_id)
+    # The conversation has moved on: whatever an earlier turn proposed is no longer what a
+    # /yes would be about. It stays pending for the app; Telegram lets go of it.
+    db.query(models.PendingAction).filter(
+        models.PendingAction.status == "pending", models.PendingAction.thread_id.like("telegram:%"),
+    ).update({models.PendingAction.thread_id: None}, synchronize_session=False)
+    db.commit()
     result = orchestrator.run_turn(text, db, source="telegram", session_id=session_id)
     ids = [p["id"] for p in result.get("pending") or []]
     if ids:

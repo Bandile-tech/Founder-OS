@@ -4035,6 +4035,7 @@ async function renderPipeline(){
     <p class="hint">Nothing is sent until you approve it. To change a draft, tell Founder OS what to change.</p>
     <div class="mt-3">${drafts.map(d=>`<div class="result draft" id="draft-${Number(d.id)}">
       <div class="cluster"><b>${escHtml(d.lead_name||"Lead")}</b><span class="badge badge--muted">${escHtml(d.channel)}</span>${Number(d.version)>1?`<span class="badge badge--muted">v${Number(d.version)}</span>`:""}</div>
+      <div class="row-sub wrap">${d.recipient?"To "+escHtml(d.recipient):(d.channel==="whatsapp"||d.channel==="email"?"No "+(d.channel==="email"?"email address":"number")+" on file":"You send this one yourself")}</div>
       ${d.subject?`<div class="draft-subject">${escHtml(d.subject)}</div>`:""}
       <div class="draft-body">${escHtml(d.body||"")}</div>
       <div class="cluster mt-3">

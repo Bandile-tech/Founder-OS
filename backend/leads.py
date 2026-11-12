@@ -151,6 +151,8 @@ def serialize_message(db: Session, m: models.OutreachMessage, *, lead_name: bool
     if lead_name:
         lead = db.query(models.Lead).filter(models.Lead.id == m.lead_id).first()
         out["lead_name"] = lead.name if lead else None
+        import outreach_channels
+        out["recipient"] = outreach_channels.recipient(lead, m.channel)     # where it would go, shown before approval
     return out
 
 

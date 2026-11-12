@@ -84,14 +84,19 @@ def propose_delete(db: Session, table: str, record_id: int, reason: str | None =
     obj = db.query(model).filter(model.id == int(record_id)).first()
     if obj is None:
         raise ValueError(f"{table}#{record_id} not found")
-    # Reuse an open proposal for the same row rather than stacking duplicates.
-    existing = db.query(models.PendingAction).filter(
+    # Reuse an open DELETE proposal for the same row rather than stacking duplicates. Only a
+    # delete: a draft with a send waiting has a pending action on the same row, and handing
+    # that back would turn the yes to "delete it?" into a send.
+    open_for_row = db.query(models.PendingAction).filter(
         models.PendingAction.table_name == table,
         models.PendingAction.record_id == int(record_id),
         models.PendingAction.status == "pending",
-    ).first()
-    if existing:
-        return _pending_dict(existing)
+    ).all()
+    for other in open_for_row:
+        if (other.kind or "delete") == "delete":
+            return _pending_dict(other)
+    for other in open_for_row:                 # he wants the row gone: whatever else was waiting on it is off
+        other.status, other.resolved_at = "cancelled", datetime.utcnow()
     p = models.PendingAction(
         created_at=datetime.utcnow(), thread_id=thread_id, kind="delete",
         table_name=table, record_id=int(record_id),
@@ -157,9 +162,14 @@ def confirm_action(db: Session, pending_id: int, *, human: bool = False) -> dict
         return {**_pending_dict(p), "executed": False, "reason": f"unknown action kind '{kind}'"}
     if kind in _NEEDS_LATER_MESSAGE and not human:
         import outreach
+        if not outreach._is_newest_proposal(db, p):
+            return {**_pending_dict(p), "executed": False,
+                    "error": "something else was proposed after this send, so a yes is not about it. "
+                             "Call request_send again and ask Bandile for a plain yes"}
         if not outreach.confirmed_in_a_later_message(db, p):
             return {**_pending_dict(p), "executed": False,
-                    "error": "confirmation must come in a later message"}
+                    "error": "confirmation must come in a later message, and that message must be a "
+                             "plain yes from Bandile. Ask him; he can also tap Approve & send"}
     outcome = executor(db, p)
     p.status = outcome.pop("status", "confirmed" if outcome.get("executed") else "cancelled")
     p.resolved_at = datetime.utcnow()

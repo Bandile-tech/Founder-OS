@@ -140,9 +140,15 @@ def send(db: Session, *, to: str, subject: str, body: str, reply_to: str | None 
     message is stored as an ``out`` row (headers and a snippet). The caller commits."""
     if not configured():
         return {"ok": False, "message_id": None, "error": NOT_CONFIGURED}
-    recipient = parseaddr(_one_line(to))[1].lower()
-    if not _ADDRESS.match(recipient):
-        return {"ok": False, "message_id": None, "error": f"'{_one_line(to)[:80]}' is not an email address"}
+    # One address, and no second one hiding in the display name: a value like
+    # "a@b.example" <someone@else.example> would be sent to the second while the first is shown,
+    # so the value must be a bare address, or a plain name with one. A "name" that is itself
+    # an address, or a list, is refused.
+    raw = _one_line(to).strip()
+    name, recipient = parseaddr(raw)
+    recipient = recipient.lower()
+    if "@" in name or "," in raw or ";" in raw or not _ADDRESS.match(recipient):
+        return {"ok": False, "message_id": None, "error": f"'{raw[:80]}' is not an email address"}
     text = str(body or "").strip()
     if not text:
         return {"ok": False, "message_id": None, "error": "an email needs a body"}

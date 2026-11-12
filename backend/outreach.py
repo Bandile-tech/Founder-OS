@@ -14,6 +14,7 @@ message than the request. Every step is in the change log.
 """
 
 import json
+import re
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -139,14 +140,41 @@ def _close_pending(db: Session, message: models.OutreachMessage, status: str = "
         p.resolved_at = datetime.utcnow()
 
 
-def _latest_user_message_id(db: Session) -> int:
-    row = db.query(models.ChatMessage).filter(
+def _latest_user_message(db: Session):
+    return db.query(models.ChatMessage).filter(
         models.ChatMessage.role == "user").order_by(models.ChatMessage.id.desc()).first()
+
+
+def _latest_user_message_id(db: Session) -> int:
+    row = _latest_user_message(db)
     return row.id if row else 0
 
 
+def _is_newest_proposal(db: Session, pending: models.PendingAction) -> bool:
+    """True when nothing has been proposed since: a yes answers the last thing asked."""
+    newest = db.query(models.PendingAction.id).order_by(models.PendingAction.id.desc()).first()
+    return newest is not None and newest[0] == pending.id
+
+
+def approval_text(db: Session, message: models.OutreachMessage) -> str:
+    """What Bandile is being asked to approve, written by the code and not by the model:
+    the channel, who it goes to, and the whole text."""
+    lead = _lead_of(db, message)
+    to = outreach_channels.recipient(lead, message.channel)
+    who = (lead.name if lead else "the lead") + (f" <{to}>" if to else "")
+    label = {"whatsapp": "WhatsApp", "email": "Email", "linkedin": "LinkedIn message"}.get(
+        message.channel, message.channel.capitalize())
+    lines = [f"Waiting for your yes. Nothing has been sent.", f"{label} to {who}"]
+    if message.subject:
+        lines.append(f"Subject: {message.subject}")
+    lines.append(message.body or "")
+    return "\n".join(lines)
+
+
 def request_send(db: Session, message: models.OutreachMessage) -> dict:
-    """Ask for approval to send. Creates (or reuses) a pending action. Sends nothing."""
+    """Ask for approval to send. Creates a pending action (or returns the open one while it
+    is still the last thing proposed). Sends nothing. The recipient as it stands now is
+    recorded: the approval is for this text to this address, and nothing else."""
     import actions
     if message.status not in SENDABLE:
         raise ValueError(f"this message is {message.status}; only a draft can be sent")
@@ -155,13 +183,18 @@ def request_send(db: Session, message: models.OutreachMessage) -> dict:
         existing = db.query(models.PendingAction).filter(
             models.PendingAction.id == message.pending_action_id).first()
         if existing is not None and existing.status == "pending":
-            return actions._pending_dict(existing)
+            if _is_newest_proposal(db, existing):
+                return actions._pending_dict(existing)
+            # Something else has been proposed since. Ask afresh, so that the yes which
+            # follows is plainly about this send.
+            existing.status, existing.resolved_at = "cancelled", datetime.utcnow()
     p = models.PendingAction(
         created_at=datetime.utcnow(), kind="send_outreach", table_name="outreach_messages",
         record_id=message.id,
         summary=f"Send {message.channel} to {lead.name if lead else 'lead'}: {(message.subject or message.body)[:60]}",
         payload_json=json.dumps({"message_id": message.id,
-                                 "after_message_id": _latest_user_message_id(db)}),
+                                 "after_message_id": _latest_user_message_id(db),
+                                 "to": outreach_channels.recipient(lead, message.channel)}),
         status="pending",
         expires_at=datetime.utcnow() + timedelta(hours=actions.PENDING_TTL_HOURS),
         batch_id=change_log.current_batch_id(db),
@@ -173,15 +206,37 @@ def request_send(db: Session, message: models.OutreachMessage) -> dict:
     return actions._pending_dict(p)
 
 
+_YES = re.compile(
+    r"^\W*(yes|yep|yeah|yup|ok|okay|sure|confirm|confirmed|approve|approved|go ahead|go for it|do it|"
+    r"please do|proceed|send it|send)\b", re.I)
+_NOT_A_YES = re.compile(
+    r"\b(no|not|don'?t|do not|wait|but|stop|cancel|change|edit|instead|first|later|hold)\b|\?", re.I)
+
+
+def reads_as_yes(text: str | None) -> bool:
+    """A short, plain yes: "yes", "ok send it", "go ahead". Anything longer, hedged, asked
+    as a question or typed as a command is not one. Deliberately strict: when in doubt the
+    answer is no, and Bandile can tap Approve & send."""
+    said = (text or "").strip()
+    if not said or said.startswith("/") or len(said) > 60:
+        return False
+    found = _YES.match(said)
+    if not found or _NOT_A_YES.search(said):
+        return False
+    # "send" on its own is a yes; "send the report to Wamu" is a new instruction.
+    return found.group(1).lower() != "send" or len(said.split()) <= 2
+
+
 def confirmed_in_a_later_message(db: Session, pending: models.PendingAction) -> bool:
-    """True when Bandile has said something since the send was requested. A request and its
-    confirmation in the same turn is the model approving its own proposal."""
+    """True when the last thing Bandile said is a plain yes, said after the send was asked
+    for. A request and its confirmation in one turn is the model approving its own proposal;
+    a later message about something else is not an approval either."""
     try:
         after = int(json.loads(pending.payload_json or "{}").get("after_message_id") or 0)
     except (ValueError, TypeError):
         after = 0
-    return db.query(models.ChatMessage).filter(
-        models.ChatMessage.role == "user", models.ChatMessage.id > after).first() is not None
+    last = _latest_user_message(db)
+    return last is not None and last.id > after and reads_as_yes(last.content)
 
 
 def execute_send(db: Session, message: models.OutreachMessage) -> dict:
@@ -197,8 +252,23 @@ def execute_send(db: Session, message: models.OutreachMessage) -> dict:
         raise ValueError("the lead for this message no longer exists")
     now = datetime.utcnow()
     before = change_log.snapshot(message)
-    message.status, message.approved_at = "approved", message.approved_at or now
-    outcome = outreach_channels.get_channel(message.channel).send(db, message, lead)
+    # Claim the message before anything leaves: one UPDATE that only succeeds while it is
+    # still a draft, committed so that another approval arriving now (a tap on a second
+    # device, /yes beside a tap) finds it taken and stops. Without this both would send.
+    claimed = db.query(models.OutreachMessage).filter(
+        models.OutreachMessage.id == message.id, models.OutreachMessage.status.in_(SENDABLE),
+    ).update({models.OutreachMessage.status: "sending", models.OutreachMessage.approved_at: now},
+             synchronize_session=False)
+    db.commit()
+    if claimed != 1:
+        raise ValueError("this message is already being sent")
+    db.refresh(message)
+    try:
+        outcome = outreach_channels.get_channel(message.channel).send(db, message, lead)
+    except Exception as exc:  # noqa: BLE001 — a channel that raises may or may not have sent
+        message.status, message.error, message.updated_at = "failed", f"{type(exc).__name__}"[:200], now
+        db.commit()
+        raise
     changes, extra = [], {}
 
     if not outcome.get("ok"):
@@ -218,6 +288,7 @@ def execute_send(db: Session, message: models.OutreachMessage) -> dict:
             message.external_id = outcome["external_id"]
         _close_pending(db, message, "confirmed")
         changes.append(change_log.record_update(db, message, before, f"Sent {message.channel} to {lead.name[:50]}"))
+        db.commit()         # it has left: that fact is kept even if the bookkeeping below fails
 
         lead_before = change_log.snapshot(lead)
         lead.last_contact_at = now
@@ -254,8 +325,20 @@ def execute_pending(db: Session, pending: models.PendingAction) -> dict:
         return {"executed": False, "reason": "the message no longer exists", "status": "cancelled"}
     if message.status not in SENDABLE:
         return {"executed": False, "reason": f"the message is already {message.status}", "status": "cancelled"}
+    # The yes was for this text to the address shown when the send was asked for.
+    try:
+        approved_to = json.loads(pending.payload_json or "{}").get("to")
+    except (ValueError, TypeError):
+        approved_to = None
+    current_to = outreach_channels.recipient(_lead_of(db, message), message.channel)
+    if approved_to and approved_to != current_to:
+        return {"executed": False, "status": "cancelled",
+                "reason": "the recipient changed after this send was requested; ask for the send again"}
     with change_log.batch_scope(db, "assistant"):
-        result = execute_send(db, message)
+        try:
+            result = execute_send(db, message)
+        except ValueError as exc:
+            return {"executed": False, "reason": str(exc), "status": "cancelled"}
     if not result["sent"]:
         return {"executed": False, "reason": result["error"], "status": "confirmed", "message": result}
     out = {"executed": True, "status": "confirmed", "message": result, "changes": result["changes"],
