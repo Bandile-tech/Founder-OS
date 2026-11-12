@@ -111,3 +111,10 @@ node tests/e2e/screens.js
 
 Both need the `playwright` npm package; set `PW_CHANNEL=msedge` (or `chrome`) to use an
 installed browser instead of Playwright's Chromium.
+
+## Checking an upgrade on PostgreSQL before a merge
+
+`backend/tests/postgres/README.md` has the steps: build a database from main's schema with
+production-like rows, run the branch's startup chain on it, and check the backfills, the
+unchanged rows and row-level security. The same folder says how to run the whole suite on
+Postgres.

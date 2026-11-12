@@ -1092,6 +1092,48 @@ New migration: `m023` (`agent_event_deliveries`, `change_log.undoable`,
 After Part 1: 762 backend tests, the startup chain twice on a fresh SQLite file, and the
 browser smoke tests, all green.
 
+### Part 2 — PostgreSQL 16
+
+PostgreSQL 16.15 (the `postgresql-16` package was already in the container; the cluster was
+started and a non-superuser role created). Three throwaway databases.
+
+a) **Fresh database.** The startup chain ran twice with no error; `Schema OK` both times.
+
+b) **Upgrade from main.** A database was built by main's own startup chain, RLS was turned on
+   as in production (m008), and it was seeded with 5 clients, 10 revenue rows (ZMW, USD, one
+   lower-case `zmw`, one with no currency, two with no client), 4 todos and a chat history
+   with tool calls. Then the branch's startup chain ran on it. Result:
+   - all 5 clients are `ZMW`; none became USD;
+   - 8 payments for the 8 revenue rows that name a client, each `paid`, titled `Imported`,
+     with the revenue row's amount, client, day and currency (6 ZMW-or-USD as stored, the
+     lower-case one as `ZMW`, the one with no currency as `USD`, which is what m012 on main
+     already makes of it); the two revenue rows with no client got none;
+   - one row in `migration_marks`; a second startup added nothing;
+   - the clients' original columns, and every revenue, todo and chat row, are unchanged;
+   - 78 tables, 31 of them new on the branch, row-level security on every one;
+   - the app answers on the upgraded data (`/clients`, `/crm/summary`, `/briefing/today`,
+     `/conversation/history`, `/agents`, `/integrations`, `/portfolio` and more);
+   - an invoice plus a later revenue row, then a restart: the backfill did not touch the new
+     row, and reconciliation marked the invoice paid and linked it.
+   The check is repeatable: `backend/tests/postgres/` (`seed_from_main.py`,
+   `check_upgrade.py`, `README.md`).
+
+c) **The suite on Postgres.** 762 passed with `TEST_DATABASE_URL` (about ten minutes: every
+   test drops and recreates 78 tables).
+
+What failed and was fixed: only the test harness. `conftest.py` terminated every other
+backend in the test database before each test, including the server's own (an autovacuum
+worker), which a role that is not a superuser may not do; 30 tests errored in setup. It now
+terminates only this role's own client connections. No product code failed on Postgres.
+
+Noticed, not changed: on a brand-new database the 33 tables that predate the rebuild have no
+row-level security until `migrations/m008_enable_rls.py` is run by hand (it is not in the
+startup chain, on main either). Production already has it. Every table from m010 onwards
+turns it on itself.
+
+After Part 2: 762 tests on SQLite and on PostgreSQL, the startup chain on both, the smoke
+tests green.
+
 ## External setup — Telegram and YouTube
 
 (The Google Calendar steps are under S18 and the Gmail steps under S19. None of these has

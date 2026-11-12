@@ -106,7 +106,11 @@ except Exception:
 
 def _clear_stale_pg_connections():
     """On Postgres a session a test forgot to close keeps a lock that makes drop_all() wait
-    forever. Terminate every other connection to the test database first."""
+    forever. Terminate every other connection of ours to the test database first.
+
+    Only this role's own client connections: the database also holds backends that belong
+    to the server (an autovacuum worker, say), and a role that is not a superuser may not
+    terminate those, so asking for them fails the whole test."""
     if not _TEST_URL:
         return
     from sqlalchemy import text
@@ -114,7 +118,8 @@ def _clear_stale_pg_connections():
     with engine.connect() as conn:
         conn.execute(text(
             "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-            "WHERE datname = current_database() AND pid <> pg_backend_pid()"
+            "WHERE datname = current_database() AND pid <> pg_backend_pid() "
+            "AND usename = current_user AND backend_type = 'client backend'"
         ))
         conn.commit()
 
