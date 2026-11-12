@@ -1135,6 +1135,70 @@ turns it on itself.
 After Part 2: 762 tests on SQLite and on PostgreSQL, the startup chain on both, the smoke
 tests green.
 
+### Part 3 — independent review of `main..phase-5-6`
+
+Two fresh reviewers with no knowledge of the build read the security-sensitive areas (one:
+the auth exemptions, Telegram pairing and the secret header, Google OAuth state, secrets in
+logs and responses; the other: the outreach approval gate). Undo across agent batches and
+the data-changing migrations were reviewed by the session that did Parts 1 and 2. Every
+finding was checked against the code and reproduced by a test before it was changed.
+
+**Held up.** All three exemptions carry their own check and nothing else is reachable
+without a session (trailing slash, case, encoding, other methods were tried). An unpaired or
+other chat gets no reply and triggers no model call. The OAuth state is single-use, expires
+and cannot be forged; redirects are fixed paths. `secret_json` is never serialized and no
+integration row reaches the change log. No agent, briefing, import or suggestion can reach a
+send. The migrations only fill rows that were NULL, or run once.
+
+**Fixed.**
+
+| Area | What was wrong | Now |
+|---|---|---|
+| Undo | Undoing an old batch (the Agents page offers Undo on runs days old) restored whole rows and deleted created rows: a lead since contacted went back to new, notes were wiped, a completed task was deleted | An update gives back only the columns that change set, and only where its value is still there; a created row is removed only while it is as created. The rest is reported as kept. The app's own refreshes (overdue flags, calendar sync) do not count as changes |
+| Gate | Any later message opened the gate | The last thing Bandile said must be a short plain yes, after the request |
+| Gate | A yes could be spent on an older send | The assistant can only confirm a send while it is the last thing proposed |
+| Gate | `propose_delete` on a draft returned its pending send, so "yes" to "delete it?" sent it | It only reuses a delete proposal, and cancels a send waiting on that row |
+| Gate | Telegram `/yes` fell through to an older proposal, or took the newest of several | It answers only what the last turn proposed and refuses to guess between two |
+| Gate | Nothing guaranteed the text or the recipient had been shown | The code appends the recipient and the whole message to the reply that asks (dock and Telegram); the draft card shows the recipient |
+| Gate | The recipient was read at send time; an address could hide in a display name | A requested send is bound to the address shown; a changed one is refused; `"a@b" <c@d>` is refused |
+| Gate | Two approvals at once sent twice | The message is claimed with one UPDATE (`sending`) before the channel is called |
+| Secrets | A failed commit put the statement's parameters (Google tokens) into `agent_runs.error`, the log and `GET /agents/runs` | Both engines hide parameters; the runner redacts what it keeps, prints and returns |
+| Pairing | The pairing code was derived from the server secret (the password, when `FOUNDER_OS_SECRET` is unset), never changed and still worked after Disconnect | Random, stored, spent when used, hidden while paired |
+| OAuth | The state was signed with the same password-derived key and travels through Google and the access log | Signed with a random key of its own |
+| Secrets | A short `TELEGRAM_WEBHOOK_SECRET` or `JOBS_TOKEN` was accepted | Under 16 characters both are refused; startup warns under 32 |
+| CI | The jobs-tick workflow printed the tick's answer (project and objective names) into the Actions log | The body is discarded |
+
+**Listed, not fixed.**
+- Voice: a spoken request that itself begins with a yes ("yes, send it"), followed by
+  `request_send` and `confirm_action` in the same spoken turn, passes the gate, because the
+  transcript is saved after the request. A tap is unaffected. Closing it means refusing
+  spoken confirmation of sends altogether, which is a product decision.
+- The dock has no card with a Confirm button for a pending send (the endpoint exists). A
+  typed yes rests on the block the code appends to the reply.
+- A second lead with the same name and a different address can still be created by
+  conversation. The address is now shown before approval; nothing blocks the duplicate.
+- A message whose process dies mid-send stays `sending` and is not retried or released.
+- The pairing lockout is per chat and in memory; more than 1,000 chats in rotation reset it.
+  The code is 30 bits and only accepted while nothing is paired (about 2^29 messages).
+- With `FOUNDER_OS_SECRET` unset, session tokens are still signed with a key derived from
+  the password (as on main). Startup now says so; `docs/DEPLOY.md` asks for the secret.
+- `integrations_google.sync` says it never raises, but a failed commit can; the runner
+  records a failed run (now with no parameters in the text).
+- `POST /jobs/tick` still returns agent summaries to its caller.
+- An agent run longer than 30 minutes could be started a second time (the claim's age limit).
+- Undo treats any unlogged change to a touched column as "changed afterwards", except the
+  refreshes it knows about. That is the careful side: it may refuse an undo, never lose data.
+- Not re-read line by line in this review: the business logic of the CRM, leads, brand,
+  portfolio, applications and market-intelligence modules, and the frontend beyond the parts
+  changed here. They are covered by the suite, not by a second pair of eyes.
+
+After Part 3: 780 backend tests on SQLite, the startup chain on SQLite and on a fresh
+PostgreSQL 16 database, the upgrade check from main on PostgreSQL, the browser smoke tests
+and the layout checks at four sizes. The full suite on PostgreSQL at the final commit: see
+the line below.
+
+PostgreSQL suite at the final commit: running when this was written.
+
 ## External setup — Telegram and YouTube
 
 (The Google Calendar steps are under S18 and the Gmail steps under S19. None of these has
