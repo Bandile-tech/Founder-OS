@@ -4,8 +4,13 @@ Branch `phase-5-6`, cut from `main` at `15bdbfd` (which already contains the ass
 current-data fix and the tool-call history sanitiser). One commit per session, pushed as it
 lands. Nothing here is merged into `main`.
 
-**Resume here:** read the last entry under "Sessions" and start the next item in the order
-below. Run the checks before starting; do not start a session while anything is red.
+**State on 12 November 2026:** every session in the order below is built, committed and
+pushed. The last full run was green: 721 backend tests, the startup chain, the browser smoke
+tests and the layout checks. Not done: the suite and the startup chain on PostgreSQL (this
+machine has no PostgreSQL server and no Docker, only the `pg_dump` client), any check against
+the live Telegram, Google, Gmail or YouTube services, and an independent review of the branch.
+What is left is under "Follow-ups noticed", the "Limits to know" of each session, and
+`ROADMAP.md`.
 
 ## Order
 
@@ -1070,6 +1075,22 @@ service after deployment.
   inactivity rule. Moot while the schedule is switched off; check before switching it on.
 - 6B Render: the free tier's HTTP request timeout (the tick budget of 80 seconds assumes at
   least 100) and current spin-down behaviour. Not checked.
+- 6D Telegram: `sendMessage` and its 4,096-character limit (messages are split at 4,000);
+  the `setWebhook` parameters `url`, `secret_token` and `allowed_updates`; the header
+  `X-Telegram-Bot-Api-Secret-Token`; how long Telegram waits for the webhook to answer and
+  whether it retries (the webhook answers at once and drops repeated `update_id`s). Not
+  checked against the live Bot API.
+- 6C Google OAuth: that an unverified app "In production" with the `calendar.events` scope
+  lets its owner through the warning screen, and that its refresh tokens do not expire as
+  they do in Testing; the token endpoint's fields and the `invalid_grant` error; the revoke
+  endpoint. Not checked. Fallback if Google blocks it: a read-only sync from the calendar's
+  private ICS address, which is not built.
+- 6C Google Calendar API v3: `start.dateTime`, `start.date` for all-day events, `end`,
+  `summary`, `status`, `htmlLink`, `updated`, `nextPageToken`. Marked `# VERIFY` in
+  `backend/integrations_google.py`. Not checked.
+- 6C Gmail: that App Passwords are still offered with 2-Step Verification, that IMAP is
+  enabled, the `X-GM-THRID` fetch item and the `BODY.PEEK[TEXT]<0.2000>` syntax. Not
+  checked.
 
 ## Follow-ups noticed
 
