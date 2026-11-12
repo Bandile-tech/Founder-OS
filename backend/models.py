@@ -1071,6 +1071,18 @@ class AgentEvent(Base):
     source       = Column(String, nullable=True)
 
 
+class AgentEventDelivery(Base):
+    """An event handed to one subscriber. An event is consumed once every enabled
+    subscriber has a row here, so an agent the tick deferred still gets it next time."""
+    __tablename__ = "agent_event_deliveries"
+    __table_args__ = (Index("ux_agent_event_deliveries", "event_id", "agent_key", unique=True),)
+
+    id           = Column(Integer, primary_key=True, index=True)
+    event_id     = Column(Integer, nullable=False)
+    agent_key    = Column(String, nullable=False)
+    delivered_at = Column(DateTime, nullable=True)
+
+
 class MigrationMark(Base):
     """A data migration that must run once, not on every startup, leaves its key here
     (``migrations._helpers.claim_once``)."""

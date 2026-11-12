@@ -881,3 +881,58 @@ def test_a_failed_run_releases_its_claim():
     db = _db()
     assert db.query(models.Agent).filter_by(key="fails").one().claimed_at is None
     db.close()
+
+
+# ── Review round: an event reaches every subscriber (item 13) ─
+
+def test_a_deferred_subscriber_still_receives_the_event(monkeypatch):
+    """lead.replied has two subscribers (the follow-up sentinel and the alert courier). The
+    event was marked consumed as soon as one of them ran, so a subscriber the tick deferred
+    never saw it and the alert was never sent."""
+    got = {"sentinel": [], "alert_courier": []}
+
+    def listener(name):
+        def run(ctx):
+            got[name].append(sorted(json.loads(e.payload_json)["lead_id"] for e in ctx.events))
+            return AgentResult(summary=f"saw {len(ctx.events)}")
+        return run
+
+    _spec("sentinel", listener("sentinel"), schedule_=Schedule(), events=["lead.replied"])
+    _spec("alert_courier", listener("alert_courier"), schedule_=Schedule(), events=["lead.replied", "payment.overdue"])
+    db = _db()
+    event = agents.emit(db, "lead.replied", {"lead_id": 7}, source="test")
+    db.commit()
+    event_id = event.id
+
+    monkeypatch.setenv("JOBS_TICK_BUDGET", "0")                  # room for one agent a tick
+    first = runner.tick("manual")
+    assert [r["key"] for r in first["ran"]] == ["sentinel"] and first["deferred"] == ["alert_courier"]
+    assert first["events_consumed"] == 0                         # one subscriber is still waiting
+    db.expire_all()
+    assert db.query(models.AgentEvent).filter_by(id=event_id).one().consumed_at is None
+    assert [(d.event_id, d.agent_key) for d in db.query(models.AgentEventDelivery).all()] == [(event_id, "sentinel")]
+
+    second = runner.tick("manual", now=datetime.utcnow() + timedelta(minutes=16))
+    assert [r["key"] for r in second["ran"]] == ["alert_courier"]            # the sentinel is not handed it again
+    assert second["events_consumed"] == 1
+    assert got == {"sentinel": [[7]], "alert_courier": [[7]]}
+    db.expire_all()
+    assert db.query(models.AgentEvent).filter_by(id=event_id).one().consumed_at is not None
+
+    third = runner.tick("manual", now=datetime.utcnow() + timedelta(minutes=32))
+    assert third["ran"] == [] and got == {"sentinel": [[7]], "alert_courier": [[7]]}
+    db.close()
+
+
+def test_a_disabled_or_missing_subscriber_does_not_hold_an_event_forever():
+    seen = []
+    _spec("on", lambda ctx: seen.append(len(ctx.events)) or AgentResult(summary="ok"),
+          schedule_=Schedule(), events=["lead.replied"])
+    _spec("off", lambda ctx: AgentResult(summary="never"), schedule_=Schedule(), events=["lead.replied"], enabled=False)
+    db = _db()
+    agents.emit(db, "lead.replied", {"lead_id": 1})
+    db.commit()
+    out = runner.tick("manual")
+    assert [r["key"] for r in out["ran"]] == ["on"] and seen == [1] and out["events_consumed"] == 1
+    assert db.query(models.AgentEvent).one().consumed_at is not None          # the switched-off agent is not waited for
+    db.close()

@@ -232,8 +232,19 @@ def run_agent(spec, trigger: str = "manual", event_ids: list[int] | None = None,
         row.runs_count = (row.runs_count or 0) + 1
         row.cost_usd_total = round((row.cost_usd_total or 0.0) + run.cost_usd, 6)
         row.updated_at = datetime.utcnow()
+        # The events were handed to this agent (whatever became of the run): say so, in the
+        # same commit as the run's outcome. Other subscribers still have theirs to come.
+        handed = [e.id for e in events]
+        if handed:
+            have = {d.event_id for d in db.query(models.AgentEventDelivery).filter(
+                models.AgentEventDelivery.agent_key == spec.key,
+                models.AgentEventDelivery.event_id.in_(handed)).all()}
+            for event_id in handed:
+                if event_id not in have:
+                    db.add(models.AgentEventDelivery(event_id=event_id, agent_key=spec.key,
+                                                     delivered_at=datetime.utcnow()))
         db.commit()
-        return serialize_run(run)
+        return {**serialize_run(run), "event_ids": handed}
     except Exception as exc:  # noqa: BLE001 — the runner never raises
         print(f"[agents] runner error for {spec.key}: {type(exc).__name__}: {exc}")
         try:
@@ -264,6 +275,14 @@ def run_agent(spec, trigger: str = "manual", event_ids: list[int] | None = None,
 
 
 # ── The tick ─────────────────────────────────────────────────
+
+def _deliveries(db, event_ids: list[int]) -> set:
+    """{(event id, agent key)} for the events given: who has already been handed what."""
+    if not event_ids:
+        return set()
+    rows = db.query(models.AgentEventDelivery).filter(models.AgentEventDelivery.event_id.in_(event_ids)).all()
+    return {(d.event_id, d.agent_key) for d in rows}
+
 
 def due_now(db, now: datetime | None = None) -> list[str]:
     """Keys of the enabled agents whose schedule says they are due (events aside)."""
@@ -300,6 +319,10 @@ def tick(trigger: str = "manual", *, now: datetime | None = None) -> dict:
         fresh = [e for e in pending if e.created_at >= cutoff]
         stale = [e for e in pending if e.created_at < cutoff]
         fresh_by_id = {e.id: e.kind for e in fresh}
+        # An event goes to every subscriber, and each gets it once: what has already been
+        # handed over is on record, so a subscriber this tick defers gets it next time.
+        handed = _deliveries(db, list(fresh_by_id))
+        listening: dict[str, set] = {}          # event kind → the enabled agents that subscribe to it
 
         plan = []          # (spec, trigger, event ids)
         for spec in agents.ordered_specs():
@@ -307,7 +330,10 @@ def tick(trigger: str = "manual", *, now: datetime | None = None) -> dict:
             if not row.enabled:
                 summary["skipped"].append({"key": spec.key, "reason": "disabled"})
                 continue
-            matching = [eid for eid, kind in fresh_by_id.items() if kind in (spec.events or [])]
+            for kind in spec.events or []:
+                listening.setdefault(kind, set()).add(spec.key)
+            matching = [eid for eid, kind in fresh_by_id.items()
+                        if kind in (spec.events or []) and (eid, spec.key) not in handed]
             scheduled = schedule.due(spec, row, now_local)
             if not scheduled and not matching:
                 continue
@@ -317,7 +343,6 @@ def tick(trigger: str = "manual", *, now: datetime | None = None) -> dict:
             plan.append((spec, trigger if scheduled else "event", matching))
         db.commit()
 
-        delivered: set[int] = set()
         for index, (spec, why, event_ids) in enumerate(plan):
             if index > 0 and (time.monotonic() - started) >= budget:
                 summary["deferred"].append(spec.key)
@@ -335,6 +360,8 @@ def tick(trigger: str = "manual", *, now: datetime | None = None) -> dict:
                 waiting = [e.id for e in run_db.query(models.AgentEvent).filter(
                     models.AgentEvent.id.in_(event_ids), models.AgentEvent.consumed_at.is_(None)).all()
                 ] if event_ids else []
+                already = _deliveries(run_db, waiting)
+                waiting = [eid for eid in waiting if (eid, spec.key) not in already]
                 return waiting or None
 
             outcome = run_agent(spec, how, event_ids, tick_id=tick_row.id, now=now, still_due=still_due)
@@ -346,16 +373,23 @@ def tick(trigger: str = "manual", *, now: datetime | None = None) -> dict:
                                    "summary": outcome.get("summary")})
             if outcome.get("status") in ("failed", "violation"):
                 summary["errors"] += 1
-            delivered.update(event_ids)
 
+        # An event is consumed once every enabled subscriber has been handed it. One with
+        # no subscriber waits; one older than a day is dropped.
         stamp = datetime.utcnow()
+        db.expire_all()
+        handed = _deliveries(db, list(fresh_by_id))
+        stale_ids = {e.id for e in stale}
         for event in db.query(models.AgentEvent).filter(
-                models.AgentEvent.id.in_(list(delivered) + [e.id for e in stale])).all() if (delivered or stale) else []:
-            event.consumed_at = stamp
-            if event.id not in delivered:
-                event.dropped = True
+                models.AgentEvent.id.in_(list(fresh_by_id) + list(stale_ids)),
+                models.AgentEvent.consumed_at.is_(None)).all() if (fresh_by_id or stale_ids) else []:
+            if event.id in stale_ids:
+                event.consumed_at, event.dropped = stamp, True
                 summary["events_dropped"] += 1
-            else:
+                continue
+            wanted = listening.get(event.kind) or set()
+            if wanted and all((event.id, key) in handed for key in wanted):
+                event.consumed_at = stamp
                 summary["events_consumed"] += 1
 
         summary["duration_ms"] = int((time.monotonic() - started) * 1000)

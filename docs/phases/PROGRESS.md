@@ -437,7 +437,10 @@ Decisions where the spec was silent:
 - `agent_runs.trigger` is `schedule` for the external tick, `in_process` for the in-process
   one, `manual` for a manual tick or Run now, and `event` when only an event made it due.
 - An event stays unconsumed until an agent that subscribes to it actually runs; after 24
-  hours it is marked consumed and `dropped`.
+  hours it is marked consumed and `dropped`. (Corrected in the review round: with two
+  subscribers the event was consumed when the first one ran, so a subscriber the tick
+  deferred never got it. Each hand-over is now a row in `agent_event_deliveries`, and an
+  event is consumed once every enabled subscriber has one.)
 - A failed run rolls back whatever it had not committed; what it had committed stays and is
   undoable from the run's batch. The audit runs for failed runs as well.
 - `chat_text` goes through `chat_completion`, so one call counts once against the cap.
