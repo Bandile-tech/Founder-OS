@@ -1064,3 +1064,42 @@ def test_run_turn_returns_the_same_things_a_dock_turn_saves():
     assert [p["table"] for p in out["pending"]] == ["todos"] and out["changes"] == []
     assert conversation.thread_rows(db)[-1].session_id == conversation.DEFAULT_THREAD_ID
     db.close()
+
+
+# ── Review round: /yes on a WhatsApp send ────────────────────
+
+def _whatsapp_draft(db, number="0977 123 456", body="Hi Mercy, quick question about stock alerts."):
+    import leads
+    import outreach
+    lead, _deduped, _change = leads.create_lead(db, {"name": "Mercy Banda", "company": "Sunrise Pharmacy",
+                                                    "whatsapp": number})
+    db.commit()
+    with patch("llm.chat_text", return_value=body):
+        draft = outreach.draft(db, lead, "whatsapp", "intro")
+    db.commit()
+    return lead, draft["id"]
+
+
+def test_yes_on_a_whatsapp_send_replies_with_the_link_to_tap(hook, sends):
+    """Review item 8: WhatsApp has no API here, so approving a send only produces a wa.me
+    link; the tap is the send. /yes used to answer "Done" with no link, so the message was
+    marked sent and never left."""
+    db = _db()
+    _pair(db)
+    _lead, message_id = _whatsapp_draft(db)
+
+    rounds = [_tool_round("request_send", {"message_id": message_id}), _final_round("Shall I send it to Mercy?")]
+    with patch("openai_client._stream_completion", _scripted(rounds)):
+        hook("send Mercy the intro")
+    assert _texts(sends)[-1] == "Shall I send it to Mercy?\nReply /yes to confirm or /no."
+    assert db.query(models.OutreachMessage).one().status == "draft"            # nothing has left
+
+    hook("/yes")
+    db.expire_all()
+    reply = _texts(sends)[-1]
+    link = "https://wa.me/260977123456?text=Hi%20Mercy%2C%20quick%20question%20about%20stock%20alerts."
+    assert link in reply and "Tap" in reply
+    assert db.query(models.OutreachMessage).one().status == "sent"
+    saved = db.query(models.ChatMessage).filter_by(role="assistant").order_by(models.ChatMessage.id.desc()).first()
+    assert link in saved.content                                               # the thread remembers the link too
+    db.close()

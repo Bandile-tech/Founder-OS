@@ -167,6 +167,10 @@ def _yes(db) -> tuple[str, list]:
     if outcome.get("executed"):
         change = outcome.get("change")
         changes = outcome.get("changes") or ([change] if isinstance(change, dict) else [])
+        if outcome.get("open_url"):
+            # WhatsApp has no API here: approving only builds the link. The tap is the send.
+            return (f"Approved: {summary}\nTap to open WhatsApp and send it:\n{outcome['open_url']}"
+                    "\n/undo to reverse"), changes
         return f"Done: {summary}\n/undo to reverse", changes
     return f"Not done: {outcome.get('reason') or outcome.get('error') or 'it could not be carried out'}", []
 
