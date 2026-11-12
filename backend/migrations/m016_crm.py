@@ -7,13 +7,16 @@ New tables:
   contacts, deals, projects, payments, recurring_revenue, communications
   (projects carries every column the portfolio needs as well)
 
-Backfills (Python, row by row, re-runnable):
+Backfills (Python, row by row):
   * clients.currency  — rows that predate the column get DEFAULT_CURRENCY (ZMW unless the
     variable says USD), the same value new rows get from the ORM. The column is added
     without a SQL default so those rows are the ones with NULL.
   * payments          — every revenue row with a client_id gets one paid payment
-    (title 'Imported') in that revenue row's own currency, whatever the client's is,
-    matched by revenue_id so a second run adds nothing.
+    (title 'Imported') in that revenue row's own currency, whatever the client's is.
+    This runs ONCE per database, at migration time (``claim_once``), not on every startup:
+    a revenue row logged later belongs to ``crm.reconcile``, which matches it to the open
+    invoice it paid. Run on every start, the backfill got there first and the invoice
+    stayed open.
 
 SQLite + Postgres. Idempotent. No drops. RLS enabled on the new tables (Postgres).
 """
@@ -27,7 +30,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from sqlalchemy import text
 
 from database import engine
-from migrations._helpers import (dialect, add_column_if_missing, create_table_if_missing,
+from migrations._helpers import (dialect, add_column_if_missing, claim_once, create_table_if_missing,
                                  create_index, enable_rls, table_exists)
 
 TAG = "m016"
@@ -195,6 +198,13 @@ def _backfill_payments(conn, d: str) -> int:
     return done
 
 
+def _backfill_payments_once(conn, d: str) -> int:
+    """The payment backfill, the first time this database is migrated and never again."""
+    if not claim_once(conn, d, "m016_payments_backfill", TAG):
+        return 0
+    return _backfill_payments(conn, d)
+
+
 def run(db=None):
     conn = engine.connect()
     try:
@@ -213,7 +223,7 @@ def run(db=None):
             ))
             enable_rls(conn, d, list(_TABLES), TAG)
             currencies = _backfill_client_currency(conn, d)
-            payments = _backfill_payments(conn, d)
+            payments = _backfill_payments_once(conn, d)
             if currencies:
                 print(f"[{TAG}] Set the default currency on {currencies} existing client(s).")
             if payments:

@@ -138,6 +138,54 @@ def test_a_client_with_no_currency_reads_as_the_default_not_usd(monkeypatch):
     assert made["currency"] == "ZMW"
 
 
+def test_m016_payment_backfill_runs_once_so_it_never_preempts_reconcile():
+    """Review item 7: the backfill ran on every startup. A revenue row logged after the
+    migration got an 'Imported' paid payment at the next restart, so crm.reconcile never
+    matched it to the invoice it paid and the invoice stayed open."""
+    from migrations import m016_crm as m016
+    from migrations._helpers import dialect
+
+    def startup_backfill():
+        with engine.connect() as conn:
+            with conn.begin():
+                return m016._backfill_payments_once(conn, dialect(conn, "test"))
+
+    db = _db()
+    c = _client(db, "Hope Clinic")
+    cid = c.id
+    db.add(models.Revenue(amount=150, currency="USD", source="Hope Clinic", client_id=cid,
+                          date=TODAY - timedelta(days=40)))
+    db.commit()
+    assert startup_backfill() == 1                      # the migration: history becomes payments
+    assert startup_backfill() == 0
+
+    # Afterwards: an invoice, then the money logged in conversation as plain revenue.
+    invoice = crm.record_payment(db, c, 500, "ZMW", status="due", title="November retainer")
+    db.add(models.Revenue(amount=500, currency="ZMW", source="Hope Clinic", client_id=cid, date=TODAY))
+    db.commit()
+    db.close()
+
+    assert startup_backfill() == 0                      # a restart adds nothing
+
+    db = _db()
+    assert crm.reconcile(db) == 1                       # reconciliation settles the invoice
+    db.commit()
+    payments = db.query(models.Payment).order_by(models.Payment.id).all()
+    assert [(p.title, p.status, p.amount) for p in payments] == [
+        ("Imported", "paid", 150), ("November retainer", "paid", 500)]
+    assert payments[1].id == invoice["id"] and payments[1].revenue_id is not None
+    mark = db.query(models.MigrationMark).one()
+    assert mark.key == "m016_payments_backfill" and mark.applied_at is not None
+    db.close()
+
+
+def test_m016_run_is_safe_to_repeat_on_the_app_database():
+    from migrations import m016_crm as m016
+
+    m016.run()
+    m016.run()
+
+
 # ── 6. winning a deal creates its project once ────────────────
 
 def test_won_deal_creates_one_project_linked_both_ways():

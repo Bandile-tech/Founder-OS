@@ -570,7 +570,7 @@ anything. RLS enabled on every new table on Postgres (m008 convention).
 | m013 | `syllabus_points`, `briefing_summaries` |
 | m014 | Phase 5A: `research_objectives`; columns on `research_projects`, `research_findings`, `opportunity_pipeline`; a Python backfill of `recommendation` |
 | m015 | Phase 5B: `leads`, `lead_imports`, `outreach_messages`; `todos.lead_id`, `todos.client_id` |
-| m016 | Phase 5C: `contacts`, `deals`, `projects`, `payments`, `recurring_revenue`, `communications`; `clients.lead_id/currency/tags/health`. **Backfills**: existing clients become `USD`; every revenue row with a client gets one paid payment (matched by `revenue_id`, so re-running adds nothing). Back up before the first production run |
+| m016 | Phase 5C: `contacts`, `deals`, `projects`, `payments`, `recurring_revenue`, `communications`; `clients.lead_id/currency/tags/health`. **Backfills**: existing clients get `DEFAULT_CURRENCY` (ZMW); every revenue row with a client gets one paid payment in that revenue row's own currency. The payment backfill runs once per database (a row in `migration_marks`), never on a later startup, so it cannot get ahead of `crm.reconcile`. Back up before the first production run |
 | m017 | Phase 5D: `social_accounts`, `content_posts`, `content_metrics`, `account_metrics`, `content_ideas`, `brand_insights` |
 | m018 | Phase 5E: `project_updates` |
 | m019 | Phase 6A: `applications`, `application_requirements`, `application_gaps` |

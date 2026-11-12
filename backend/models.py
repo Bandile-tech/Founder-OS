@@ -1068,6 +1068,15 @@ class AgentEvent(Base):
     source       = Column(String, nullable=True)
 
 
+class MigrationMark(Base):
+    """A data migration that must run once, not on every startup, leaves its key here
+    (``migrations._helpers.claim_once``)."""
+    __tablename__ = "migration_marks"
+
+    key        = Column(String, primary_key=True)
+    applied_at = Column(DateTime, nullable=True)
+
+
 class JobTick(Base):
     """One row per tick. trigger: github|manual|in_process."""
     __tablename__ = "job_ticks"
