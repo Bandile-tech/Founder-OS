@@ -991,13 +991,18 @@ class FakeIMAP:
         self.calls.append(("select", box, readonly))
         return "OK", [str(len(self.messages)).encode()]
 
-    def search(self, charset, *criteria):
-        self.calls.append(("search", criteria))
-        return "OK", [" ".join(str(n + 1) for n in range(len(self.messages))).encode()]
+    def response(self, code):
+        return code, [b"7"] if code == "UIDVALIDITY" else [None]
 
-    def fetch(self, number, items):
+    def uid(self, command, *args):
+        """UID SEARCH and UID FETCH: a message's UID is its place in the mailbox, from 1."""
+        if command.upper() == "SEARCH":
+            self.calls.append(("search", args))
+            return "OK", [" ".join(str(n + 1) for n in range(len(self.messages))).encode()]
+        uid, items = args
         self.calls.append(("fetch", items))
-        return "OK", self.messages[int(number) - 1]
+        self.fetched = getattr(self, "fetched", []) + [int(uid)]
+        return "OK", self.messages[int(uid) - 1]
 
     def logout(self):
         self.closed = True
@@ -1074,7 +1079,7 @@ def test_fetch_keeps_mail_from_known_people_and_nothing_else(mailbox):
     with patch.object(mail.imaplib, "IMAP4_SSL", imap):
         counts = mail.fetch(db, since=date(2026, 11, 9))
     assert counts == {"ok": True, "fetched": 3, "stored": 2, "matched_leads": 1, "matched_clients": 1,
-                      "ignored": 1, "error": None}
+                      "ignored": 1, "error": None, "backlog": 0}
     assert ("connect", "imap.gmail.com") in imap.calls and ("login", MAILBOX, APP_PASSWORD) in imap.calls
     assert ("select", "INBOX", True) in imap.calls                          # read-only: nothing is marked read
     assert ("search", ("SINCE", "09-Nov-2026")) in imap.calls and imap.closed
@@ -1120,6 +1125,72 @@ def test_fetch_keeps_mail_from_known_people_and_nothing_else(mailbox):
     assert again["stored"] == 0 and again["fetched"] == 3 and again["ignored"] == 1
     assert db.query(models.EmailMessage).count() == 2 and db.query(models.Communication).count() == 2
     assert db.query(models.AgentEvent).filter_by(kind="lead.replied").count() == 1
+    db.close()
+
+
+def _clock_at(monkeypatch, moment):
+    import user_clock
+    monkeypatch.setattr(user_clock, "utcnow", lambda: moment)
+
+
+def test_fetch_looks_back_to_the_last_successful_sync_not_a_fixed_three_days(mailbox, monkeypatch):
+    """Review item 10: after more than three days without a sync (the free instance asleep,
+    or the mail server refusing), the mail in between was never looked at."""
+    db = _db()
+    _people(db)
+
+    def since_of(imap):
+        return next(c[1] for c in imap.calls if c[0] == "search")
+
+    _clock_at(monkeypatch, datetime(2026, 11, 12, 8, 0))
+    first = FakeIMAP([])
+    with patch.object(mail.imaplib, "IMAP4_SSL", first):
+        assert mail.fetch(db)["ok"] is True
+    assert since_of(first) == ("SINCE", "09-Nov-2026")                      # the first sync: three days
+
+    _clock_at(monkeypatch, datetime(2026, 11, 21, 8, 0))                    # nine days with no sync
+    later = FakeIMAP([])
+    with patch.object(mail.imaplib, "IMAP4_SSL", later):
+        assert mail.fetch(db)["ok"] is True
+    assert since_of(later) == ("SINCE", "11-Nov-2026")                      # the last success, less a day
+
+    _clock_at(monkeypatch, datetime(2026, 11, 25, 8, 0))                    # a failed sync moves nothing
+    with patch.object(mail.imaplib, "IMAP4_SSL", FakeIMAP([], login_error=mail.imaplib.IMAP4.error("down"))):
+        assert mail.fetch(db)["ok"] is False
+    _clock_at(monkeypatch, datetime(2026, 11, 26, 8, 0))
+    after = FakeIMAP([])
+    with patch.object(mail.imaplib, "IMAP4_SSL", after):
+        assert mail.fetch(db)["ok"] is True
+    assert since_of(after) == ("SINCE", "20-Nov-2026")
+    db.close()
+
+
+def test_a_backlog_is_read_oldest_first_and_nothing_is_skipped(mailbox, monkeypatch):
+    """A long gap can hold more mail than one sync reads (200). The old code read the newest
+    200 and never the rest. Now each sync continues where the last one stopped."""
+    db = _db()
+    _people(db)
+    _clock_at(monkeypatch, datetime(2026, 11, 12, 8, 0))
+    with patch.object(mail.imaplib, "IMAP4_SSL", FakeIMAP([])):
+        mail.fetch(db)
+
+    news = [_raw("Newsletter <news@shop.example>", f"Offer {n}", "Buy now.", message_id=f"<n-{n}@shop.example>")
+            for n in range(449)]
+    reply = _raw("mercy@sunrise.example", "Re: Stock alerts", "Yes please.", message_id="<old-reply@sunrise.example>",
+                 in_reply_to=OUTREACH_ID, date_text="Sat, 14 Nov 2026 09:30:00 +0200")
+    inbox = [reply] + news                                                   # the reply is the OLDEST message
+    _clock_at(monkeypatch, datetime(2026, 11, 22, 8, 0))
+    runs, windows = [], []
+    for _ in range(4):
+        imap = FakeIMAP(inbox)
+        with patch.object(mail.imaplib, "IMAP4_SSL", imap):
+            counts = mail.fetch(db)
+        runs.append((counts["fetched"], counts["backlog"], getattr(imap, "fetched", [])[:1]))
+        windows.append(next(c[1] for c in imap.calls if c[0] == "search")[1])
+    assert runs == [(200, 250, [1]), (200, 50, [201]), (50, 0, [401]), (0, 0, [])]
+    # The window stays put while mail is waiting, then moves up to the last sync again.
+    assert windows == ["11-Nov-2026", "11-Nov-2026", "11-Nov-2026", "21-Nov-2026"]
+    assert db.query(models.EmailMessage).filter_by(message_id="<old-reply@sunrise.example>").count() == 1
     db.close()
 
 

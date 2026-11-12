@@ -32,6 +32,7 @@ from sqlalchemy.orm import Session
 
 import integrations
 import models
+import user_clock
 from database import get_db
 
 router = APIRouter()
@@ -39,8 +40,9 @@ router = APIRouter()
 PROVIDER = "email"
 NOT_CONFIGURED = "email sending is not configured"
 SNIPPET_LIMIT = 500
-FETCH_DAYS = 3
-MAX_MESSAGES = 200              # newest messages looked at per sync
+FETCH_DAYS = 3                  # how far back the very first sync looks
+MARGIN_DAYS = 1                 # overlap with the last successful sync (IMAP SINCE is whole days)
+MAX_MESSAGES = 200              # messages looked at per sync; the rest wait for the next one
 SMTP_TIMEOUT = 20
 IMAP_TIMEOUT = 20
 _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
@@ -99,7 +101,7 @@ def _ok(db: Session, *, synced: bool = False) -> None:
     if row.connected_at is None:
         row.connected_at = datetime.utcnow()
     if synced:
-        row.last_sync_at = datetime.utcnow()
+        row.last_sync_at = user_clock.utcnow()
 
 
 def serialize(m: models.EmailMessage) -> dict:
@@ -340,32 +342,74 @@ def _store(db: Session, parsed: dict, who: dict, counts: dict) -> None:
         agents.emit(db, "lead.replied", {"lead_id": lead.id, "email_message_id": row.id}, source="email_sync")
 
 
-def fetch(db: Session, since: date | None = None) -> dict:
-    """Read the inbox for the last three days and keep what known people sent. Never raises.
+def _window_start(row: models.Integration) -> date:
+    """The day a sync starts reading from: the last successful sync less a day's margin
+    (never a fixed number of days back, so a week without a sync loses nothing); three days
+    for the first sync; and while a backlog is being worked through, where that began."""
+    backlog = integrations.config(row).get("mail_backlog_since")
+    if backlog:
+        try:
+            return date.fromisoformat(str(backlog))
+        except ValueError:
+            pass
+    if row.last_sync_at is None:                    # only a successful fetch sets it
+        return user_clock.utcnow().date() - timedelta(days=FETCH_DAYS)
+    return row.last_sync_at.date() - timedelta(days=MARGIN_DAYS)
 
-    Returns ``{ok, fetched, stored, matched_leads, matched_clients, ignored, error}``."""
+
+def _uidvalidity(conn) -> int | None:
+    """The mailbox's UIDVALIDITY, as SELECT reported it. UIDs only mean anything under it."""
+    try:
+        _code, data = conn.response("UIDVALIDITY")
+        return int(data[0]) if data and data[0] else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def fetch(db: Session, since: date | None = None) -> dict:
+    """Read the inbox since the last successful sync and keep what known people sent.
+    Never raises.
+
+    At most ``MAX_MESSAGES`` are looked at per call, oldest first; the UID of the last one is
+    remembered, so the next call carries on from there and a long gap is worked through
+    without skipping anything. ``since`` forces a re-read from that day.
+
+    Returns ``{ok, fetched, stored, matched_leads, matched_clients, ignored, error, backlog}``;
+    ``backlog`` is how many messages are still waiting for the next call."""
     import change_log
     counts = {"ok": True, "fetched": 0, "stored": 0, "matched_leads": 0, "matched_clients": 0, "ignored": 0,
-              "error": None}
+              "error": None, "backlog": 0}
     if not configured():
         return {**counts, "ok": False, "error": "Email is not configured"}
-    since = since or (datetime.utcnow().date() - timedelta(days=FETCH_DAYS))
+    row = _row(db)
+    held = integrations.config(row)
+    forced = since is not None
+    since = since or _window_start(row)
     host = _imap_host()
     gmail = "gmail" in host.lower() or "googlemail" in host.lower()
     # VERIFY: X-GM-THRID is a Gmail extension; other servers reject it, so it is only
     # asked of Gmail.
     items = f"(BODY.PEEK[HEADER.FIELDS ({_HEADERS})] BODY.PEEK[TEXT]<0.2000>{' X-GM-THRID' if gmail else ''})"
-    conn, messages = None, []
+    conn, messages, validity, batch, cursor = None, [], None, [], None
     try:
         conn = imaplib.IMAP4_SSL(host, timeout=IMAP_TIMEOUT)
         conn.login(address(), _password())
         conn.select("INBOX", readonly=True)
-        status, data = conn.search(None, "SINCE", _since_text(since))
+        validity = _uidvalidity(conn)
+        # VERIFY: UID SEARCH / UID FETCH (RFC 3501) behave on Gmail as on any IMAP server.
+        status, data = conn.uid("SEARCH", "SINCE", _since_text(since))
         if status != "OK":
             raise imaplib.IMAP4.error(f"search answered {status}")
-        numbers = (data[0] or b"").split() if data else []
-        for number in numbers[-MAX_MESSAGES:]:
-            status, parts = conn.fetch(number, items)
+        uids = sorted(int(u) for u in ((data[0] or b"").split() if data else []) if u.isdigit())
+        if validity is not None and held.get("mail_uidvalidity") == validity and held.get("mail_uid"):
+            cursor = int(held["mail_uid"])
+        if cursor is not None and not forced:
+            uids = [u for u in uids if u > cursor]          # already looked at, kept or not
+        # Oldest first when the place can be remembered; else the newest, as a best effort.
+        batch = uids[:MAX_MESSAGES] if validity is not None else uids[-MAX_MESSAGES:]
+        counts["backlog"] = len(uids) - len(batch)
+        for uid in batch:
+            status, parts = conn.uid("FETCH", str(uid), items)
             if status == "OK":
                 messages.append(parts)
     except Exception as exc:  # noqa: BLE001 — IMAP and socket errors are outcomes
@@ -397,6 +441,13 @@ def fetch(db: Session, since: date | None = None) -> dict:
             already.add(parsed["message_id"])
             _store(db, parsed, who, counts)
         _ok(db, synced=True)
+        if validity is not None:
+            seen = max([u for u in (cursor, batch[-1] if batch else None) if u is not None], default=None)
+            integrations.set_config(_row(db), mail_uid=seen, mail_uidvalidity=validity)
+            if not forced:
+                # While mail is still waiting, the next sync must start from the same day.
+                integrations.set_config(
+                    _row(db), mail_backlog_since=since.isoformat() if counts["backlog"] else None)
         db.commit()
     return counts
 

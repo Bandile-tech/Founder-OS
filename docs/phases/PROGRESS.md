@@ -968,8 +968,11 @@ Decisions where the spec was silent:
   everything after "On … wrote:" are dropped from the snippet. A body that cannot be decoded
   from its first 2,000 bytes gives an empty snippet.
 - `X-GM-THRID` is only requested when the IMAP host is Gmail; other servers reject it.
-- The inbox is opened read-only, so syncing never marks mail as read. At most the newest 200
-  messages of the three-day window are looked at.
+- The inbox is opened read-only, so syncing never marks mail as read. (Changed in the review
+  round: a sync used to read the newest 200 messages of a fixed three-day window, so mail
+  older than three days at the next sync was never seen. It now reads from the last
+  successful sync less a day, at most 200 messages a call, oldest first, and remembers the
+  UID it reached, so a backlog is worked through over the following syncs.)
 - `email_messages` rows and `outreach_messages.replied_at` are not change-logged (they are
   facts from the mailbox). The communication, the lead's move to `replied` and the closed
   follow-up are logged, in a batch with source `email_sync`.
@@ -993,7 +996,8 @@ External setup — Gmail (not done; nothing here was tested against Gmail):
 5. In the app: Settings → Integrations → Email → Sync. Status should turn to connected.
 
 VERIFY (6C): that App Passwords are still offered on the account and IMAP is enabled; the
-`X-GM-THRID` fetch item; the IMAP fetch item syntax `BODY.PEEK[TEXT]<0.2000>`.
+`X-GM-THRID` fetch item; the IMAP fetch item syntax `BODY.PEEK[TEXT]<0.2000>`; `UID SEARCH
+SINCE` and `UID FETCH` (added in the review round; standard IMAP, not checked against Gmail).
 
 ### S22 (rest) — Phase 6 UI: Settings cards, Command Centre indicators, docs
 
