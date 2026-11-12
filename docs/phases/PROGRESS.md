@@ -1123,10 +1123,6 @@ service after deployment.
   (from before this branch) seeds messages "five minutes ago" in UTC, so it fails if it runs in
   the first five minutes after 00:00 UTC. It failed once in a full run at 00:02 UTC on
   12 November 2026 and passed on the rerun. Seed it from a fixed clock.
-- `GET /briefing/today` uses the server's clock (`datetime.now()`), which is UTC on Render:
-  between 00:00 and 02:00 in Lusaka the home screen briefing is still yesterday's. The
-  couriers already pass the local clock; the endpoint should do the same. (not done here)
-
 - Brand tab: a Disconnect control behind a confirm dialog (`DELETE /brand/accounts/{id}`
   exists), and a way to drop an idea from the screen.
 - `tests/e2e/smoke.js` has a `KEEP=1` option that does not keep the server alive on

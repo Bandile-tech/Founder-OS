@@ -29,6 +29,7 @@ import change_log
 import llm
 import models
 from database import get_db
+import user_clock
 
 router = APIRouter()
 
@@ -105,7 +106,7 @@ def timeline(db: Session, app: models.Application, today: date | None = None) ->
     """Days to the deadline, requirement counts, the next thing due, and whether it is at
     risk: a missing or in-progress requirement whose due date (or, without one, the
     application's deadline) is within 14 days."""
-    today = today or date.today()
+    today = today or user_clock.today()
     reqs = requirements_of(db, app)
     counts = {status: sum(1 for r in reqs if r.status == status) for status in REQ_CYCLE}
     pending = [r for r in reqs if r.status in REQ_OPEN]

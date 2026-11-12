@@ -13,26 +13,9 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from agents.base import Schedule
 
-DEFAULT_TZ = "Africa/Lusaka"
 _WEEKDAY_NAMES = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 
-
-def tz():
-    name = os.getenv("FOUNDER_OS_TZ") or DEFAULT_TZ
-    try:
-        return ZoneInfo(name)
-    except (ZoneInfoNotFoundError, ValueError):
-        # No tz database on this machine: Lusaka is UTC+2 all year, anything else falls to UTC.
-        return timezone(timedelta(hours=2)) if name == DEFAULT_TZ else timezone.utc
-
-
-def to_local(naive_utc: datetime) -> datetime:
-    return naive_utc.replace(tzinfo=timezone.utc).astimezone(tz())
-
-
-def to_utc(local: datetime) -> datetime:
-    """An aware local datetime → naive UTC."""
-    return local.astimezone(timezone.utc).replace(tzinfo=None)
+from user_clock import DEFAULT_TZ, tz, to_local, to_utc   # noqa: F401 — one clock for the whole app
 
 
 def parse_time(text: str | None):

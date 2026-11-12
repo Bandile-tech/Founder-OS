@@ -10,6 +10,7 @@ Shared helpers for the business modules (leads, CRM, portfolio, brand).
 import difflib
 import re
 from datetime import date, datetime
+import user_clock
 
 
 def _words(text: str) -> set[str]:
@@ -77,7 +78,7 @@ def days_since(dt) -> int | None:
     if isinstance(dt, datetime):
         return (datetime.utcnow() - dt).days
     if isinstance(dt, date):
-        return (date.today() - dt).days
+        return (user_clock.today() - dt).days
     return None
 
 
@@ -96,7 +97,7 @@ def parse_day(text, today: date | None = None, *, past: bool = False) -> date | 
 
     import syllabus
 
-    today = today or date.today()
+    today = today or user_clock.today()
     t = " ".join(str(text or "").lower().replace(",", " ").split())
     if not t:
         return None

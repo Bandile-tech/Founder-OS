@@ -28,6 +28,7 @@ from sqlalchemy.orm import Session
 import models
 import change_log
 from database import get_db
+import user_clock
 
 router = APIRouter()
 
@@ -252,7 +253,7 @@ def accept_suggestion(db: Session, sid: int) -> dict:
         raise HTTPException(400, f"Cannot apply suggestion kind '{s.kind}'")
 
     with change_log.batch_scope(db, "ui"):
-        updates = main.apply_parse_updates(db, parsed, date.today())
+        updates = main.apply_parse_updates(db, parsed, user_clock.today())
         changes = change_log.current_batch_changes(db)
     s.status = "accepted"
     s.resolved_at = datetime.utcnow()

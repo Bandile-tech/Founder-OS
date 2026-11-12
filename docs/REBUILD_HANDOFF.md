@@ -613,7 +613,7 @@ Phases 5 and 6 add (all optional; each feature shows "not connected" without its
 |---|---|---|
 | `RESEARCH_MODEL` | the assistant model | Model for the market-intelligence roles |
 | `JOBS_TOKEN` | unset | Secret for `POST /jobs/tick`; 32+ random characters. Unset: the endpoint answers 503 |
-| `FOUNDER_OS_TZ` | `Africa/Lusaka` | The zone schedules and notification times are read in |
+| `FOUNDER_OS_TZ` | `Africa/Lusaka` | The user's zone: "today" everywhere, schedules and notification times |
 | `JOBS_TICK_BUDGET` | `80` | Seconds a tick may spend starting agents |
 | `JOBS_IN_PROCESS` | `1` | `0` turns off the in-process 15-minute tick |
 | `YOUTUBE_API_KEY` | unset | YouTube Data API v3 key for the Brand tab |

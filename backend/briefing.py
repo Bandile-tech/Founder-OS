@@ -53,6 +53,7 @@ import models
 import llm
 import syllabus
 from database import get_db
+import user_clock
 
 router = APIRouter()
 
@@ -616,14 +617,11 @@ def _delivery(db: Session, today: date) -> dict:
 # ── Assemble ─────────────────────────────────────────────────
 
 def build_briefing(db: Session, *, refresh: bool = False, now: datetime | None = None, with_summary: bool = True) -> dict:
-    # The calendar is timed, so it needs the user's wall clock: the caller's ``now`` when
-    # one is given, else the real time in FOUNDER_OS_TZ (the server's own clock may be UTC).
+    # "Today" and the timed calendar both follow the user's wall clock: the caller's ``now``
+    # when one is given, else the real time in FOUNDER_OS_TZ (the server's clock may be UTC).
     if now is None:
-        from agents import schedule
-        clock = schedule.to_local(datetime.utcnow()).replace(tzinfo=None)
-    else:
-        clock = now
-    now = now or datetime.now()
+        now = user_clock.now()
+    clock = now
     today = now.date()
 
     task_items, counts = _task_items(db, today)

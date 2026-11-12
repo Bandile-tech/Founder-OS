@@ -18,6 +18,7 @@ from datetime import date, datetime, timedelta
 from sqlalchemy import func
 
 import models
+import user_clock
 
 _RULES_PATH = os.path.join(
     os.path.dirname(__file__), "..", "context", "core", "off_track_rules.json"
@@ -37,11 +38,11 @@ def route_brain_dump(db, text: str):
     import assistant_state as st
 
     context = {
-        "today": str(date.today()),
+        "today": str(user_clock.today()),
         "non_negotiables": [(n.key, n.label) for n in st.active_non_negotiables(db)],
     }
     parsed = main.get_parse_response(text, context)
-    updates = main.apply_parse_updates(db, parsed, date.today())
+    updates = main.apply_parse_updates(db, parsed, user_clock.today())
 
     summary = parsed.get("summary") or "Entry logged."
     result = {"summary": summary}
@@ -68,7 +69,7 @@ def get_dashboard_state(db):
     import syllabus
     import assistant_state as st
 
-    today = date.today()
+    today = user_clock.today()
     open_todos = db.query(models.Todo).filter(models.Todo.done == False).all()  # noqa: E712
     overdue = sum(1 for t in open_todos if t.due_date and t.due_date < today)
     due_today = sum(1 for t in open_todos if t.due_date == today)
@@ -118,7 +119,7 @@ def _load_rules() -> list:
 def _check_no_revenue_since(db, params) -> bool:
     """True (fires) when no revenue exists in the trailing window, but only once we are
     past ``after_date`` (so the alert can't fire before the first-revenue phase opens)."""
-    today = date.today()
+    today = user_clock.today()
     after = date.fromisoformat(params.get("after_date", "2026-06-01"))
     if today < after:
         return False
@@ -134,7 +135,7 @@ def _check_non_negotiable_completion_below(db, params) -> bool:
     import assistant_state as st
     threshold = float(params.get("threshold_pct", 60))
     window = int(params.get("window_days", 7))
-    today = date.today()
+    today = user_clock.today()
     floor = today - timedelta(days=window - 1)
     c = st.routine_completion(db, floor, today, only_days_with_data=True)
     if not c["has_data"] or not c["possible"]:
@@ -165,7 +166,7 @@ def _check_syllabus_weak_before_exam(db, params) -> bool:
     import syllabus
     days = int(params.get("days", 60))
     min_topics = int(params.get("min_topics", 1))
-    today = date.today()
+    today = user_clock.today()
     weak = 0
     for p in db.query(models.SyllabusPoint).filter(
             models.SyllabusPoint.status.in_(["not_started", "learned"])).all():
@@ -231,12 +232,12 @@ def synthesize_weekly_review(db, week_start: str | None = None):
     if week_start:
         start = date.fromisoformat(week_start)
     else:
-        today = date.today()
+        today = user_clock.today()
         start = today - timedelta(days=today.weekday())   # Monday of current week
     end = start + timedelta(days=6)
     start_dt = datetime_min(start)
     end_dt = datetime_max(end)
-    last_day = min(end, date.today()) if start <= date.today() else end
+    last_day = min(end, user_clock.today()) if start <= user_clock.today() else end
 
     # SHIPPED — tasks completed, syllabus topics revised, non-negotiables kept this week
     shipped = [f"Completed: {t.text}" for t in db.query(models.Todo).filter(
@@ -350,7 +351,7 @@ def add_todos(db, items: list, category: str = "personal", priority: int = 5):
     Never called for advisory or query responses. Source is always "orchestrator".
     """
     import change_log
-    today = str(date.today())
+    today = str(user_clock.today())
     created = []
     for text in items:
         todo = models.Todo(
@@ -546,7 +547,7 @@ def complete_task(db, query: str | None = None, todo_id: int | None = None):
             return {"id": todo.id, "text": todo.text, "already_done": True}, f"'{todo.text}' was already done"
         before = change_log.snapshot(todo)
         todo.done = True
-        todo.completed_at = date.today()
+        todo.completed_at = user_clock.today()
         change = change_log.record_update(db, todo, before, f"Completed task: {todo.text[:80]}")
         db.commit()
         return {"id": todo.id, "text": todo.text, "completed": True, "change": change}, f"completed '{todo.text}'"
@@ -637,7 +638,7 @@ def deadlines_report(db, days: int = 14):
 def get_deadlines(db, days: int = 14):
     """Overdue and upcoming tasks (by real due date) plus exams within the window."""
     import syllabus
-    today = date.today()
+    today = user_clock.today()
     horizon = today + timedelta(days=int(days))
     open_todos = db.query(models.Todo).filter(models.Todo.done == False).all()
 
@@ -902,7 +903,7 @@ def _readable(name: str, result):
     if name == "update_syllabus":
         if result.get("matched"):
             text = f"{_topic_label(result)} is now {st.STATUS_WORDS.get(result['status'], result['status'])}."
-            if result.get("last_revised") == date.today().isoformat():
+            if result.get("last_revised") == user_clock.today().isoformat():
                 text += " Marked as revised today."
             return {"updated": text}
         if result.get("ambiguous"):
@@ -1596,7 +1597,7 @@ def log_communication(db, who: str, summary: str, channel: str = "whatsapp",
         day = business_common.parse_day(when, past=True)
         if day is None:
             return {"error": f"could not read the date '{when}'"}, f"could not read the date '{when}'"
-        if day != date.today():
+        if day != user_clock.today():
             occurred = datetime(day.year, day.month, day.day, 12, 0, 0)
     client, client_scored = crm.find_client(db, who)
     lead = None
@@ -1827,7 +1828,7 @@ _register(
 def _check_payment_overdue(db, params):
     """True when any open client payment is more than ``days`` days past its due date."""
     days = int(params.get("days", 14))
-    cutoff = date.today() - timedelta(days=days)
+    cutoff = user_clock.today() - timedelta(days=days)
     return db.query(models.Payment).filter(
         models.Payment.status.in_(("due", "overdue")), models.Payment.due_date.isnot(None),
         models.Payment.due_date < cutoff).first() is not None
@@ -2655,7 +2656,7 @@ def _check_application_at_risk(db, params):
     """True when an application still being prepared has its deadline inside ``days`` days
     and requirements that are not ready."""
     days = int(params.get("days", 14))
-    today = date.today()
+    today = user_clock.today()
     for app in db.query(models.Application).filter(
             models.Application.status.in_(("researching", "preparing")),
             models.Application.deadline.isnot(None)).all():

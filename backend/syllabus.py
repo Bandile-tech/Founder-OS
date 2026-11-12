@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 import models
 import change_log
+import user_clock
 
 # Subject aliases → code. Codes themselves always resolve.
 SUBJECT_ALIASES = {
@@ -99,12 +100,12 @@ def set_exam_date(db: Session, subject: str, exam_date: date, paper: str | None 
         row.updated_at = datetime.utcnow()
         change_log.record_update(db, row, before, f"Exam date for {label}: {exam_date.isoformat()}")
     return {"subject_code": code, "subject": subject_name(db, code), "paper": paper,
-            "exam_date": exam_date.isoformat(), "days_away": (exam_date - date.today()).days}
+            "exam_date": exam_date.isoformat(), "days_away": (exam_date - user_clock.today()).days}
 
 
 def upcoming_exams(db: Session, today: date | None = None) -> list[dict]:
     """Every known exam date (paper rows plus subject fallbacks), soonest first."""
-    today = today or date.today()
+    today = today or user_clock.today()
     out: dict[tuple, dict] = {}
     for row in db.query(models.ExamDate).all():
         out[(row.subject_code, row.paper)] = {
@@ -125,7 +126,7 @@ def upcoming_exams(db: Session, today: date | None = None) -> list[dict]:
 def parse_date_text(text: str, today: date | None = None) -> date | None:
     """'12 May', '2026-05-12', '12/05/2026', 'May 12' → date (assumes the next occurrence
     for day-month forms without a year)."""
-    today = today or date.today()
+    today = today or user_clock.today()
     t = (text or "").strip()
     if not t:
         return None
@@ -382,7 +383,7 @@ def advance(db: Session, point_id: int) -> models.SyllabusPoint:
     idx = STATUSES.index(p.status) if p.status in STATUSES else 0
     p.status = STATUSES[(idx + 1) % len(STATUSES)]
     if p.status in ("revised", "bulletproof"):
-        p.last_revised = date.today()
+        p.last_revised = user_clock.today()
     p.updated_at = datetime.utcnow()
     change_log.record_update(db, p, before, f"{p.subject_name} {p.paper or ''} {p.topic_code} → {p.status}".replace("  ", " "))
     return p
@@ -428,9 +429,9 @@ def update_point(db: Session, p: models.SyllabusPoint, *, status: str | None = N
             raise ValueError(f"status must be one of {', '.join(STATUSES)}")
         p.status = status
     if revised_today and (status in ("revised", "bulletproof") or weakness_note or past_paper_score is not None):
-        p.last_revised = date.today()
+        p.last_revised = user_clock.today()
     if weakness_note:
-        line = f"- {date.today().isoformat()}: {weakness_note.strip()}"
+        line = f"- {user_clock.today().isoformat()}: {weakness_note.strip()}"
         p.weakness_notes = (p.weakness_notes.rstrip() + "\n" + line) if (p.weakness_notes or "").strip() else line
     if past_paper_score is not None:
         p.past_paper_score = float(past_paper_score)
@@ -459,7 +460,7 @@ def update_syllabus(db: Session, topic: str, status: str | None = None, weakness
 
 def weakest_topics(db: Session, limit: int = 5, today: date | None = None) -> list[dict]:
     """Rank topics by status, staleness of last_revised, weakness notes and exam proximity."""
-    today = today or date.today()
+    today = today or user_clock.today()
     out = []
     for p in db.query(models.SyllabusPoint).all():
         status_w = {"not_started": 3.0, "learned": 2.0, "revised": 1.0, "bulletproof": 0.0}.get(p.status, 3.0)

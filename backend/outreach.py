@@ -26,6 +26,7 @@ import llm
 import models
 import outreach_channels
 from database import get_db
+import user_clock
 
 router = APIRouter()
 
@@ -219,7 +220,7 @@ def execute_send(db: Session, message: models.OutreachMessage) -> dict:
         lead.status = "contacted"
     follow = leads.open_follow_up(db, lead.id)
     if follow is None:
-        follow, follow_change = leads.set_follow_up(db, lead, date.today() + timedelta(days=FOLLOW_UP_DAYS))
+        follow, follow_change = leads.set_follow_up(db, lead, user_clock.today() + timedelta(days=FOLLOW_UP_DAYS))
         changes.append(follow_change)
     lead.updated_at = now
     changes.append(change_log.record_update(db, lead, lead_before, f"Contacted {lead.name[:60]}"))

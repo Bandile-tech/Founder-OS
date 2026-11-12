@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session
 import change_log
 import models
 import syllabus
+import user_clock
 
 DEFAULT_ZMW_PER_USD = 27.0
 
@@ -86,7 +87,7 @@ def plural(n: int, word: str, many: str | None = None) -> str:
 
 
 def day_label(d: date, today: date | None = None) -> str:
-    today = today or date.today()
+    today = today or user_clock.today()
     if d == today:
         return "today"
     if d == today - timedelta(days=1):
@@ -115,7 +116,7 @@ def _ticks(db: Session, keys: list[str], start: date, end: date) -> list[models.
 
 def routine_day(db: Session, day: date | None = None) -> dict:
     """The active non-negotiables for one day: label, done, and the tick row id if any."""
-    day = day or date.today()
+    day = day or user_clock.today()
     active = active_non_negotiables(db)
     ticks = {h.key: h for h in _ticks(db, [n.key for n in active], day, day)}
     items = []
@@ -183,7 +184,7 @@ def mark_non_negotiable_done(db: Session, text: str, day: date | None = None) ->
     """Tick the active non-negotiable that ``text`` names, for ``day``. Creates the day's
     tick row when it does not exist yet. Logged in the change log. Caller commits.
     Returns {key, label, strategy} or None when nothing matches."""
-    day = day or date.today()
+    day = day or user_clock.today()
     active = active_non_negotiables(db)
     if not active and db.query(models.NonNegotiable).count() == 0:
         # Never configured: match against the defaults the app seeds (nothing is written
@@ -226,7 +227,7 @@ def academics(db: Session) -> list[dict]:
 
 
 def academics_lines(db: Session, today: date | None = None) -> list[str]:
-    today = today or date.today()
+    today = today or user_clock.today()
     lines = []
     for s in academics(db):
         c = s["counts"]
@@ -296,7 +297,7 @@ def revenue_target(db: Session) -> dict | None:
 # ── Revenue (ZMW with conversion) ────────────────────────────
 
 def revenue(db: Session, today: date | None = None) -> dict:
-    today = today or date.today()
+    today = today or user_clock.today()
     rows = db.query(models.Revenue).order_by(models.Revenue.date.desc(), models.Revenue.id.desc()).all()
     year_start = date(today.year, 1, 1)
     month_start = today.replace(day=1)
@@ -318,7 +319,7 @@ def revenue(db: Session, today: date | None = None) -> dict:
 
 
 def revenue_text(db: Session, today: date | None = None) -> str:
-    today = today or date.today()
+    today = today or user_clock.today()
     r = revenue(db, today)
     if not r["entries"]:
         return "No revenue logged yet."

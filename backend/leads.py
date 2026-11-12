@@ -26,6 +26,7 @@ import business_common
 import change_log
 import models
 from database import get_db
+import user_clock
 
 router = APIRouter()
 
@@ -481,7 +482,7 @@ def close_follow_ups(db: Session, lead: models.Lead) -> list:
             models.Todo.lead_id == lead.id, models.Todo.done == False,   # noqa: E712
             models.Todo.category == "outreach").all():
         before = change_log.snapshot(todo)
-        todo.done, todo.completed_at = True, date.today()
+        todo.done, todo.completed_at = True, user_clock.today()
         changes.append(change_log.record_update(db, todo, before, f"Completed task: {todo.text[:80]}"))
     lead.next_follow_up_at = None
     return [c for c in changes if c]
@@ -649,7 +650,7 @@ def log_reply(db: Session, lead: models.Lead, summary: str | None = None,
     if lead.status not in ("converted", "lost"):
         lead.status = "replied"
     lead.last_contact_at = now
-    lead.notes = _merge_notes(lead.notes, f"- {date.today().isoformat()}: replied — {text}")
+    lead.notes = _merge_notes(lead.notes, f"- {user_clock.today().isoformat()}: replied — {text}")
     lead.updated_at = now
     change = change_log.record_update(db, lead, before, f"{lead.name[:50]} replied")
     changes.append(change)

@@ -68,6 +68,9 @@ async function api(token, method, p, body, isForm) {
     FOUNDER_OS_ORIGINS: BASE,
     VAULT_REPO_URL: "https://127.0.0.1/none.git", // never clone a real vault in a smoke run
     VAULT_LOCAL_PATH: path.join(tmp, "vault"),
+    // The backend takes "today" from FOUNDER_OS_TZ; this script seeds with this machine's
+    // local date, so the server runs in this machine's zone.
+    FOUNDER_OS_TZ: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
   };
   delete env.OPENAI_API_KEY;
   const server = spawn(PYTHON, ["-m", "uvicorn", "main:app", "--port", String(PORT)], {

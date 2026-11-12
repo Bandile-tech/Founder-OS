@@ -286,7 +286,8 @@ async function show(page, name) {
 async function main() {
   fs.mkdirSync(OUT, { recursive: true });
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "fos-screens-"));
-  const env = { ...process.env, DATABASE_URL: `sqlite:///${path.join(tmp, "screens.db")}`, VAULT_REPO_URL: "https://127.0.0.1/none.git" };
+  const env = { ...process.env, DATABASE_URL: `sqlite:///${path.join(tmp, "screens.db")}`, VAULT_REPO_URL: "https://127.0.0.1/none.git",
+    FOUNDER_OS_TZ: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC" };   // the server's "today" = this machine's
   delete env.FOUNDER_OS_PASSWORD;
   delete env.OPENAI_API_KEY;
   const server = spawn(PYTHON, ["-m", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", String(PORT)], { cwd: path.join(ROOT, "backend"), env });

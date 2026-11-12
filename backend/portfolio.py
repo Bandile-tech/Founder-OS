@@ -24,6 +24,7 @@ import change_log
 import crm
 import models
 from database import get_db
+import user_clock
 
 router = APIRouter()
 
@@ -74,7 +75,7 @@ def _overdue_payment(db: Session, project: models.Project, today: date):
 def attention(db: Session, project: models.Project, today: date | None = None) -> dict:
     """How much attention a project deserves right now, with the parts that make up the
     score so the screen can show why, and the single bottleneck that matters most."""
-    today = today or date.today()
+    today = today or user_clock.today()
     now = datetime.utcnow()
     value_w = round(min(1.0, _usd(project.expected_value, project.currency) / VALUE_CAP_USD) * 3, 2)
 
@@ -164,7 +165,7 @@ def _entry(db: Session, project: models.Project, today: date) -> dict:
 def review(db: Session, today: date | None = None, *, include_paused: bool = True) -> dict:
     """The ranked portfolio. Stores each project's health (derived, so not logged). The
     caller commits."""
-    today = today or date.today()
+    today = today or user_clock.today()
     projects = db.query(models.Project).filter(models.Project.status.notin_(("closed", "cancelled"))).all()
     by_id = {p.id: p for p in projects}
     entries = [_entry(db, p, today) for p in projects]
@@ -278,7 +279,7 @@ def create_project(db: Session, *, title: str, kind: str = "internal", client: m
         expected_value=float(expected_value) if expected_value is not None else None,
         currency=crm._currency(currency, "ZMW"), due_date=due_date,
         effort_hours_week=float(effort_hours_week) if effort_hours_week is not None else None,
-        next_action=(next_action or "").strip() or None, start_date=date.today(),
+        next_action=(next_action or "").strip() or None, start_date=user_clock.today(),
         last_activity_at=datetime.utcnow(), created_at=datetime.utcnow(), updated_at=datetime.utcnow())
     db.add(project)
     change = change_log.record_create(db, project, f"New project: {title[:60]}")

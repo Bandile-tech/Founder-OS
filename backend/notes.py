@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 import models
 import change_log
 from database import get_db
+import user_clock
 
 router = APIRouter()
 
@@ -99,7 +100,7 @@ def append_entry(db: Session, title: str, kind: str, text: str, *, on: date | No
                  fuzzy: bool = False) -> models.Note:
     """Append a dated entry to the note, creating it when missing."""
     note = find_note_fuzzy(db, title, kind) if fuzzy else find_note(db, title, kind)
-    stamp = (on or date.today()).isoformat()
+    stamp = (on or user_clock.today()).isoformat()
     line = f"- {stamp}: {text.strip()}"
     if note is None:
         if not create_missing:

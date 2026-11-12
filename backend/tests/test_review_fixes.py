@@ -66,3 +66,77 @@ def test_whatsapp_country_code_is_configurable_and_foreign_numbers_are_left_alon
     assert oc.whatsapp_digits("") == "" and oc.whatsapp_digits(None) == ""
     lead = models.Lead(name="No Number")
     assert oc.WhatsAppLinkChannel().send(None, models.OutreachMessage(body="x"), lead)["ok"] is False
+
+
+# ── 3. "today" is the day in FOUNDER_OS_TZ, not the server's ──
+
+def _half_past_midnight_in_lusaka(monkeypatch):
+    """00:30 on Friday 5 March 2027 in Lusaka = 22:30 on Thursday 4 March UTC, which is
+    what a server on UTC (Render) believes the time to be."""
+    import user_clock
+
+    monkeypatch.setenv("FOUNDER_OS_TZ", "Africa/Lusaka")
+    monkeypatch.setattr(user_clock, "utcnow", lambda: datetime(2027, 3, 4, 22, 30))
+    return date(2027, 3, 5)
+
+
+def test_briefing_today_is_the_lusaka_day_at_half_past_midnight(monkeypatch):
+    today = _half_past_midnight_in_lusaka(monkeypatch)
+    db = _db()
+    db.add(models.Todo(text="Send the Hope Clinic invoice", priority=2, done=False, category="business",
+                       due_date=today, source="test"))
+    db.add(models.Todo(text="Chase the bakery deposit", priority=2, done=False, category="business",
+                       due_date=today - timedelta(days=1), source="test"))
+    db.commit()
+    db.close()
+
+    b = client.get("/briefing/today").json()
+    assert (b["date"], b["weekday"], b["greeting"]) == ("2027-03-05", "Friday", "Good morning")
+    labels = {i["title"]: i["due_label"] for i in b["items"] if i["category"] not in ("non_negotiable",)}
+    assert labels["Send the Hope Clinic invoice"] == "Today"
+    assert b["counts"]["overdue"] == 1          # yesterday's task is overdue, today's is not
+
+
+def test_everything_dated_today_follows_the_user_zone(monkeypatch):
+    import orchestrator_tools as ot
+    import user_clock
+
+    today = _half_past_midnight_in_lusaka(monkeypatch)
+    assert user_clock.today() == today and user_clock.now() == datetime(2027, 3, 5, 0, 30)
+
+    db = _db()
+    todo = models.Todo(text="Print the syllabus", priority=3, done=False, category="academics", source="test")
+    db.add(todo)
+    db.commit()
+    todo_id = todo.id
+    db.close()
+    assert client.post(f"/todos/{todo_id}/complete").json()["completed_at"] == "2027-03-05"
+
+    habits = client.get("/habits").json()                       # the day's ticks are the local day's
+    assert habits and all(h["date"] == "2027-03-05" for h in habits)
+
+    db = _db()
+    result, _ = ot.get_deadlines(db, 7)
+    db.close()
+    assert result["today"] == "2027-03-05"
+
+    monkeypatch.setenv("FOUNDER_OS_TZ", "UTC")                  # the same instant, seen from UTC
+    assert user_clock.today() == date(2027, 3, 4)
+    assert client.get("/briefing/today").json()["date"] == "2027-03-04"
+
+
+def test_no_app_code_reads_the_server_clock_for_today():
+    """date.today() and datetime.now() are the server's day. App code goes through user_clock."""
+    import re
+
+    root = Path(__file__).parent.parent
+    pattern = re.compile(r"(?<![\w.])(?:_date|date)\.today\(\)|(?<![\w.])datetime\.(?:now|today)\(\)")
+    offenders = []
+    for path in root.rglob("*.py"):
+        rel = path.relative_to(root)
+        if rel.parts[0] in ("tests", "migrations") or "__pycache__" in rel.parts or rel.name == "user_clock.py":
+            continue
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if not line.lstrip().startswith("#") and pattern.search(line):
+                offenders.append(f"{rel}:{number}")
+    assert offenders == []

@@ -24,6 +24,7 @@ import conversation
 import memory_service
 import change_log
 from openai_client import get_orchestrator_response, AI_FAILED_REPLY
+import user_clock
 
 MEMORY_RECALL_LIMIT = 5
 
@@ -41,7 +42,7 @@ def _enrich_user_text(request, db) -> str:
     text = request.text.strip()
     context_parts: list[str] = []
     today_logs = db.query(models.DailyLog).filter(
-        models.DailyLog.date == date.today()
+        models.DailyLog.date == user_clock.today()
     ).order_by(models.DailyLog.id.asc()).all()
     if today_logs:
         log_lines = "\n".join(f"- {l.entry}" for l in today_logs if l.entry)

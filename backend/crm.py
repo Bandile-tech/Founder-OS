@@ -29,6 +29,7 @@ import business_common
 import change_log
 import models
 from database import get_db
+import user_clock
 
 router = APIRouter()
 
@@ -192,7 +193,7 @@ def client_health(db: Session, client: models.Client, today: date | None = None)
     amber: any overdue payment, or an active client with no communication in 21 days, or a
            deal in negotiation for more than 30 days
     Silence is measured from the last communication, or from when the client was created."""
-    today = today or date.today()
+    today = today or user_clock.today()
     now = datetime.utcnow()
     overdue_days = [
         (today - p.due_date).days
@@ -396,7 +397,7 @@ def update_deal(db: Session, deal: models.Deal, *, stage: str | None = None,
         project = models.Project(
             title=deal.title, kind="client", client_id=deal.client_id, deal_id=deal.id,
             status="active", expected_value=deal.amount, currency=deal.currency or "ZMW",
-            start_date=date.today(), last_activity_at=datetime.utcnow(),
+            start_date=user_clock.today(), last_activity_at=datetime.utcnow(),
             created_at=datetime.utcnow(), updated_at=datetime.utcnow())
         db.add(project)
         db.flush()
@@ -634,7 +635,7 @@ def mark_paid(db: Session, payment: models.Payment, paid_at: date | None = None,
         raise ValueError("a cancelled payment cannot be marked paid")
     client = db.query(models.Client).filter(models.Client.id == payment.client_id).first()
     name = client.name if client else f"client #{payment.client_id}"
-    day = paid_at or (revenue.date if revenue is not None else None) or date.today()
+    day = paid_at or (revenue.date if revenue is not None else None) or user_clock.today()
     changes = []
     if revenue is None:
         revenue = models.Revenue(amount=payment.amount, currency=payment.currency, source=name,
@@ -689,7 +690,7 @@ def add_recurring(db: Session, client: models.Client, title: str, amount: float,
         raise ValueError("recurring revenue needs an amount above zero")
     if interval not in INTERVALS:
         raise ValueError(f"interval must be one of: {', '.join(INTERVALS)}")
-    today = date.today()
+    today = user_clock.today()
     if start is not None:
         day = int(day_of_month or start.day)
         next_due = start
@@ -713,7 +714,7 @@ def generate_due(db: Session, today: date | None = None) -> int:
     """Create the due payment for every recurring period that has arrived, and move
     ``next_due`` on. Idempotent: a period that already has its payment is not created again
     (checked here, and guaranteed by the unique index). The caller commits."""
-    today = today or date.today()
+    today = today or user_clock.today()
     created = 0
     for rec in db.query(models.RecurringRevenue).filter(
             models.RecurringRevenue.active == True, models.RecurringRevenue.next_due <= today).all():   # noqa: E712
@@ -747,7 +748,7 @@ def generate_due(db: Session, today: date | None = None) -> int:
 def refresh_statuses(db: Session, today: date | None = None) -> int:
     """due → overdue once the due date has passed (and back if the date was moved). The
     status is derived from the date, so the flip is not written to the change log."""
-    today = today or date.today()
+    today = today or user_clock.today()
     flipped = 0
     for p in db.query(models.Payment).filter(models.Payment.status.in_(OPEN_PAYMENT)).all():
         want = "overdue" if (p.due_date is not None and p.due_date < today) else "due"
@@ -800,7 +801,7 @@ def housekeeping(db: Session, source: str = "job:crm") -> dict:
 
 def summary(db: Session, today: date | None = None) -> dict:
     """The numbers behind GET /crm/summary. Read-only (the endpoint runs housekeeping first)."""
-    today = today or date.today()
+    today = today or user_clock.today()
     since = today - timedelta(days=30)
     clients = db.query(models.Client).all()
     deals = db.query(models.Deal).all()
@@ -994,7 +995,7 @@ def patch_recurring(recurring_id: int, payload: RecurringPatch, db: Session = De
             elif key == "day_of_month" and value is not None:
                 value = max(1, min(31, int(value)))
             setattr(rec, key, value)
-        if rec.ended_at is not None and rec.ended_at <= date.today():
+        if rec.ended_at is not None and rec.ended_at <= user_clock.today():
             rec.active = False
         rec.updated_at = datetime.utcnow()
         change = change_log.record_update(db, rec, before, f"Updated recurring: {rec.title[:60]}")

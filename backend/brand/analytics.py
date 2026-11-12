@@ -16,6 +16,7 @@ from statistics import median
 import llm
 import models
 from brand import sync as brand_sync
+import user_clock
 
 TARGET_POSTS_30D = 8
 TREND_WEEKS = 12
@@ -138,7 +139,7 @@ def progress(db) -> int | None:
 
 
 def cached_insight(db, platform: str | None, week_start: date | None = None):
-    week_start = week_start or _week_start(date.today())
+    week_start = week_start or _week_start(user_clock.today())
     return db.query(models.BrandInsight).filter(
         models.BrandInsight.week_start == week_start, models.BrandInsight.platform == (platform or "all")).first()
 
@@ -147,7 +148,7 @@ def insight(db, platform: str | None = None, week_start: date | None = None, ref
     """The weekly note: at most one model call per platform per ISO week, cached in
     ``brand_insights``; ``refresh`` regenerates it. ``text`` is None with no key or when
     there is nothing measured to talk about. Commits when it writes."""
-    week_start = week_start or _week_start(date.today())
+    week_start = week_start or _week_start(user_clock.today())
     key = platform or "all"
     row = cached_insight(db, platform, week_start)
     if row is not None and not refresh:

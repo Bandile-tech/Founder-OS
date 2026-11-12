@@ -48,7 +48,7 @@ Environment (`backend/.env` locally, Render env vars in production):
 | `INTENT_CONFIDENCE_MIN` | `0.7` | Below this an extracted item becomes a suggestion |
 | `RESEARCH_MODEL` | the assistant model | Model for the market-intelligence roles |
 | `JOBS_TOKEN` | unset | Secret for `POST /jobs/tick` (the scheduler). Unset: the endpoint answers 503. Use 32+ random characters |
-| `FOUNDER_OS_TZ` | `Africa/Lusaka` | The zone agent schedules and notification times are read in |
+| `FOUNDER_OS_TZ` | `Africa/Lusaka` | The user's zone: "today" everywhere (briefing, tasks, habits, payments), agent schedules and notification times. Never the server's clock |
 | `JOBS_TICK_BUDGET` | `80` | Seconds a tick may spend starting agents; the rest run on the next tick |
 | `JOBS_IN_PROCESS` | `1` | `0` turns off the in-process 15-minute tick (the external tick still works) |
 | `YOUTUBE_API_KEY` | unset | YouTube Data API v3 key for the Brand tab. Unset: the YouTube account shows an error and nothing is estimated |
@@ -156,6 +156,7 @@ before markdown runs.
 | `voice_realtime.py` | Client secret for WebRTC voice, server-side tool bridge, transcript save |
 | `usage.py` | `GET /usage/summary` from `llm_usage` |
 | `vault_sync.py` | Obsidian vault clone/index; semantic search when embedded |
+| `user_clock.py` | The user's clock: `today()` and `now()` in `FOUNDER_OS_TZ`. No app code calls `date.today()` or `datetime.now()` |
 | `models.py` / `schemas.py` / `database.py` | ORM, Pydantic, engine (SQLite locally, Postgres on Supabase) |
 | `migrations/` | Hand-written, re-runnable, wired into startup (`m010`–`m013` are the rebuild, `m014`–`m022` Phases 5 and 6) |
 | `market_intel/` | Research agent: roles, weighted scoring (`scoring.py`), standing objectives (`objectives.py`) |

@@ -101,6 +101,7 @@ import integrations_email as _integrations_email
 app.include_router(_integrations_email.router)
 import agents as _agents
 from agents import api as _agents_api
+import user_clock
 _agents.load_all()                       # every shipped agent registers itself
 app.include_router(_agents_api.router)
 
@@ -286,7 +287,7 @@ def freeze_ended_weeks_job():
     db = SessionLocal()
     try:
         snapshots = db.query(models.WeeklyTargetSnapshot).filter(
-            models.WeeklyTargetSnapshot.week_end < date.today(),
+            models.WeeklyTargetSnapshot.week_end < user_clock.today(),
             models.WeeklyTargetSnapshot.frozen == False
         ).all()
         for snapshot in snapshots:
@@ -354,7 +355,7 @@ HABIT_DEFAULTS = [
 ]
 
 def _seed_habits_if_empty(db: Session):
-    today = date.today()
+    today = user_clock.today()
     existing = db.query(Habit).filter(Habit.date == today).count()
     if existing == 0:
         for key, label in HABIT_DEFAULTS:
@@ -439,7 +440,7 @@ def update_kpis(payload: schemas.KPIBulkUpdate, db: Session = Depends(get_db)):
     for u in payload.updates:
         if u.key in _kpi_state:
             _kpi_state[u.key]["value"] = u.value
-            db.add(KPISnapshot(key=u.key, value=u.value, date=date.today()))
+            db.add(KPISnapshot(key=u.key, value=u.value, date=user_clock.today()))
             updated.append(u.key)
     db.commit()
     return {"updated": updated, "kpis": _kpi_state}
@@ -457,7 +458,7 @@ def kpi_history(key: str, limit: int = 30, db: Session = Depends(get_db)):
 @app.get("/habits")
 def get_habits(for_date: Optional[date] = None, db: Session = Depends(get_db)):
     from models import NonNegotiable
-    target_date = for_date or date.today()
+    target_date = for_date or user_clock.today()
     active_nns = db.query(NonNegotiable).filter(NonNegotiable.is_active == True).order_by(NonNegotiable.sort_order, NonNegotiable.id).all()
     if not active_nns:
         # Fallback: seed non-negotiables then retry
@@ -497,7 +498,7 @@ def habit_streak(key: str, db: Session = Depends(get_db)):
         Habit.done == True
     ).order_by(Habit.date.desc()).all()
     streak = 0
-    check = date.today()
+    check = user_clock.today()
     for r in records:
         if r.date == check:
             streak += 1
@@ -624,8 +625,8 @@ def create_todo(todo: dict, db: Session = Depends(get_db)):
         priority=todo.get("priority", 5),
         done=False,
         category=todo.get("category", "personal"),
-        due=todo.get("due", str(date.today())),
-        due_date=_due_date_from(todo.get("due", str(date.today()))),
+        due=todo.get("due", str(user_clock.today())),
+        due_date=_due_date_from(todo.get("due", str(user_clock.today()))),
         source=todo.get("source", "manual"),
         roadmap_id=todo.get("roadmapId")
     )
@@ -647,7 +648,7 @@ def complete_todo(todo_id: int, db: Session = Depends(get_db)):
         else:
             before = change_log.snapshot(todo)
             todo.done = True
-            todo.completed_at = date.today()
+            todo.completed_at = user_clock.today()
             change = change_log.record_update(db, todo, before, f"Completed task: {todo.text[:80]}")
         db.commit()
     return {"id": todo.id, "done": todo.done, "completed_at": str(todo.completed_at) if todo.completed_at else None,
@@ -660,7 +661,7 @@ def toggle_todo(todo_id: int, db: Session = Depends(get_db)):
     if not todo:
         raise HTTPException(404, "Todo not found")
     todo.done = not todo.done
-    todo.completed_at = date.today() if todo.done else None
+    todo.completed_at = user_clock.today() if todo.done else None
     db.commit()
     return {"id": todo.id, "done": todo.done, "completed_at": str(todo.completed_at) if todo.completed_at else None}
 
@@ -676,7 +677,7 @@ _RADAR_TTL = 60.0
 @app.get("/radar")
 def get_radar(db: Session = Depends(get_db)):
     """Compute radar domain scores from live system data."""
-    today_key = date.today()
+    today_key = user_clock.today()
     now = _time.monotonic()
     if (
         _radar_cache["key"] == today_key
@@ -685,7 +686,7 @@ def get_radar(db: Session = Depends(get_db)):
     ):
         return _radar_cache["payload"]
 
-    habits_today = {h.key: h.done for h in db.query(Habit).filter(Habit.date == date.today()).all()}
+    habits_today = {h.key: h.done for h in db.query(Habit).filter(Habit.date == user_clock.today()).all()}
     annual = [
         {"name": t.name, "current": t.current_value, "target": t.target_value}
         for t in db.query(AnnualTarget).filter(
@@ -699,7 +700,7 @@ def get_radar(db: Session = Depends(get_db)):
         Habit.key == "scripture_prayer", Habit.done == True
     ).order_by(Habit.date.desc()).all()
     streak = 0
-    check = date.today()
+    check = user_clock.today()
     for r in bible_records:
         if r.date == check:
             streak += 1
@@ -924,7 +925,7 @@ def update_subtopic(subtopic_id: int, payload: schemas.SubtopicUpdate, db: Sessi
     updates = payload.model_dump(exclude_none=True)
     # Auto-set last_reviewed_date when mastery changes (unless caller provided a date)
     if "mastery_level" in updates and "last_reviewed_date" not in updates:
-        updates["last_reviewed_date"] = date.today()
+        updates["last_reviewed_date"] = user_clock.today()
     for field, val in updates.items():
         setattr(st, field, val)
     db.commit()
@@ -1013,7 +1014,7 @@ def _get_or_create_weekly_health(db: Session, week_start: date) -> WeeklyHealth:
 
 
 def _current_week_start() -> date:
-    today = date.today()
+    today = user_clock.today()
     return today - timedelta(days=today.weekday())  # last Monday
 
 
@@ -1063,7 +1064,7 @@ def _compute_health_radar(db: Session) -> dict:
     Compute the Health radar axis from the last 7 DailyHealth rows.
     Returns None for each component when fewer than 3 rows exist.
     """
-    cutoff = date.today() - timedelta(days=6)
+    cutoff = user_clock.today() - timedelta(days=6)
     rows = db.query(DailyHealth).filter(DailyHealth.date >= cutoff).all()
     if len(rows) < 3:
         return {"insufficient_data": True, "score": None}
@@ -1072,7 +1073,7 @@ def _compute_health_radar(db: Session) -> dict:
 
     training_days_in_window = sum(
         1 for i in range(7)
-        if ((date.today() - timedelta(days=i)).weekday() in TRAINING_WEEKDAYS)
+        if ((user_clock.today() - timedelta(days=i)).weekday() in TRAINING_WEEKDAYS)
     )
     sessions_done = sum(1 for r in rows if r.session_done)
     session_pct = (sessions_done / max(training_days_in_window, 1)) * 100
@@ -1097,7 +1098,7 @@ def _compute_health_radar(db: Session) -> dict:
 
 @app.get("/health/daily/today")
 def get_daily_health_today(db: Session = Depends(get_db)):
-    return _serialize_daily_health(_get_or_create_daily_health(db, date.today()))
+    return _serialize_daily_health(_get_or_create_daily_health(db, user_clock.today()))
 
 
 @app.patch("/health/daily/{log_date}")
@@ -1112,7 +1113,7 @@ def patch_daily_health(log_date: date, payload: schemas.DailyHealthPatch, db: Se
 
 @app.get("/health/daily/recent")
 def get_daily_health_recent(days: int = Query(14, ge=1, le=90), db: Session = Depends(get_db)):
-    cutoff = date.today() - timedelta(days=days - 1)
+    cutoff = user_clock.today() - timedelta(days=days - 1)
     rows = db.query(DailyHealth).filter(DailyHealth.date >= cutoff).order_by(DailyHealth.date.desc()).all()
     return [_serialize_daily_health(r) for r in rows]
 
@@ -1222,13 +1223,13 @@ def create_lift_log(payload: schemas.LiftLogCreate, db: Session = Depends(get_db
 
 @app.get("/health/lift-logs/today")
 def get_lift_logs_today(db: Session = Depends(get_db)):
-    logs = db.query(LiftLog).filter(LiftLog.date == date.today()).order_by(LiftLog.id).all()
+    logs = db.query(LiftLog).filter(LiftLog.date == user_clock.today()).order_by(LiftLog.id).all()
     return [_serialize_lift_log(l) for l in logs]
 
 
 @app.get("/health/lift-logs/recent")
 def get_lift_logs_recent(days: int = Query(14, ge=1, le=90), db: Session = Depends(get_db)):
-    cutoff = date.today() - timedelta(days=days - 1)
+    cutoff = user_clock.today() - timedelta(days=days - 1)
     logs = db.query(LiftLog).filter(LiftLog.date >= cutoff).order_by(LiftLog.date.desc(), LiftLog.id).all()
     return [_serialize_lift_log(l) for l in logs]
 
@@ -1710,7 +1711,7 @@ def _run_parse(db: Session, text: str) -> dict:
     """Call the parser with the standard context. Raises AIUnavailable / ParseFailed /
     SDK errors to the caller — callers translate via ``_ai_http_error``."""
     roadmap_ids = [t.task_id for t in db.query(RoadmapTask).all()]
-    context = {"roadmap_ids": roadmap_ids, "today": str(date.today())}
+    context = {"roadmap_ids": roadmap_ids, "today": str(user_clock.today())}
     return get_parse_response(text, context)
 
 
@@ -1721,7 +1722,7 @@ def parse_brain_dump(payload: schemas.ParseRequest, db: Session = Depends(get_db
         parsed = _run_parse(db, payload.text)
     except Exception as exc:  # noqa: BLE001
         raise _ai_http_error(exc)
-    updates = apply_parse_updates(db, parsed, date.today())
+    updates = apply_parse_updates(db, parsed, user_clock.today())
 
     # Backward-compatible response: keep existing top-level fields, add "updates" object
     response: dict = {
@@ -1767,7 +1768,7 @@ def unified_input(request: schemas.UnifiedInputRequest, db: Session = Depends(ge
 
         context_parts: list[str] = []
         today_logs = db.query(models.DailyLog).filter(
-            models.DailyLog.date == date.today()
+            models.DailyLog.date == user_clock.today()
         ).order_by(models.DailyLog.id.asc()).all()
         if today_logs:
             log_lines = "\n".join(f"- {l.entry}" for l in today_logs if l.entry)
@@ -1791,7 +1792,7 @@ def unified_input(request: schemas.UnifiedInputRequest, db: Session = Depends(ge
             parsed = _run_parse(db, text)
         except Exception as exc:  # noqa: BLE001
             raise _ai_http_error(exc)
-        updates = apply_parse_updates(db, parsed, date.today())
+        updates = apply_parse_updates(db, parsed, user_clock.today())
 
         resp: dict = {
             "type":     "log",
@@ -1855,7 +1856,7 @@ def chat_endpoint(request: schemas.ChatRequest, db: Session = Depends(get_db)):
     context_parts: list[str] = []
 
     today_logs = db.query(models.DailyLog).filter(
-        models.DailyLog.date == date.today()
+        models.DailyLog.date == user_clock.today()
     ).order_by(models.DailyLog.id.asc()).all()
     if today_logs:
         log_lines = "\n".join(f"- {l.entry}" for l in today_logs if l.entry)
@@ -1947,7 +1948,7 @@ def bible_streak_endpoint(db: Session = Depends(get_db)):
         BibleEntry.done == True
     ).order_by(BibleEntry.date.desc()).all()
     streak = 0
-    check = date.today()
+    check = user_clock.today()
     for r in records:
         if r.date == check:
             streak += 1
@@ -1966,7 +1967,7 @@ def _serialize_bible_log(e: DailyBibleLog) -> dict:
 @app.post("/bible-log", status_code=201)
 def create_bible_log(payload: schemas.DailyBibleLogCreate, db: Session = Depends(get_db)):
     entry = DailyBibleLog(
-        date=payload.entry_date or date.today(),
+        date=payload.entry_date or user_clock.today(),
         book=payload.book.strip(),
         chapter=payload.chapter,
         notes=payload.notes,
@@ -1979,14 +1980,14 @@ def create_bible_log(payload: schemas.DailyBibleLogCreate, db: Session = Depends
 
 @app.get("/bible-log/today")
 def get_bible_log_today(db: Session = Depends(get_db)):
-    today = date.today()
+    today = user_clock.today()
     entries = db.query(DailyBibleLog).filter(DailyBibleLog.date == today).order_by(DailyBibleLog.created_at.asc()).all()
     return [_serialize_bible_log(e) for e in entries]
 
 
 @app.get("/bible-log/recent")
 def get_bible_log_recent(days: int = 30, db: Session = Depends(get_db)):
-    since = date.today() - timedelta(days=days - 1)
+    since = user_clock.today() - timedelta(days=days - 1)
     entries = db.query(DailyBibleLog).filter(DailyBibleLog.date >= since).order_by(DailyBibleLog.date.desc(), DailyBibleLog.created_at.asc()).all()
     grouped: dict = {}
     for e in entries:
@@ -2204,7 +2205,7 @@ def delete_non_negotiable(nn_id: int, db: Session = Depends(get_db)):
 
 def _serialize_reading_plan(p: ReadingPlan) -> dict:
     from datetime import date as _date
-    today = _date.today()
+    today = user_clock.today()
     days_remaining = None
     if p.target_completion_date:
         days_remaining = (p.target_completion_date - today).days
@@ -2626,7 +2627,7 @@ def get_social_score(db: Session = Depends(get_db)):
 
 @app.post("/social-score")
 def update_social_score(payload: schemas.SocialScoreUpdate, db: Session = Depends(get_db)):
-    db.add(SocialScore(value=payload.value, date=date.today()))
+    db.add(SocialScore(value=payload.value, date=user_clock.today()))
     db.commit()
     return {"value": payload.value}
 
@@ -2739,7 +2740,7 @@ def delete_revenue(revenue_id: int, db: Session = Depends(get_db)):
 # ── Helpers ───────────────────────────────────────────────────
 
 def _serialize_prop_account(a: PropFirmAccount) -> dict:
-    days_active = (date.today() - a.start_date).days if a.start_date else 0
+    days_active = (user_clock.today() - a.start_date).days if a.start_date else 0
     drawdown_pct = round((a.peak_balance - a.current_balance) / a.peak_balance * 100, 2) if a.peak_balance else 0.0
     profit_target_usd = a.starting_balance * (a.profit_target_pct / 100)
     profit_made = a.current_balance - a.starting_balance
@@ -3021,7 +3022,7 @@ def monthly_scoreboard(month: str = Query(..., regex=r"^\d{4}-\d{2}$"), db: Sess
 @app.get("/scoreboard/ten-k")
 def ten_k_scoreboard(db: Session = Depends(get_db)):
     target_date = date(2026, 9, 30)
-    days_remaining = max(0, (target_date - date.today()).days)
+    days_remaining = max(0, (target_date - user_clock.today()).days)
 
     ai_revenue = _revenue_usd_total(db, since=TEN_K_START_DATE)   # ZMW converted via ZMW_PER_USD
 
@@ -3037,7 +3038,7 @@ def ten_k_scoreboard(db: Session = Depends(get_db)):
     breakdown = []
     # Walk months from TEN_K_START_DATE to today
     cur = TEN_K_START_DATE.replace(day=1)
-    today_month = date.today().replace(day=1)
+    today_month = user_clock.today().replace(day=1)
     while cur <= today_month:
         yr, mo = cur.year, cur.month
         _, last_day = monthrange(yr, mo)
@@ -3119,7 +3120,7 @@ def create_log(log: schemas.DailyLogCreate, db: Session = Depends(get_db)):
 def get_today_logs(db: Session = Depends(get_db)):
     """Return all DailyLog entries for today, newest first."""
     logs = db.query(models.DailyLog).filter(
-        models.DailyLog.date == date.today()
+        models.DailyLog.date == user_clock.today()
     ).order_by(models.DailyLog.id.desc()).all()
     return [{"id": l.id, "entry": l.entry, "weekly_target_id": l.weekly_target_id,
              "impact_score": l.impact_score, "date": str(l.date)} for l in logs]
@@ -3129,7 +3130,7 @@ def get_today_logs(db: Session = Depends(get_db)):
 def get_recent_logs(days: int = 30, db: Session = Depends(get_db)):
     """Return DailyLog entries from the last N days (default 30), newest first."""
     from datetime import timedelta
-    cutoff = date.today() - timedelta(days=days)
+    cutoff = user_clock.today() - timedelta(days=days)
     logs = db.query(models.DailyLog).filter(
         models.DailyLog.date >= cutoff
     ).order_by(models.DailyLog.date.desc(), models.DailyLog.id.desc()).all()
@@ -3366,7 +3367,7 @@ def read_recent_memory(limit: int = Query(5, le=20), context_type: str | None = 
 
 # ── UTILS ────────────────────────────────────────────────────
 def _year_pct() -> float:
-    now = datetime.now()
+    now = user_clock.now()
     start = datetime(now.year, 1, 1)
     end = datetime(now.year + 1, 1, 1)
     return (now - start) / (end - start)

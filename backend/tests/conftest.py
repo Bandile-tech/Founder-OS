@@ -33,6 +33,17 @@ else:
     atexit.register(_remove_app_db)
     APP_TEST_DATABASE_URL = "sqlite:///" + Path(_app_db_dir, "app.db").as_posix()
 os.environ["DATABASE_URL"] = APP_TEST_DATABASE_URL
+
+# ── The user's zone: this machine's ──────────────────────────────────────────
+# The app takes "today" from FOUNDER_OS_TZ (default Africa/Lusaka); the tests build their
+# fixtures from date.today(), which is this machine's day. On a UTC machine the two differ
+# for two hours a night, so the suite runs with the app in the machine's own zone. A test
+# about zones sets FOUNDER_OS_TZ itself.
+try:
+    import tzlocal
+    os.environ["FOUNDER_OS_TZ"] = tzlocal.get_localzone_name() or "UTC"
+except Exception:   # noqa: BLE001 — no zone name to be had: leave whatever is set
+    os.environ.setdefault("FOUNDER_OS_TZ", "UTC")
 if "database" in sys.modules or "main" in sys.modules:
     raise RuntimeError("tests/conftest.py must run before the app is imported")
 

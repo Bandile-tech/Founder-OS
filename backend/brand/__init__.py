@@ -28,6 +28,7 @@ import models
 from brand import adapters
 from brand import sync as _sync
 from database import get_db
+import user_clock
 
 router = APIRouter()
 
@@ -256,7 +257,7 @@ def mark_posted(db: Session, idea: models.ContentIdea, url: str | None = None) -
 
 def calendar(db: Session, start: date | None = None, end: date | None = None) -> dict:
     """Ideas by scheduled day and posts by publishing day. Default: this week and next."""
-    today = date.today()
+    today = user_clock.today()
     start = start or (today - timedelta(days=today.weekday()))
     end = end or (start + timedelta(days=13))
     if end < start:
