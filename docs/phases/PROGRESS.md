@@ -1197,7 +1197,8 @@ PostgreSQL 16 database, the upgrade check from main on PostgreSQL, the browser s
 and the layout checks at four sizes. The full suite on PostgreSQL at the final commit: see
 the line below.
 
-PostgreSQL suite at the final commit: running when this was written.
+PostgreSQL suite on the final code (`2d2d858`; later commits only touch this file):
+780 passed in about ten minutes.
 
 ## External setup — Telegram and YouTube
 
