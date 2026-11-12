@@ -210,11 +210,42 @@ def usage_from_response(usage) -> tuple[int, int, int]:
 
 # ── Calls ────────────────────────────────────────────────────
 
+def _sdk_takes_max_completion_tokens(client) -> bool:
+    """Does the installed SDK's ``chat.completions.create`` accept ``max_completion_tokens``?
+    The pinned openai 1.30.1 predates it and raises TypeError on the keyword."""
+    import inspect
+    try:
+        return "max_completion_tokens" in inspect.signature(client.chat.completions.create).parameters
+    except (TypeError, ValueError):
+        return False
+
+
+def _apply_output_cap(client, kwargs: dict) -> None:
+    """Put the output cap in ``kwargs`` as ``max_completion_tokens`` — never ``max_tokens``.
+    Sent as a named argument when the SDK knows it, otherwise in ``extra_body``, which the
+    SDK merges into the JSON request unchanged."""
+    cap = kwargs.pop("max_completion_tokens", None)
+    legacy = kwargs.pop("max_tokens", None)
+    if cap is None:
+        cap = legacy
+    if cap is None:
+        return
+    if _sdk_takes_max_completion_tokens(client):
+        kwargs["max_completion_tokens"] = cap
+    else:
+        kwargs["extra_body"] = {**(kwargs.get("extra_body") or {}), "max_completion_tokens": cap}
+
+
 def chat_completion(messages: list, *, db=None, purpose: str = "assistant",
                     model: str | None = None, **kwargs):
-    """Non-streaming chat completion. Returns the SDK response. Logs usage."""
+    """Non-streaming chat completion. Returns the SDK response. Logs usage.
+
+    The output cap is ``max_completion_tokens``. The GPT-5 family rejects ``max_tokens``
+    with a 400, so a caller that still passes it has it renamed here rather than failing
+    in production (``tests/test_openai_request_params.py`` checks every call path)."""
     _count_call()
     client = get_client()
+    _apply_output_cap(client, kwargs)
     model = model or assistant_model()
     started = time.monotonic()
     response = client.chat.completions.create(model=model, messages=messages, **kwargs)

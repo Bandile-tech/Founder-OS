@@ -98,7 +98,7 @@ def draft(db: Session, lead: models.Lead, channel: str, brief: str | None = None
         {"role": "user", "content": user},
     ]
     kwargs = {"response_format": {"type": "json_object"}} if channel == "email" else {}
-    raw = (llm.chat_text(messages, db=db, purpose="outreach_draft", max_tokens=400, **kwargs) or "").strip()
+    raw = (llm.chat_text(messages, db=db, purpose="outreach_draft", max_completion_tokens=400, **kwargs) or "").strip()
     subject, body = None, raw
     if channel == "email":
         try:

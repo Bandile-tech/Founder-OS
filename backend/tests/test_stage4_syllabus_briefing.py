@@ -399,6 +399,52 @@ class TestBriefing:
             b = client.get("/briefing/today").json()
         assert b["summary"] is None and b["greeting_line"].startswith("You're")
 
+    def test_summary_failure_is_cached_for_30_minutes(self, monkeypatch):
+        """A failing summary is tried once, not on every load or refresh, and again only
+        once the 30 minutes are up."""
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        _seed_world()
+        with patch("llm.chat_text", side_effect=RuntimeError("400 Unsupported parameter")) as chat:
+            for params in ({}, {}, {"refresh": 1}, {"refresh": 1}):
+                b = client.get("/briefing/today", params=params).json()
+                assert b["summary"] is None and b["summary_source"] == "deterministic"
+            assert chat.call_count == 1
+        db = _db()
+        row = db.query(models.BriefingSummary).one()
+        assert row.summary == "" and row.failed_at is not None
+        assert "Unsupported parameter" in row.last_error
+        row.failed_at = row.failed_at - briefing.SUMMARY_RETRY_AFTER   # 30 minutes pass
+        db.commit()
+        db.close()
+        with patch("llm.chat_text", return_value="Ship the delivery. Then revise.") as chat:
+            b = client.get("/briefing/today").json()
+            assert chat.call_count == 1 and b["summary_source"] == "llm"
+            assert client.get("/briefing/today").json()["summary_cached"] is True
+            assert chat.call_count == 1
+        db = _db()
+        row = db.query(models.BriefingSummary).one()
+        assert row.failed_at is None and row.last_error is None
+        db.close()
+
+    def test_empty_summary_counts_as_a_failure(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        _seed_world()
+        with patch("llm.chat_text", return_value="  ") as chat:
+            client.get("/briefing/today")
+            client.get("/briefing/today")
+            assert chat.call_count == 1
+
+    def test_failed_refresh_keeps_the_days_summary_and_backs_off(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        _seed_world()
+        with patch("llm.chat_text", return_value="Two things matter today. Ship it."):
+            first = client.get("/briefing/today").json()
+        with patch("llm.chat_text", side_effect=RuntimeError("api down")) as chat:
+            for _ in range(3):
+                b = client.get("/briefing/today", params={"refresh": 1}).json()
+                assert b["summary"] == first["summary"] and b["summary_cached"] is True
+            assert chat.call_count == 1
+
     def test_empty_system_briefing(self):
         b = client.get("/briefing/today").json()
         assert b["items"] == [] or all("id" in i for i in b["items"])

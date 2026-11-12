@@ -426,7 +426,7 @@ def test_insight_is_cached_per_platform_week(monkeypatch):
         first = client.get("/brand/insight").json()
         assert first["text"].startswith("Shorts did best") and first["cached"] is False and first["platform"] == "all"
         kwargs = chat.call_args.kwargs
-        assert kwargs["purpose"] == "brand_insight" and kwargs["max_tokens"] == 250
+        assert kwargs["purpose"] == "brand_insight" and kwargs["max_completion_tokens"] == 250
         assert chat.call_args.args[0][0]["content"] == analytics.INSIGHT_PROMPT
         again = client.get("/brand/insight").json()
         assert again["cached"] is True and chat.call_count == 1                    # once per platform-week
