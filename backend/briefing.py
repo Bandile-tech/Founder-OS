@@ -7,7 +7,8 @@ recent weakness notes, critical annual targets and alerts — every item with a 
 category, due label, reason, suggested action and target id, ranked.
 
 Optional summary: at most one LLM call per day, cached in ``briefing_summaries``;
-regenerated only with ``?refresh=1``. Works fully with no OpenAI key.
+regenerated only with ``?refresh=1``. A failed call is cached too and retried at most
+every 30 minutes, refresh or not. Works fully with no OpenAI key.
 
 Response shape (the target home screen is built against this):
 {
@@ -538,27 +539,49 @@ def _summary_prompt(core: dict) -> list[dict]:
     return [{"role": "system", "content": system}, {"role": "user", "content": facts}]
 
 
+SUMMARY_RETRY_AFTER = timedelta(minutes=30)
+
+
 def _summary(db: Session, core: dict, refresh: bool) -> tuple[str | None, str | None, bool]:
-    """(summary, greeting_line, cached). One LLM call per day unless refreshed."""
+    """(summary, greeting_line, cached). One LLM call per day unless refreshed.
+
+    A failure is cached too: the day's row records ``failed_at``, and while that is under
+    ``SUMMARY_RETRY_AFTER`` old no call is made, on a plain load or a refresh. Until a call
+    succeeds the briefing falls back to the deterministic greeting (or keeps the day's
+    earlier summary when a refresh failed)."""
     today = core["today_date"]
     row = db.query(models.BriefingSummary).filter(models.BriefingSummary.day == today).first()
-    if row is not None and not refresh:
+    have = row is not None and bool(row.summary)
+    if have and not refresh:
         return row.summary, row.greeting_line, True
+    fallback = (row.summary, row.greeting_line, True) if have else (None, None, False)
     if not llm.is_configured():
-        return None, None, False
+        return fallback
+    if row is not None and row.failed_at is not None and datetime.utcnow() - row.failed_at < SUMMARY_RETRY_AFTER:
+        return fallback
     try:
-        text = llm.chat_text(_summary_prompt(core), db=db, purpose="briefing_summary", max_tokens=300).strip()
+        text = (llm.chat_text(_summary_prompt(core), db=db, purpose="briefing_summary",
+                              max_completion_tokens=300) or "").strip()
+        error = None if text else "the model returned an empty summary"
     except Exception as exc:  # noqa: BLE001
-        print(f"[briefing] summary failed: {exc}")
-        return (row.summary, row.greeting_line, True) if row else (None, None, False)
+        text, error = "", f"{type(exc).__name__}: {exc}"
+    if row is None:
+        row = models.BriefingSummary(day=today, summary="")
+        db.add(row)
     if not text:
-        return None, None, False
+        import integrations
+        error = integrations.redact(error, db)[:500]
+        print(f"[briefing] summary failed (next try in 30 minutes): {error}")
+        row.failed_at, row.last_error = datetime.utcnow(), error
+        try:
+            db.commit()
+        except Exception:  # noqa: BLE001 — a concurrent load wrote the row first
+            db.rollback()
+        return fallback
     first = text.split(". ")[0].strip()
     greeting_line = first if first.endswith((".", "!", "?")) else first + "."
-    if row is None:
-        row = models.BriefingSummary(day=today)
-        db.add(row)
     row.summary, row.greeting_line, row.model, row.created_at = text, greeting_line, llm.assistant_model(), datetime.utcnow()
+    row.failed_at = row.last_error = None
     db.commit()
     return text, greeting_line, False
 

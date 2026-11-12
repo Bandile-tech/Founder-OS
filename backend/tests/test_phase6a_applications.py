@@ -106,7 +106,7 @@ def test_import_keeps_only_dates_the_text_states_and_marks_the_deadline_source()
     assert (out["created"], out["updated"], out["deadline_set"], out["dates_dropped"]) == (7, 0, True, 1)
     assert out["deadline"] == "2027-01-01" and out["deadline_source"] == "document"
     kwargs = chat.call_args.kwargs
-    assert kwargs["purpose"] == "application_parse" and kwargs["max_tokens"] == 1200
+    assert kwargs["purpose"] == "application_parse" and kwargs["max_completion_tokens"] == 1200
     assert kwargs["response_format"] == {"type": "json_object"}
     messages = chat.call_args.args[0]
     assert messages[0]["content"] == applications.IMPORT_PROMPT and "Never supply a date" in messages[0]["content"]
@@ -369,7 +369,7 @@ def test_review_gaps_is_cached_and_supersedes_the_previous_review(monkeypatch):
         first = client.get(f"/applications/{app['id']}/gaps").json()
         assert chat.call_count == 1 and first["cached"] is False
         kwargs = chat.call_args.kwargs
-        assert kwargs["purpose"] == "application_gaps" and kwargs["max_tokens"] == 700
+        assert kwargs["purpose"] == "application_gaps" and kwargs["max_completion_tokens"] == 700
         system, user = chat.call_args.args[0]
         assert system["content"] == applications.GAPS_PROMPT
         assert "[missing] Personal essay" in user["content"] and "DEADLINE: unknown" in user["content"]

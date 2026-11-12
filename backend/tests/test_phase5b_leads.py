@@ -259,7 +259,7 @@ def test_qualification_scores_and_sets_status(monkeypatch):
     assert len(out.json()["changes"]) == 3
 
     messages, kwargs = seen[0]
-    assert kwargs["purpose"] == "lead_qualify" and kwargs["max_tokens"] == 300
+    assert kwargs["purpose"] == "lead_qualify" and kwargs["max_completion_tokens"] == 300
     assert kwargs["response_format"] == {"type": "json_object"}
     assert messages[0]["content"].startswith(leads.QUALIFY_PROMPT)            # stable text first
     assert "Ideal customer" in messages[0]["content"]                         # then the ICP file
@@ -310,7 +310,7 @@ def test_draft_revision_supersedes_and_cancels_the_previous():
     assert summary == "drafted whatsapp to Mercy Banda (v1)"
     assert first["version"] == 1 and first["body"] == "Hi Mercy, quick intro." and first["subject"] is None
     kwargs = chat.call_args.kwargs
-    assert kwargs["purpose"] == "outreach_draft" and kwargs["max_tokens"] == 400 and "response_format" not in kwargs
+    assert kwargs["purpose"] == "outreach_draft" and kwargs["max_completion_tokens"] == 400 and "response_format" not in kwargs
     sent_messages = chat.call_args.args[0]
     assert sent_messages[0]["content"] == outreach.DRAFT_PROMPT          # stable prompt first
     assert "IDEAL CUSTOMER" in sent_messages[1]["content"]               # dynamic context second

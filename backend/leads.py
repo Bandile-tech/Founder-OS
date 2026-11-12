@@ -527,7 +527,7 @@ def _llm_fit(db: Session, lead: models.Lead) -> dict:
         {"role": "system", "content": QUALIFY_PROMPT + "\n\n" + _icp()},
         {"role": "user", "content": json.dumps(fields, ensure_ascii=False)},
     ]
-    raw = llm.chat_text(messages, db=db, purpose="lead_qualify", max_tokens=300,
+    raw = llm.chat_text(messages, db=db, purpose="lead_qualify", max_completion_tokens=300,
                         response_format={"type": "json_object"})
     try:
         parsed = json.loads(raw)

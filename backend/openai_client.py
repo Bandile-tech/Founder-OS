@@ -97,7 +97,7 @@ def clean_ai_output(text: str) -> str:
 
 def get_chat_response(messages: list) -> str:
     full_messages = [{"role": "system", "content": SYSTEM_PROMPT}] + messages
-    return llm.chat_text(full_messages, purpose="chat", max_tokens=800)
+    return llm.chat_text(full_messages, purpose="chat", max_completion_tokens=800)
 
 
 def get_chat_response_with_memory(
@@ -128,7 +128,7 @@ def get_chat_response_with_memory(
         full_messages.append({"role": "system", "content": dynamic.strip()})
     full_messages += messages
 
-    raw = llm.chat_text(full_messages, db=db, purpose="chat", max_tokens=800)
+    raw = llm.chat_text(full_messages, db=db, purpose="chat", max_completion_tokens=800)
     clean = clean_ai_output(raw)
 
     # Store in memory
@@ -235,7 +235,7 @@ Today is {today}. Return valid JSON only."""
             {"role": "user", "content": text}
         ],
         purpose="parse",
-        max_tokens=1000,
+        max_completion_tokens=1000,
     )
     try:
         parsed = json.loads(raw.replace("```json", "").replace("```", "").strip())
@@ -266,7 +266,7 @@ State: {json.dumps(context)}"""
             {"role": "user", "content": prompt}
         ],
         purpose="proactive_brief",
-        max_tokens=300,
+        max_completion_tokens=300,
     )
     return clean_ai_output(text)
 

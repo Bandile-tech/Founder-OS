@@ -199,7 +199,7 @@ def import_requirements(db: Session, app: models.Application, text: str) -> dict
     raw = llm.chat_text(
         [{"role": "system", "content": IMPORT_PROMPT},
          {"role": "user", "content": f"APPLICATION: {app.name}\n\nPASTED TEXT:\n{text}"}],
-        db=db, purpose="application_parse", max_tokens=1200, response_format={"type": "json_object"})
+        db=db, purpose="application_parse", max_completion_tokens=1200, response_format={"type": "json_object"})
     try:
         parsed = json.loads(raw)
     except (ValueError, TypeError):
@@ -462,7 +462,7 @@ def review_gaps(db: Session, app: models.Application, *, refresh: bool = False) 
     raw = llm.chat_text(
         [{"role": "system", "content": GAPS_PROMPT},
          {"role": "user", "content": _review_context(db, app)}],
-        db=db, purpose="application_gaps", max_tokens=700, response_format={"type": "json_object"})
+        db=db, purpose="application_gaps", max_completion_tokens=700, response_format={"type": "json_object"})
     try:
         parsed = json.loads(raw)
     except (ValueError, TypeError):

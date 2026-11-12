@@ -213,7 +213,7 @@ def summarise(existing: str, transcript: str, db=None) -> str:
     user = f"EXISTING SUMMARY:\n{existing or '(none)'}\n\nNEW TURNS:\n{transcript}"
     return llm.chat_text(
         [{"role": "system", "content": prompt}, {"role": "user", "content": user}],
-        db=db, purpose="conversation_summary", max_tokens=600,
+        db=db, purpose="conversation_summary", max_completion_tokens=600,
     ).strip()
 
 

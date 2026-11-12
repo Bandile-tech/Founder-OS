@@ -162,7 +162,7 @@ def insight(db, platform: str | None = None, week_start: date | None = None, ref
         text = (llm.chat_text(
             [{"role": "system", "content": INSIGHT_PROMPT},
              {"role": "user", "content": json.dumps(data, default=str)}],
-            db=db, purpose="brand_insight", max_tokens=INSIGHT_MAX_TOKENS) or "").strip()
+            db=db, purpose="brand_insight", max_completion_tokens=INSIGHT_MAX_TOKENS) or "").strip()
     except Exception as exc:                              # noqa: BLE001 — the page still renders
         print(f"[brand] insight failed: {type(exc).__name__}")
         text = ""

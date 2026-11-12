@@ -795,6 +795,10 @@ class BriefingSummary(Base):
     greeting_line = Column(String, nullable=True)
     model         = Column(String, nullable=True)
     created_at    = Column(DateTime, default=datetime.utcnow)
+    # A failed (or empty) call is remembered so it is retried at most every 30 minutes;
+    # a day whose only call failed has a row with an empty ``summary`` (m024).
+    failed_at     = Column(DateTime, nullable=True)
+    last_error    = Column(String, nullable=True)
 
 
 # ── PHASE 5B: PROSPECTING AND OUTREACH ───────────────────────
