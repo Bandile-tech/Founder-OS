@@ -1,7 +1,9 @@
 """
 Migration 023 — review round on the Phase 5/6 branch.
 
-Column added:
+Columns added:
+  agents.claimed_at    — set while a run holds the agent, so overlapping ticks and manual
+                         runs cannot start the same agent twice (``runner._claim``).
   change_log.undoable  — FALSE on a change that records something which has already left
                          the system (a sent email or WhatsApp message). Undo keeps those
                          rows. NULL and TRUE both mean undoable, so existing rows are.
@@ -28,6 +30,7 @@ def run(db=None):
         d = dialect(conn, TAG)
         with conn.begin():
             add_column_if_missing(conn, d, "change_log", "undoable", "BOOLEAN DEFAULT TRUE", TAG)
+            add_column_if_missing(conn, d, "agents", "claimed_at", "TIMESTAMP", TAG)
             add_column_if_missing(conn, d, "email_messages", "auth_result", "VARCHAR", TAG)
         print(f"[{TAG}] Review-round migration complete on {d}.")
     finally:

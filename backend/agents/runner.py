@@ -9,6 +9,12 @@ The agent runner and the tick.
 Permissions are enforced by the change log, not by trust: after a run every change in its
 batch is checked, and a write to a table outside ``tables_write`` undoes the whole batch
 and marks the run ``violation``.
+
+One run of an agent at a time. The in-process timer, ``POST /jobs/tick`` and a Run now tap
+can overlap (and on Render they can be different processes), so a run first claims its
+agent in the database (``agents.claimed_at``, one atomic UPDATE) and releases it when it
+ends. A run that cannot claim reports ``busy`` and does nothing. A tick that does claim
+looks at the agent again before running it, because another tick may have just run it.
 """
 
 import json
@@ -28,6 +34,7 @@ from database import SessionLocal
 
 DEFAULT_TICK_BUDGET_SECONDS = 80
 EVENT_TTL_HOURS = 24
+CLAIM_TTL_MINUTES = 30          # a claim older than this was left by a process that died
 
 
 def tick_budget_seconds() -> float:
@@ -94,6 +101,42 @@ def serialize_run(run: models.AgentRun) -> dict:
             "over_time": bool(run.over_time)}
 
 
+# ── The claim ────────────────────────────────────────────────
+
+def _claim(db, key: str):
+    """Take the agent for one run. Returns the claim's stamp, or None when another run holds
+    it. One UPDATE decides: of two sessions that try at once, the database lets one through
+    (the other's WHERE no longer matches once the first commits)."""
+    stamp = datetime.utcnow()
+    cutoff = stamp - timedelta(minutes=CLAIM_TTL_MINUTES)
+    taken = db.query(models.Agent).filter(
+        models.Agent.key == key,
+        (models.Agent.claimed_at.is_(None)) | (models.Agent.claimed_at < cutoff),
+    ).update({models.Agent.claimed_at: stamp}, synchronize_session=False)
+    db.commit()
+    return stamp if taken == 1 else None
+
+
+def _release(db, key: str, stamp) -> None:
+    """Give the agent back. Only our own claim: a stale one may have been taken over."""
+    try:
+        db.rollback()
+        db.query(models.Agent).filter(models.Agent.key == key, models.Agent.claimed_at == stamp).update(
+            {models.Agent.claimed_at: None}, synchronize_session=False)
+        db.commit()
+    except Exception as exc:  # noqa: BLE001 — the claim expires on its own
+        print(f"[agents] could not release the claim on {key}: {type(exc).__name__}: {exc}")
+        try:
+            db.rollback()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def _not_run(spec, status: str, summary: str) -> dict:
+    """What run_agent returns when it did not run (no agent_runs row is written)."""
+    return {"agent_key": spec.key, "status": status, "summary": summary, "error": None, "changes_count": 0}
+
+
 # ── One run ──────────────────────────────────────────────────
 
 def _audit(db, batch_id: str, allowed: list[str]) -> tuple[int, str | None]:
@@ -106,15 +149,29 @@ def _audit(db, batch_id: str, allowed: list[str]) -> tuple[int, str | None]:
 
 
 def run_agent(spec, trigger: str = "manual", event_ids: list[int] | None = None,
-              tick_id: int | None = None, now: datetime | None = None) -> dict:
-    """Run one agent. Returns the serialised ``agent_runs`` row. Never raises."""
+              tick_id: int | None = None, now: datetime | None = None, *, still_due=None) -> dict:
+    """Run one agent. Returns the serialised ``agent_runs`` row. Never raises.
+
+    When another run of the same agent is in progress nothing happens and the result has
+    ``status: "busy"``. ``still_due(db, row)`` is the tick's second look, taken once the
+    claim is held: it returns the event ids to deliver, or None when another tick has run
+    the agent in the meantime (``status: "not_due"``)."""
     now = now or datetime.utcnow()
     started = time.monotonic()
     run = None
     db = None
+    claim = None
     try:
         db = SessionLocal()
         row = agent_row(db, spec)
+        claim = _claim(db, spec.key)
+        if claim is None:
+            return _not_run(spec, "busy", f"{spec.name} is already running")
+        if still_due is not None:
+            db.refresh(row)
+            event_ids = still_due(db, row)
+            if event_ids is None:
+                return _not_run(spec, "not_due", f"{spec.name} already ran")
         run = models.AgentRun(agent_key=spec.key, trigger=trigger, tick_id=tick_id,
                               started_at=datetime.utcnow(), status="running")
         db.add(run)
@@ -201,6 +258,8 @@ def run_agent(spec, trigger: str = "manual", event_ids: list[int] | None = None,
                 change_log.end_batch(db)
             except Exception:  # noqa: BLE001
                 pass
+            if claim is not None:
+                _release(db, spec.key, claim)
             db.close()
 
 
@@ -266,7 +325,23 @@ def tick(trigger: str = "manual", *, now: datetime | None = None) -> dict:
             how = why if why == "event" else ("in_process" if trigger == "in_process" else "schedule")
             if trigger == "manual" and why != "event":
                 how = "manual"
-            outcome = run_agent(spec, how, event_ids, tick_id=tick_row.id, now=now)
+            def still_due(run_db, row, spec=spec, event_ids=event_ids, scheduled=(why != "event")):
+                """Looked at again with the claim held: another tick may have run it since
+                this one made its plan."""
+                if schedule.inside_min_gap(spec, row, now):
+                    return None
+                if scheduled and schedule.due(spec, row, now_local):
+                    return event_ids
+                waiting = [e.id for e in run_db.query(models.AgentEvent).filter(
+                    models.AgentEvent.id.in_(event_ids), models.AgentEvent.consumed_at.is_(None)).all()
+                ] if event_ids else []
+                return waiting or None
+
+            outcome = run_agent(spec, how, event_ids, tick_id=tick_row.id, now=now, still_due=still_due)
+            if outcome.get("status") in ("busy", "not_due"):
+                summary["skipped"].append({"key": spec.key, "reason": "already running"
+                                           if outcome["status"] == "busy" else "already ran"})
+                continue
             summary["ran"].append({"key": spec.key, "status": outcome.get("status"),
                                    "summary": outcome.get("summary")})
             if outcome.get("status") in ("failed", "violation"):

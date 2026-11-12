@@ -1032,6 +1032,8 @@ class Agent(Base):
     cost_usd_total   = Column(Float, default=0.0)
     created_at       = Column(DateTime, default=datetime.utcnow)
     updated_at       = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    # Set while a run holds the agent (runner._claim): one run at a time, across processes.
+    claimed_at       = Column(DateTime, nullable=True)
 
 
 class AgentRun(Base):

@@ -141,8 +141,11 @@ def patch_agent(key: str, payload: AgentPatch, db: Session = Depends(get_db)):
 
 @router.post("/agents/{key}/run")
 def run_agent_now(key: str):
-    """Run now, whatever the schedule or the toggle say."""
-    return runner.run_agent(_spec_or_404(key), "manual")
+    """Run now, whatever the schedule or the toggle say. 409 while the agent is already running."""
+    outcome = runner.run_agent(_spec_or_404(key), "manual")
+    if outcome.get("status") == "busy":
+        raise HTTPException(409, outcome["summary"])
+    return outcome
 
 
 @router.get("/agents/{key}/runs")

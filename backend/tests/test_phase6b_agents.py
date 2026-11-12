@@ -799,3 +799,85 @@ def test_agent_row_survives_two_requests_creating_it_at_once():
     listed = client.get("/agents").json()            # and the endpoints that share it still answer
     status = client.get("/jobs/status").json()
     assert [a["key"] for a in listed] == ["writer"] and status["agents_due_now"] == ["writer"]
+
+
+# ── Review round: one run at a time (item 12) ─────────────────
+
+def test_an_agent_that_is_running_is_not_started_again_by_a_tick_or_a_manual_run():
+    """A second tick (the in-process timer and POST /jobs/tick can overlap) or a Run now tap
+    arriving while an agent is running must not start it a second time. The overlap is made
+    deterministic by letting the agent's own run trigger them."""
+    calls, inner = [], {}
+    now = _local(2026, 11, 11, 8, 0)
+
+    def run(ctx):
+        calls.append(ctx.run.id)
+        if len(calls) == 1:
+            inner["tick"] = runner.tick("in_process", now=now)
+            inner["manual"] = runner.run_agent(agents.REGISTRY["slow"], "manual")
+            inner["api"] = client.post("/agents/slow/run")
+        return AgentResult(summary="worked")
+
+    spec = _spec("slow", run)
+    outer = runner.tick("schedule", now=now)
+
+    assert len(calls) == 1                                           # it ran once, not three or four times
+    assert [r["key"] for r in outer["ran"]] == ["slow"] and outer["errors"] == 0
+    assert inner["tick"]["ran"] == []
+    assert {"key": "slow", "reason": "already running"} in inner["tick"]["skipped"]
+    assert inner["manual"]["status"] == "busy" and "already running" in inner["manual"]["summary"]
+    assert inner["api"].status_code == 409
+    db = _db()
+    assert db.query(models.AgentRun).count() == 1
+    row = db.query(models.Agent).filter_by(key="slow").one()
+    assert row.claimed_at is None and row.runs_count == 1            # released when the run ended
+    db.close()
+    assert runner.run_agent(spec, "manual")["status"] == "completed"   # and free to run again
+
+
+def test_a_tick_with_a_stale_plan_does_not_rerun_what_another_tick_just_ran():
+    """Two ticks plan at the same moment. One finishes an agent before the other reaches it:
+    the second must look again once it holds the claim, and skip."""
+    ran = []
+    now = _local(2026, 11, 11, 8, 0)
+
+    def first(ctx):
+        ran.append("first")
+        if ran.count("first") == 1:
+            runner.tick("in_process", now=now)      # a whole second tick runs while this one is mid-plan
+        return AgentResult(summary="ok")
+
+    def second(ctx):
+        ran.append("second")
+        return AgentResult(summary="ok")
+
+    _spec("first", first)
+    _spec("second", second)
+    outer = runner.tick("schedule", now=now)
+    assert ran.count("first") == 1 and ran.count("second") == 1
+    assert [r["key"] for r in outer["ran"]] == ["first"]
+    assert {"key": "second", "reason": "already ran"} in outer["skipped"]
+
+
+def test_a_claim_left_by_a_dead_process_expires():
+    spec = _spec("stuck", lambda ctx: AgentResult(summary="ok"))
+    db = _db()
+    row = runner.agent_row(db, spec)
+    row.claimed_at = datetime.utcnow() - timedelta(minutes=5)       # a live run
+    db.commit()
+    assert runner.run_agent(spec, "manual")["status"] == "busy"
+    row.claimed_at = datetime.utcnow() - timedelta(hours=2)         # the process died long ago
+    db.commit()
+    db.close()
+    assert runner.run_agent(spec, "manual")["status"] == "completed"
+
+
+def test_a_failed_run_releases_its_claim():
+    def boom(ctx):
+        raise RuntimeError("no")
+
+    spec = _spec("fails", boom)
+    assert runner.run_agent(spec, "manual")["status"] == "failed"
+    db = _db()
+    assert db.query(models.Agent).filter_by(key="fails").one().claimed_at is None
+    db.close()
