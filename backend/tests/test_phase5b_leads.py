@@ -411,7 +411,7 @@ def test_the_dock_tap_confirms_a_requested_send():
 
 # ── 5. the Approve & send tap ─────────────────────────────────
 
-def test_send_tap_on_whatsapp_marks_sent_creates_follow_up_and_undoes():
+def test_send_tap_on_whatsapp_marks_sent_creates_follow_up_and_cannot_be_undone():
     db = _db()
     lead = _lead(db)
     lead_id = lead.id
@@ -444,15 +444,71 @@ def test_send_tap_on_whatsapp_marks_sent_creates_follow_up_and_undoes():
     assert client.get("/outreach", params={"status": "draft"}).json() == []
     assert client.get(f"/outreach/{mid}").json()["lead_name"] == "Mercy Banda"
 
+    # Review item 9: the message has left. Undo must not turn "sent" back into "draft".
     batch_id = out["changes"][0]["batch_id"]
     assert len({c["batch_id"] for c in out["changes"]}) == 1                   # one batch
-    assert client.post(f"/changes/batch/{batch_id}/undo").status_code == 200
+    assert out["undoable"] is False and "cannot be undone" in out["undo_note"]
+    assert all(c["undoable"] is False for c in out["changes"])
+    refused = client.post(f"/changes/batch/{batch_id}/undo")
+    assert refused.status_code == 409 and "cannot be undone" in refused.json()["detail"]
+    one = client.post(f"/changes/{out['changes'][0]['id']}/undo")
+    assert one.status_code == 409 and "cannot be undone" in one.json()["detail"]
     db = _db()
     message = db.query(models.OutreachMessage).filter(models.OutreachMessage.id == mid).one()
-    assert message.status == "draft" and message.sent_at is None
-    assert db.query(models.Todo).count() == 0
-    assert db.query(models.Lead).filter(models.Lead.id == lead_id).one().status == "new"
+    assert message.status == "sent" and message.sent_at is not None
+    assert db.query(models.Todo).count() == 1 and db.query(models.Communication).count() == 1
+    assert db.query(models.Lead).filter(models.Lead.id == lead_id).one().status == "contacted"
+    assert db.query(models.ChangeLog).filter(models.ChangeLog.undone_at.isnot(None)).count() == 0
     db.close()
+
+
+def test_undo_all_keeps_the_sent_message_and_reverses_the_rest():
+    """A turn that both changed something ordinary and sent a message: Undo all reverses the
+    ordinary change and leaves every record of the send."""
+    import change_log
+    db = _db()
+    lead = _lead(db)
+    lead_id = lead.id
+    message = db.query(models.OutreachMessage).filter(models.OutreachMessage.id == _draft(db, lead)["id"]).one()
+    with change_log.batch_scope(db, "assistant") as batch_id:
+        todo = models.Todo(text="Buy airtime", done=False, priority=5)
+        db.add(todo)
+        db.flush()
+        ordinary = change_log.record_create(db, todo, "Added task: Buy airtime")
+        result = outreach.execute_send(db, message)
+        db.commit()
+    assert ordinary["undoable"] is True and result["sent"] is True
+
+    undone = client.post(f"/changes/batch/{batch_id}/undo").json()
+    assert undone["undone"] == 1 and undone["kept"] == len(result["changes"])
+    assert "cannot be undone" in undone["note"]
+    db.expire_all()
+    assert db.query(models.Todo).filter(models.Todo.text == "Buy airtime").count() == 0
+    assert db.query(models.OutreachMessage).one().status == "sent"
+    assert db.query(models.Lead).filter(models.Lead.id == lead_id).one().status == "contacted"
+    again = client.post(f"/changes/batch/{batch_id}/undo")                     # nothing left that can be undone
+    assert again.status_code == 409
+    db.close()
+
+
+def test_a_manual_send_and_a_failed_send_can_still_be_undone():
+    db = _db()
+    lead = _lead(db)
+    linkedin = _draft(db, lead, channel="linkedin")["id"]
+    db.close()
+    out = client.post(f"/outreach/{linkedin}/send").json()                     # nothing left the app
+    assert out["undoable"] is True and all(c["undoable"] is True for c in out["changes"])
+    assert client.post(f"/changes/batch/{out['changes'][0]['batch_id']}/undo").status_code == 200
+    db = _db()
+    assert db.query(models.OutreachMessage).filter_by(id=linkedin).one().status == "draft"
+    nobody = _lead(db, name="No Number", whatsapp=None, email="x@example.com")
+    nobody.whatsapp = nobody.phone = None
+    db.commit()
+    failed_id = _draft(db, nobody)["id"]
+    db.close()
+    failed = client.post(f"/outreach/{failed_id}/send").json()                 # no number: nothing was sent
+    assert failed["message"]["status"] == "failed" and failed["undoable"] is True
+    assert client.post(f"/changes/batch/{failed['changes'][0]['batch_id']}/undo").status_code == 200
 
 
 def test_manual_channel_and_dismiss():

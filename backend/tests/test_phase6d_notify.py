@@ -1103,3 +1103,34 @@ def test_yes_on_a_whatsapp_send_replies_with_the_link_to_tap(hook, sends):
     saved = db.query(models.ChatMessage).filter_by(role="assistant").order_by(models.ChatMessage.id.desc()).first()
     assert link in saved.content                                               # the thread remembers the link too
     db.close()
+
+
+def test_a_sent_message_is_not_undone_from_telegram_and_the_reply_says_so(hook, sends):
+    """Review item 9."""
+    db = _db()
+    _pair(db)
+    lead, message_id = _whatsapp_draft(db)
+    rounds = [_tool_round("request_send", {"message_id": message_id}), _final_round("Shall I send it to Mercy?")]
+    with patch("openai_client._stream_completion", _scripted(rounds)):
+        hook("send Mercy the intro")
+    hook("/yes")
+    reply = _texts(sends)[-1]
+    assert "https://wa.me/260977123456" in reply
+    assert "cannot be undone" in reply and "/undo" not in reply
+    hook("/undo")
+    db.expire_all()
+    assert "cannot be undone" in _texts(sends)[-1] and not _texts(sends)[-1].startswith("Undone")
+    assert db.query(models.OutreachMessage).one().status == "sent"
+    assert db.query(models.Lead).one().status == "contacted"
+    db.close()
+
+
+def test_format_reply_says_which_changes_cannot_be_undone():
+    kept = {"summary": "Sent email to Mercy Banda", "undoable": False}
+    plain = {"summary": "Added task: Buy airtime", "undoable": True}
+    assert telegram_inbound.format_reply({"final": "Sent.", "changes": [kept]}) == (
+        "Sent.\nChanged: Sent email to Mercy Banda\nA sent message cannot be undone.")
+    assert telegram_inbound.format_reply({"final": "Done.", "changes": [plain, kept]}) == (
+        "Done.\nChanged: Added task: Buy airtime; Sent email to Mercy Banda\n"
+        "/undo to reverse (a sent message cannot be undone)")
+    assert telegram_inbound.format_reply({"final": "Done.", "changes": [plain]}).endswith("/undo to reverse")

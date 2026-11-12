@@ -577,6 +577,7 @@ anything. RLS enabled on every new table on Postgres (m008 convention).
 | m020 | Phase 6B: `agents`, `agent_runs`, `agent_events`, `job_ticks`; `llm_usage.agent_run_id` |
 | m021 | Phase 6C: `integrations`, `calendar_events`, `email_messages`; `outreach_messages.replied_at` |
 | m022 | Phase 6D: `notifications`, `notification_settings` (row 1 created with the defaults) |
+| m023 | Review round: `change_log.undoable` (FALSE on the record of a sent email or WhatsApp message; undo keeps those rows) |
 
 **Postgres notes**
 - All ADD COLUMN use `IF NOT EXISTS`; all tables `CREATE TABLE IF NOT EXISTS`.

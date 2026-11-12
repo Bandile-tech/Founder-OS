@@ -683,6 +683,7 @@ class ChangeLog(Base):
     after_json  = Column(Text, nullable=True)
     summary     = Column(String, nullable=True)
     undone_at   = Column(DateTime, nullable=True)
+    undoable    = Column(Boolean, default=True, nullable=True)   # False: records something that has left (a sent message)
 
 
 class PendingAction(Base):

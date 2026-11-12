@@ -9,6 +9,12 @@ Undo restores the before-state: an update is reverted column by column, a create
 removed, a delete is re-inserted with its original id. Undo is idempotent — a change
 already undone reports ``already_undone`` and touches nothing.
 
+Some changes record something that has already left the system: an email that was sent, a
+WhatsApp message that was approved and opened. They are written inside
+``with irreversible(db):`` and stored with ``undoable = False``. Undo never touches them:
+undoing one is refused (409), and undoing a batch reverses the rest and reports them as
+``kept``.
+
 Endpoints:
   GET  /changes                       recent changes (newest first)
   POST /changes/{id}/undo
@@ -29,6 +35,8 @@ from database import get_db
 router = APIRouter()
 
 _BATCH_KEY = "change_batch"
+_KEEP_KEY = "change_irreversible"
+NOT_UNDOABLE = "A sent message cannot be undone."
 
 
 # ── Batches ──────────────────────────────────────────────────
@@ -81,6 +89,29 @@ class batch_scope:
         return False
 
 
+class irreversible:
+    """``with irreversible(db):`` — every change recorded inside is a record of something
+    that has already left (a sent message). It is logged like any other and never undone."""
+
+    def __init__(self, db: Session, active: bool = True):
+        self.db = db
+        self.active = active
+        self.previous = None
+
+    def __enter__(self):
+        self.previous = self.db.info.get(_KEEP_KEY)
+        if self.active:
+            self.db.info[_KEEP_KEY] = True
+        return self
+
+    def __exit__(self, *exc):
+        if self.previous is None:
+            self.db.info.pop(_KEEP_KEY, None)
+        else:
+            self.db.info[_KEEP_KEY] = self.previous
+        return False
+
+
 # ── Snapshots ────────────────────────────────────────────────
 
 def _json_safe(value):
@@ -126,6 +157,7 @@ def _entry(row: models.ChangeLog) -> dict:
         "id": row.id, "summary": row.summary, "table": row.table_name,
         "action": row.action, "record_id": row.record_id, "batch_id": row.batch_id,
         "undone": row.undone_at is not None,
+        "undoable": row.undoable is not False,
     }
 
 
@@ -144,6 +176,7 @@ def _record(db: Session, *, table_name: str, record_id, action: str, before, aft
         before_json=json.dumps(before, default=str) if before is not None else None,
         after_json=json.dumps(after, default=str) if after is not None else None,
         summary=summary,
+        undoable=not db.info.get(_KEEP_KEY),
     )
     db.add(row)
     db.flush()
@@ -202,6 +235,8 @@ def _after_undo_hook(db: Session, table_name: str, row: models.ChangeLog | None 
 def _undo_row(db: Session, row: models.ChangeLog) -> dict:
     if row.undone_at is not None:
         return {**_entry(row), "already_undone": True}
+    if row.undoable is False:
+        raise HTTPException(409, NOT_UNDOABLE)
     model = _model_for(row.table_name)
     if model is None:
         raise HTTPException(400, f"Cannot undo changes to unknown table '{row.table_name}'")
@@ -260,6 +295,10 @@ def undo_batch(db: Session, batch_id: str) -> dict:
     )
     if not rows:
         raise HTTPException(404, "Batch not found")
+    kept = [r for r in rows if r.undoable is False]
+    rows = [r for r in rows if r.undoable is not False]
+    if kept and not any(r.undone_at is None for r in rows):
+        raise HTTPException(409, NOT_UNDOABLE)          # nothing in the batch is left to undo
     try:
         results = [_undo_row(db, r) for r in rows]
         db.commit()
@@ -269,12 +308,16 @@ def undo_batch(db: Session, batch_id: str) -> dict:
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(409, f"Cannot undo batch: a record is still referenced ({exc.orig})")
-    return {
+    out = {
         "batch_id": batch_id,
         "undone": sum(1 for r in results if not r["already_undone"]),
         "already_undone": sum(1 for r in results if r["already_undone"]),
         "changes": results,
     }
+    if kept:
+        out["kept"] = len(kept)
+        out["note"] = NOT_UNDOABLE
+    return out
 
 
 # ── Endpoints ────────────────────────────────────────────────

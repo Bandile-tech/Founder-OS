@@ -926,10 +926,13 @@ def _readable(name: str, result):
                 "next step": "Ask Bandile to confirm in plain words. Call confirm_action only after he says yes."}
     if name == "confirm_action":
         if result.get("executed"):
+            shaped = {"done": result["summary"]}
             if result.get("open_url"):
-                return {"done": result["summary"], "open link": result["open_url"],
-                        "next step": "Tell Bandile to tap the link to open WhatsApp and send it."}
-            return {"done": result["summary"]}
+                shaped["open link"] = result["open_url"]
+                shaped["next step"] = "Tell Bandile to tap the link to open WhatsApp and send it."
+            if result.get("undoable") is False:
+                shaped["undo"] = "A sent message cannot be undone. Say so; do not offer to undo it."
+            return shaped
         return {"not done": f"{result['summary']} — {result.get('reason', 'not executed')}"}
     if name == "cancel_action":
         return {"cancelled": result["summary"]}

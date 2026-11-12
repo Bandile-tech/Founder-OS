@@ -94,6 +94,9 @@ class ManualChannel(Channel):
 
 
 CHANNELS = ("whatsapp", "email", "linkedin", "call", "other")
+# Channels through which a message actually leaves once it is approved. What they send
+# cannot be unsent, so the record of it is never undone.
+EXTERNAL = ("whatsapp", "email")
 
 
 def get_channel(name: str) -> Channel:

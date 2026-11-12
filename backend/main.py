@@ -205,6 +205,8 @@ async def startup():
         run_m021(db)        # m021 — integrations, calendar_events, email_messages, outreach_messages.replied_at
         from migrations.m022_notifications import run as run_m022
         run_m022(db)        # m022 — notifications, notification_settings (row 1)
+        from migrations.m023_review_round import run as run_m023
+        run_m023(db)        # m023 — change_log.undoable
         _validate_schema(engine)   # raises if any ORM column is absent from the live DB
         _seed_non_negotiables_if_empty(db)
         _verify_seed_integrity(db)

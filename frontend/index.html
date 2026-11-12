@@ -2940,13 +2940,17 @@ function renderChangesStrip(changes,container){
   let host=container||document.getElementById("ucmd-changes");
   if(!host){showToast(changes.map(c=>c.summary).join(" · "),"info");return;}
   const batch=changes[0].batch_id;
-  const undoAll=changes.length>1&&batch?`<button class="chg-undo" onclick="undoBatch('${escHtml(batch)}',this)">Undo all</button>`:"";
+  // A change that records a sent message (undoable:false) is shown without Undo.
+  const canUndo=changes.filter(c=>c.undoable!==false).length;
+  const undoAll=canUndo>1&&batch?`<button class="chg-undo" onclick="undoBatch('${escHtml(batch)}',this)">Undo all</button>`:"";
   host.innerHTML=`<div class="chg-head"><span>${changes.length} change${changes.length>1?"s":""}</span>${undoAll}</div>
     <div class="chg-strip">${changes.map(c=>`
       <div class="chg-row ${c.undone?"undone":""}" id="chg-${Number(c.id)}">
         <span class="chg-act">${escHtml(c.action)}</span>
         <span class="chg-text">${escHtml(c.summary||`${c.table} #${c.record_id}`)}</span>
-        <button class="chg-undo" onclick="undoChange(${Number(c.id)},this)" ${c.undone?"disabled":""}>${c.undone?"Undone":"Undo"}</button>
+        ${c.undoable===false
+          ?`<button class="chg-undo" disabled title="A sent message cannot be undone">Sent</button>`
+          :`<button class="chg-undo" onclick="undoChange(${Number(c.id)},this)" ${c.undone?"disabled":""}>${c.undone?"Undone":"Undo"}</button>`}
       </div>`).join("")}</div>`;
 }
 
@@ -2974,7 +2978,7 @@ async function undoBatch(batchId,btn){
     const d=await r.json();
     (d.changes||[]).forEach(c=>{const row=document.getElementById(`chg-${c.id}`);if(row){row.classList.add("undone");const b=row.querySelector(".chg-undo");if(b){b.disabled=true;b.textContent="Undone";}}});
     if(btn)btn.textContent="Undone";
-    showToast(`Undid ${d.undone} change${d.undone===1?"":"s"}`,"info");
+    showToast(`Undid ${d.undone} change${d.undone===1?"":"s"}`+(d.kept?". The sent message stays: it cannot be undone":""),"info");
     _afterWriteRefresh();
   }catch(e){
     if(btn){btn.disabled=false;btn.textContent="Undo all";}

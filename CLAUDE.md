@@ -146,7 +146,7 @@ before markdown runs.
 | `conversation.py` | One default thread, verbatim window + rolling summary, replay of tool results, `GET /conversation/history` |
 | `assistant_state.py` | Everything the assistant knows about Bandile's state, from the current sources only (see below) |
 | `memory_service.py` | Long-term memory (`remember` tool, recall) |
-| `change_log.py` | Every write recorded with before/after snapshots; undo; batches live on `db.info` |
+| `change_log.py` | Every write recorded with before/after snapshots; undo; batches live on `db.info`. Changes written inside `irreversible(db)` (a sent email or WhatsApp message) are logged but never undone |
 | `actions.py` | Pending deletes needing confirmation; suggestions accepted with one tap |
 | `notes.py` | Notes (book / bible / journal / inbox / general), search, endpoints |
 | `retrieval.py` | Shared `embeddings` table, cosine in Python, keyword fallback |
@@ -158,7 +158,7 @@ before markdown runs.
 | `vault_sync.py` | Obsidian vault clone/index; semantic search when embedded |
 | `user_clock.py` | The user's clock: `today()` and `now()` in `FOUNDER_OS_TZ`. No app code calls `date.today()` or `datetime.now()` |
 | `models.py` / `schemas.py` / `database.py` | ORM, Pydantic, engine (SQLite locally, Postgres on Supabase) |
-| `migrations/` | Hand-written, re-runnable, wired into startup (`m010`–`m013` are the rebuild, `m014`–`m022` Phases 5 and 6) |
+| `migrations/` | Hand-written, re-runnable, wired into startup (`m010`–`m013` are the rebuild, `m014`–`m022` Phases 5 and 6, `m023` the review round). A data backfill that must run once uses `_helpers.claim_once` (`migration_marks`) |
 | `market_intel/` | Research agent: roles, weighted scoring (`scoring.py`), standing objectives (`objectives.py`) |
 | `business_common.py` | Shared helpers: fuzzy matching, money, `parse_day`, `parse_when` |
 | `leads.py` / `outreach.py` / `outreach_channels.py` | Leads, qualification, drafted messages, the approval gate, the channels (WhatsApp link, email, manual) |

@@ -130,9 +130,12 @@ def _undo(db, chat_id) -> str:
         except (ValueError, TypeError):
             continue
         for batch_id in dict.fromkeys(b for b in batches if b):
-            live = db.query(models.ChangeLog).filter(
+            pending = db.query(models.ChangeLog).filter(
                 models.ChangeLog.batch_id == batch_id, models.ChangeLog.undone_at.is_(None)).all()
+            live = [c for c in pending if c.undoable is not False]
             if not live:
+                if pending:                         # the newest thing done was a send: say so, undo nothing older
+                    return change_log.NOT_UNDOABLE + " Nothing was changed."
                 continue
             summaries = [c.summary for c in live if c.summary]
             try:
@@ -140,7 +143,8 @@ def _undo(db, chat_id) -> str:
             except HTTPException as exc:
                 db.rollback()
                 return f"Could not undo that: {exc.detail}"
-            return "Undone: " + ("; ".join(summaries) or "the last change")
+            kept = " (the sent message stays: it cannot be undone)" if len(live) < len(pending) else ""
+            return "Undone: " + ("; ".join(summaries) or "the last change") + kept
     return "Nothing to undo from the last 24 hours."
 
 
@@ -154,6 +158,7 @@ def _waiting(db):
 
 def _yes(db) -> tuple[str, list]:
     import actions
+    import change_log
     pending = _waiting(db)
     if pending is None:
         return "Nothing is waiting for a yes.", []
@@ -167,11 +172,12 @@ def _yes(db) -> tuple[str, list]:
     if outcome.get("executed"):
         change = outcome.get("change")
         changes = outcome.get("changes") or ([change] if isinstance(change, dict) else [])
+        tail = "/undo to reverse" if outcome.get("undoable", True) else change_log.NOT_UNDOABLE
         if outcome.get("open_url"):
             # WhatsApp has no API here: approving only builds the link. The tap is the send.
             return (f"Approved: {summary}\nTap to open WhatsApp and send it:\n{outcome['open_url']}"
-                    "\n/undo to reverse"), changes
-        return f"Done: {summary}\n/undo to reverse", changes
+                    f"\n{tail}"), changes
+        return f"Done: {summary}\n{tail}", changes
     return f"Not done: {outcome.get('reason') or outcome.get('error') or 'it could not be carried out'}", []
 
 
@@ -239,9 +245,17 @@ def _command(db, chat_id, text: str) -> str | None:
 def format_reply(result: dict) -> str:
     """The assistant's answer, what changed, and how to answer a proposal."""
     text = (result.get("final") or "").strip() or "Done."
-    summaries = [c.get("summary") for c in result.get("changes") or [] if isinstance(c, dict) and c.get("summary")]
-    if summaries:
-        text += "\nChanged: " + "; ".join(summaries) + "\n/undo to reverse"
+    changes = [c for c in result.get("changes") or [] if isinstance(c, dict) and c.get("summary")]
+    if changes:
+        import change_log
+        kept = [c for c in changes if c.get("undoable") is False]
+        text += "\nChanged: " + "; ".join(c["summary"] for c in changes) + "\n"
+        if len(kept) == len(changes):
+            text += change_log.NOT_UNDOABLE
+        elif kept:
+            text += "/undo to reverse (a sent message cannot be undone)"
+        else:
+            text += "/undo to reverse"
     if result.get("pending"):
         text += "\nReply /yes to confirm or /no."
     return text

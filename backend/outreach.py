@@ -206,36 +206,43 @@ def execute_send(db: Session, message: models.OutreachMessage) -> dict:
         _close_pending(db, message, "confirmed")
         changes.append(change_log.record_update(
             db, message, before, f"Could not send {message.channel} to {lead.name[:40]}"))
-        return _result(db, message, sent=False, error=message.error, changes=[c for c in changes if c])
+        return _result(db, message, sent=False, error=message.error, undoable=True,
+                       changes=[c for c in changes if c])
 
-    message.status, message.sent_at, message.error, message.updated_at = "sent", now, None, now
-    if outcome.get("external_id"):
-        message.external_id = outcome["external_id"]
-    _close_pending(db, message, "confirmed")
-    changes.append(change_log.record_update(db, message, before, f"Sent {message.channel} to {lead.name[:50]}"))
+    # An email that went out, or a WhatsApp message that was approved and opened, has left:
+    # nothing recorded about it may be undone. A manual channel sent nothing itself.
+    left = message.channel in outreach_channels.EXTERNAL
+    with change_log.irreversible(db, left):
+        message.status, message.sent_at, message.error, message.updated_at = "sent", now, None, now
+        if outcome.get("external_id"):
+            message.external_id = outcome["external_id"]
+        _close_pending(db, message, "confirmed")
+        changes.append(change_log.record_update(db, message, before, f"Sent {message.channel} to {lead.name[:50]}"))
 
-    lead_before = change_log.snapshot(lead)
-    lead.last_contact_at = now
-    if lead.status in ("new", "qualified", "disqualified"):
-        lead.status = "contacted"
-    follow = leads.open_follow_up(db, lead.id)
-    if follow is None:
-        follow, follow_change = leads.set_follow_up(db, lead, user_clock.today() + timedelta(days=FOLLOW_UP_DAYS))
-        changes.append(follow_change)
-    lead.updated_at = now
-    changes.append(change_log.record_update(db, lead, lead_before, f"Contacted {lead.name[:60]}"))
+        lead_before = change_log.snapshot(lead)
+        lead.last_contact_at = now
+        if lead.status in ("new", "qualified", "disqualified"):
+            lead.status = "contacted"
+        follow = leads.open_follow_up(db, lead.id)
+        if follow is None:
+            follow, follow_change = leads.set_follow_up(db, lead, user_clock.today() + timedelta(days=FOLLOW_UP_DAYS))
+            changes.append(follow_change)
+        lead.updated_at = now
+        changes.append(change_log.record_update(db, lead, lead_before, f"Contacted {lead.name[:60]}"))
 
-    if hasattr(models, "Communication"):
-        import crm
-        logged = crm.log_communication(
-            db, lead=lead, channel=message.channel if message.channel in crm.CHANNELS else "other",
-            direction="out", summary=(message.subject or message.body)[:200], occurred_at=now,
-            source="outreach", outreach_message_id=message.id)
-        changes.append(logged["change"])
+        if hasattr(models, "Communication"):
+            import crm
+            logged = crm.log_communication(
+                db, lead=lead, channel=message.channel if message.channel in crm.CHANNELS else "other",
+                direction="out", summary=(message.subject or message.body)[:200], occurred_at=now,
+                source="outreach", outreach_message_id=message.id)
+            changes.append(logged["change"])
 
     if outcome.get("open_url"):
         extra["open_url"] = outcome["open_url"]
-    return _result(db, message, sent=True, follow_up_todo_id=follow.id,
+    if left:
+        extra["undo_note"] = change_log.NOT_UNDOABLE
+    return _result(db, message, sent=True, follow_up_todo_id=follow.id, undoable=not left,
                    changes=[c for c in changes if c], **extra)
 
 
@@ -252,9 +259,11 @@ def execute_pending(db: Session, pending: models.PendingAction) -> dict:
     if not result["sent"]:
         return {"executed": False, "reason": result["error"], "status": "confirmed", "message": result}
     out = {"executed": True, "status": "confirmed", "message": result, "changes": result["changes"],
-           "follow_up_todo_id": result["follow_up_todo_id"]}
+           "follow_up_todo_id": result["follow_up_todo_id"], "undoable": result["undoable"]}
     if result.get("open_url"):
         out["open_url"] = result["open_url"]
+    if result.get("undo_note"):
+        out["undo_note"] = result["undo_note"]
     return out
 
 
@@ -363,8 +372,11 @@ def send_outreach(message_id: int, db: Session = Depends(get_db)):
             db.rollback()
             raise HTTPException(409, str(exc))
         db.commit()
-    out = {"message": {k: v for k, v in result.items() if k not in ("changes", "open_url", "follow_up_todo_id")},
-           "changes": result["changes"]}
+    hidden = ("changes", "open_url", "follow_up_todo_id", "undoable", "undo_note")
+    out = {"message": {k: v for k, v in result.items() if k not in hidden},
+           "changes": result["changes"], "undoable": result["undoable"]}
+    if result.get("undo_note"):
+        out["undo_note"] = result["undo_note"]
     if result.get("open_url"):
         out["open_url"] = result["open_url"]
     if result.get("follow_up_todo_id"):
