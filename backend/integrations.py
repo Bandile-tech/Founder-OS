@@ -49,15 +49,16 @@ def get_or_create(db: Session, provider: str) -> models.Integration:
     if row is None:
         row = models.Integration(provider=provider, status="disconnected",
                                  created_at=datetime.utcnow(), updated_at=datetime.utcnow())
-        db.add(row)
         try:
-            db.commit()
+            with db.begin_nested():             # a savepoint: losing the race undoes only this insert
+                db.add(row)
+                db.flush()
         except IntegrityError:
-            db.rollback()
             row = _find(db, provider)
             if row is None:
                 raise
         else:
+            db.commit()
             db.refresh(row)
     return row
 

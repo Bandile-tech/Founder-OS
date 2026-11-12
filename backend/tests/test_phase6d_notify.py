@@ -1134,3 +1134,36 @@ def test_format_reply_says_which_changes_cannot_be_undone():
         "Done.\nChanged: Added task: Buy airtime; Sent email to Mercy Banda\n"
         "/undo to reverse (a sent message cannot be undone)")
     assert telegram_inbound.format_reply({"final": "Done.", "changes": [plain]}).endswith("/undo to reverse")
+
+
+# ── Review round: a duplicate key and the caller's transaction (item 14) ──
+
+def test_a_duplicate_dedupe_key_never_rolls_back_the_callers_work():
+    """queue() says the caller owns the transaction, but on a duplicate key it rolled the
+    whole session back, taking the caller's uncommitted work with it."""
+    db = _db()
+    first = _queue(db, kind="alert", body="Payment overdue: Hope Clinic", dedupe_key="alert:overdue:1")
+
+    todo = models.Todo(text="the caller's own work, not yet committed", done=False, priority=5)
+    db.add(todo)
+    db.flush()
+    real = notify._by_key
+    looks = {"n": 0}
+
+    def racing(session, key):
+        # The other request had not committed when we looked; it has by the time we insert.
+        looks["n"] += 1
+        return None if looks["n"] == 1 else real(session, key)
+
+    with patch.object(notify, "_by_key", side_effect=racing):
+        out = notify.queue(db, kind="alert", body="Payment overdue: Hope Clinic", dedupe_key="alert:overdue:1")
+    assert out["deduped"] is True and out["id"] == first["id"]
+    db.commit()
+    db.expire_all()
+    assert db.query(models.Todo).filter_by(text="the caller's own work, not yet committed").count() == 1
+    assert db.query(models.Notification).count() == 1
+
+    # The session is still usable, and a new key still queues.
+    again = _queue(db, kind="alert", body="Another", dedupe_key="alert:overdue:2")
+    assert again["deduped"] is False and db.query(models.Notification).count() == 2
+    db.close()

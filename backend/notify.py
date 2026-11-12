@@ -61,12 +61,14 @@ def settings(db: Session) -> models.NotificationSettings:
     row = db.query(models.NotificationSettings).filter(models.NotificationSettings.id == 1).first()
     if row is None:
         row = models.NotificationSettings(id=1, updated_at=datetime.utcnow(), **DEFAULTS)
-        db.add(row)
         try:
-            db.commit()
+            with db.begin_nested():             # a savepoint: losing the race undoes only this insert
+                db.add(row)
+                db.flush()
         except IntegrityError:
-            db.rollback()
             row = db.query(models.NotificationSettings).filter(models.NotificationSettings.id == 1).first()
+        else:
+            db.commit()
     return row
 
 
@@ -228,11 +230,13 @@ def queue(db: Session, *, kind: str, body: str, title: str | None = None, dedupe
         channel="telegram", kind=kind, title=(str(title).strip()[:200] if title else None), body=text,
         dedupe_key=dedupe_key, send_at=send_at, status="queued", source=source, created_at=datetime.utcnow(),
         agent_run_id=agent_run_id if agent_run_id is not None else db.info.get("agent_run_id"))
-    db.add(row)
+    # The insert runs inside a savepoint: if another request queued the same key first, only
+    # this insert is rolled back. The caller's own uncommitted work is never touched.
     try:
-        db.flush()
-    except IntegrityError:                       # another request queued the same key first
-        db.rollback()
+        with db.begin_nested():
+            db.add(row)
+            db.flush()
+    except IntegrityError:
         existing = _by_key(db, dedupe_key) if dedupe_key else None
         if existing is None:
             raise

@@ -56,20 +56,22 @@ def agent_row(db, spec) -> models.Agent:
 
     Two requests can reach this at the same moment (the Agents page asks for the registry
     and the scheduler status together). ``key`` is unique, so the loser of that race gets an
-    IntegrityError: it rolls back and reads the row the winner wrote."""
+    IntegrityError inside a savepoint, so only its own insert is undone (never the caller's
+    uncommitted work), and it reads the row the winner wrote."""
     row = _find_row(db, spec.key)
     if row is None:
         row = models.Agent(key=spec.key, enabled=bool(spec.enabled_by_default), runs_count=0,
                            cost_usd_total=0.0, created_at=datetime.utcnow(), updated_at=datetime.utcnow())
-        db.add(row)
         try:
-            db.commit()
+            with db.begin_nested():             # a savepoint: losing the race undoes only this insert
+                db.add(row)
+                db.flush()
         except IntegrityError:
-            db.rollback()
             row = _find_row(db, spec.key)
             if row is None:
                 raise
         else:
+            db.commit()
             db.refresh(row)
     return row
 
