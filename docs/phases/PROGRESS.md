@@ -221,9 +221,9 @@ Decisions where the spec was silent:
   itself configured; until S19 it returns "email sending is not configured".
 
 Known limits:
-- A WhatsApp link is built from the stored digits exactly as the spec says. A local number
-  kept as typed (`0977…`) therefore produces `wa.me/0977…`, which WhatsApp does not accept;
-  only numbers stored with a country code (`+260…`) open correctly. See follow-ups.
+- (Fixed in the review round.) A WhatsApp link was built from the stored digits as typed, so
+  a local number (`0977…`) produced `wa.me/0977…`, which WhatsApp does not accept. The link
+  now carries `DEFAULT_COUNTRY_CODE` (260) for local numbers; the stored number is unchanged.
 - In live voice the spoken "yes" counts as a later message only once its transcript line
   has been saved; if the model confirms before that, it is told to wait, and the dock tap
   works regardless.
@@ -1137,9 +1137,5 @@ service after deployment.
   endpoints exist and are tested; neither has a control on screen yet.
 - The Clients KPI strip is in dollars because `GET /crm/summary` reports `*_usd`. Bandile
   works in Kwacha; consider adding ZMW totals to the summary and leading with them.
-
-- WhatsApp links for local numbers: add a default country code (for example an env var
-  `WHATSAPP_DEFAULT_COUNTRY_CODE=260`) applied only when building the `wa.me` link for a
-  number that starts with a single `0`. Today those links do not open a chat.
 
 - `tests/test_market_intel.py` uses the deprecated `Query.get()` in three places.

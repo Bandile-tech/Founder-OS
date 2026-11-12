@@ -42,6 +42,7 @@ Environment (`backend/.env` locally, Render env vars in production):
 | `EMBEDDING_MODEL` | `text-embedding-3-small` | Vault / notes / memory retrieval |
 | `ZMW_PER_USD` | `27` | Kwacha → dollar for the revenue scoreboard |
 | `DEFAULT_CURRENCY` | `ZMW` | The currency of a client when none is given (`ZMW` or `USD`); also what m016 gives clients that predate the column |
+| `DEFAULT_COUNTRY_CODE` | `260` | Country code put on a local phone number (leading `0`, or no code at all) when a WhatsApp link is built |
 | `REALTIME_MODEL` | `gpt-realtime-2.1-mini` | Live voice (current mini realtime model, checked 2026-11-05) |
 | `ASSISTANT_HISTORY_TURNS` / `ASSISTANT_SUMMARY_BATCH` | `20` / `10` | History budget |
 | `INTENT_CONFIDENCE_MIN` | `0.7` | Below this an extracted item becomes a suggestion |

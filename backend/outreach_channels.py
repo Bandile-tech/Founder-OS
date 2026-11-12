@@ -9,7 +9,39 @@ human approval. Each returns ``{"ok": bool, "external_id"?, "open_url"?, "error"
   linkedin/call/other — manual: the user copies the text and the tap marks it sent
 """
 
+import os
 from urllib.parse import quote
+
+
+def default_country_code() -> str:
+    """DEFAULT_COUNTRY_CODE as digits (default 260, Zambia)."""
+    digits = "".join(ch for ch in (os.getenv("DEFAULT_COUNTRY_CODE") or "") if ch.isdigit()).lstrip("0")
+    return digits or "260"
+
+
+def whatsapp_digits(number) -> str:
+    """The digits wa.me needs: country code first, no plus, no leading zero.
+
+    A number written with ``+`` or ``00`` is international and kept as given. A number
+    with one leading zero is local, so the zero is replaced by the default country code.
+    With neither: ten digits or fewer is a local number without its zero (the country
+    code is added); anything longer already carries a country code."""
+    raw = (number or "").strip()
+    digits = "".join(ch for ch in raw if ch.isdigit())
+    if not digits:
+        return ""
+    cc = default_country_code()
+    if raw.lstrip(" (").startswith("+"):
+        return digits
+    if digits.startswith("00"):
+        return digits[2:].lstrip("0")
+    if digits.startswith("0"):
+        return cc + digits[1:]
+    if digits.startswith(cc) and len(digits) >= len(cc) + 8:
+        return digits
+    if len(digits) <= 10:
+        return cc + digits
+    return digits
 
 
 class Channel:
@@ -24,7 +56,7 @@ class WhatsAppLinkChannel(Channel):
 
     def send(self, db, message, lead) -> dict:
         number = lead.whatsapp or lead.phone or ""
-        digits = "".join(ch for ch in number if ch.isdigit())
+        digits = whatsapp_digits(number)
         if not digits:
             return {"ok": False, "error": "no WhatsApp number on file for this lead"}
         return {"ok": True, "open_url": f"https://wa.me/{digits}?text={quote(message.body or '')}"}
