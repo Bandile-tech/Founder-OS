@@ -956,10 +956,19 @@ def mailbox(monkeypatch):
 
 
 def _raw(sender, subject, body, *, message_id, in_reply_to=None, thread="1700",
-         content_type="text/plain; charset=utf-8", encoding=None, date_text="Thu, 12 Nov 2026 09:30:00 +0200"):
-    """One IMAP FETCH response, shaped as imaplib returns it."""
-    lines = [f"From: {sender}", f"To: {MAILBOX}", f"Subject: {subject}", f"Date: {date_text}",
-             f"Message-ID: {message_id}", f"Content-Type: {content_type}"]
+         content_type="text/plain; charset=utf-8", encoding=None, date_text="Thu, 12 Nov 2026 09:30:00 +0200",
+         auth="pass"):
+    """One IMAP FETCH response, shaped as imaplib returns it. ``auth`` is the
+    Authentication-Results header(s) the receiving server put on top: "pass" builds a passing
+    one for the sender's own domain, None leaves it out, a list gives the headers top-down."""
+    from email.utils import parseaddr
+    domain = parseaddr(sender)[1].split("@")[-1].lower()
+    if auth == "pass":
+        auth = [f"mx.google.com; dkim=pass header.i=@{domain} header.s=s1; spf=pass smtp.mailfrom=bounce@{domain}; "
+                f"dmarc=pass (p=NONE sp=NONE dis=NONE) header.from={domain}"]
+    lines = [f"Authentication-Results: {value}" for value in (auth or [])]
+    lines += [f"From: {sender}", f"To: {MAILBOX}", f"Subject: {subject}", f"Date: {date_text}",
+              f"Message-ID: {message_id}", f"Content-Type: {content_type}"]
     if in_reply_to:
         lines.append(f"In-Reply-To: {in_reply_to}")
     if encoding:
@@ -1079,13 +1088,13 @@ def test_fetch_keeps_mail_from_known_people_and_nothing_else(mailbox):
     with patch.object(mail.imaplib, "IMAP4_SSL", imap):
         counts = mail.fetch(db, since=date(2026, 11, 9))
     assert counts == {"ok": True, "fetched": 3, "stored": 2, "matched_leads": 1, "matched_clients": 1,
-                      "ignored": 1, "error": None, "backlog": 0}
+                      "ignored": 1, "error": None, "backlog": 0, "unverified": 0}
     assert ("connect", "imap.gmail.com") in imap.calls and ("login", MAILBOX, APP_PASSWORD) in imap.calls
     assert ("select", "INBOX", True) in imap.calls                          # read-only: nothing is marked read
     assert ("search", ("SINCE", "09-Nov-2026")) in imap.calls and imap.closed
     items = next(c[1] for c in imap.calls if c[0] == "fetch")
     assert "BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT DATE MESSAGE-ID IN-REPLY-TO" in items
-    assert "BODY.PEEK[TEXT]<0.2000>" in items and "X-GM-THRID" in items
+    assert "BODY.PEEK[TEXT]<0.2000>" in items and "X-GM-THRID" in items and "AUTHENTICATION-RESULTS" in items
 
     stored = {m.message_id: m for m in db.query(models.EmailMessage).all()}
     assert set(stored) == {"<reply-1@sunrise.example>", "<q-2@bakery.example>"}       # the newsletter is not kept
@@ -1194,6 +1203,95 @@ def test_a_backlog_is_read_oldest_first_and_nothing_is_skipped(mailbox, monkeypa
     db.close()
 
 
+def _reply_with(auth, message_id="<spoof-1@sunrise.example>"):
+    return _raw("Mercy Banda <mercy@sunrise.example>", "Re: Stock alerts", "Yes, send me the invoice details.",
+                message_id=message_id, in_reply_to=OUTREACH_ID, auth=auth)
+
+
+@pytest.mark.parametrize("auth", [
+    None,                                                                       # no header at all
+    ["mx.google.com; dkim=fail header.i=@sunrise.example; spf=fail smtp.mailfrom=x@evil.example; "
+     "dmarc=fail (p=NONE) header.from=sunrise.example"],                        # the checks failed
+    ["mx.google.com; dkim=pass header.i=@evil.example; spf=pass smtp.mailfrom=x@evil.example"],  # passes for another domain
+    ["mx.google.com; spf=softfail smtp.mailfrom=x@evil.example; dmarc=fail header.from=sunrise.example",
+     "mx.google.com; dkim=pass header.i=@sunrise.example; dmarc=pass header.from=sunrise.example"],  # a forged header underneath
+    ["mail.evil.example; dkim=pass header.i=@sunrise.example; dmarc=pass header.from=sunrise.example"],  # not our server's header
+])
+def test_an_unverified_sender_changes_nothing_and_becomes_a_suggestion(mailbox, auth):
+    """Review item 11: the From line is all that tied a message to a lead, and anyone can
+    write a From line. Only a message whose authentication results pass may move a lead."""
+    db = _db()
+    lead_id, _client_id, _contact_id, outreach_id, todo_id = _people(db)
+    with patch.object(mail.imaplib, "IMAP4_SSL", FakeIMAP([_reply_with(auth)])):
+        counts = mail.fetch(db, since=date(2026, 11, 9))
+    assert (counts["stored"], counts["unverified"], counts["matched_leads"]) == (1, 1, 1)
+
+    db.expire_all()
+    stored = db.query(models.EmailMessage).one()                               # it is kept, marked unverified
+    assert stored.lead_id == lead_id and stored.auth_result in ("fail", "none")
+    assert db.query(models.Lead).filter_by(id=lead_id).one().status == "contacted"
+    assert db.query(models.Todo).filter_by(id=todo_id).one().done is False
+    assert db.query(models.OutreachMessage).filter_by(id=outreach_id).one().replied_at is None
+    assert db.query(models.AgentEvent).filter_by(kind="lead.replied").count() == 0
+    assert db.query(models.Communication).count() == 0 and db.query(models.ChangeLog).count() == 0
+
+    suggestion = db.query(models.Suggestion).one()
+    payload = json.loads(suggestion.payload_json)
+    assert suggestion.kind == "lead_reply" and suggestion.status == "pending"
+    assert payload["lead_id"] == lead_id and payload["email_message_id"] == stored.id
+    assert "Mercy Banda" in payload["text"] and "verified" in suggestion.reason
+
+    # The same message again files nothing twice.
+    with patch.object(mail.imaplib, "IMAP4_SSL", FakeIMAP([_reply_with(auth)])):
+        mail.fetch(db, since=date(2026, 11, 9))
+    assert db.query(models.Suggestion).count() == 1 and db.query(models.EmailMessage).count() == 1
+
+    # One tap accepts it: now it is Bandile's word that she replied.
+    accepted = client.post(f"/suggestions/{suggestion.id}/accept").json()
+    assert accepted["applied"] is True and accepted["changes"]
+    db.expire_all()
+    assert db.query(models.Lead).filter_by(id=lead_id).one().status == "replied"
+    assert db.query(models.Todo).filter_by(id=todo_id).one().done is True
+    assert db.query(models.OutreachMessage).filter_by(id=outreach_id).one().replied_at is not None
+    assert db.query(models.EmailMessage).one().auth_result == "confirmed"
+    db.close()
+
+
+@pytest.mark.parametrize("auth", [
+    ["mx.google.com; dkim=pass header.i=@sunrise.example; spf=pass smtp.mailfrom=b@sunrise.example; "
+     "dmarc=pass (p=REJECT) header.from=sunrise.example"],
+    ["mx.google.com; dkim=pass header.i=@mail.sunrise.example header.s=k1"],     # no DMARC record: aligned DKIM
+    ["mx.google.com; spf=pass (google.com: domain of mercy@sunrise.example designates 1.2.3.4) "
+     "smtp.mailfrom=mercy@sunrise.example"],                                     # aligned SPF
+])
+def test_a_verified_reply_still_moves_the_lead(mailbox, auth):
+    db = _db()
+    lead_id, *_ = _people(db)
+    with patch.object(mail.imaplib, "IMAP4_SSL", FakeIMAP([_reply_with(auth, "<real-1@sunrise.example>")])):
+        counts = mail.fetch(db, since=date(2026, 11, 9))
+    assert counts["unverified"] == 0
+    db.expire_all()
+    assert db.query(models.Lead).filter_by(id=lead_id).one().status == "replied"
+    assert db.query(models.EmailMessage).one().auth_result == "pass"
+    assert db.query(models.Suggestion).count() == 0
+    db.close()
+
+
+def test_the_trusted_authentication_server_is_configurable(mailbox, monkeypatch):
+    monkeypatch.setenv("EMAIL_IMAP_HOST", "imap.fastmail.example")
+    db = _db()
+    lead_id, *_ = _people(db)
+    header = ["mx.fastmail.example; dkim=pass header.i=@sunrise.example; dmarc=pass header.from=sunrise.example"]
+    with patch.object(mail.imaplib, "IMAP4_SSL", FakeIMAP([_reply_with(header, "<fm-1@sunrise.example>")])):
+        assert mail.fetch(db, since=date(2026, 11, 9))["unverified"] == 1       # nobody is trusted until it is named
+    monkeypatch.setenv("EMAIL_AUTHSERV_ID", "mx.fastmail.example")
+    with patch.object(mail.imaplib, "IMAP4_SSL", FakeIMAP([_reply_with(header, "<fm-2@sunrise.example>")])):
+        assert mail.fetch(db, since=date(2026, 11, 9))["unverified"] == 0
+    db.expire_all()
+    assert db.query(models.Lead).filter_by(id=lead_id).one().status == "replied"
+    db.close()
+
+
 def test_fetch_decodes_html_multipart_and_base64(mailbox):
     db = _db()
     _people(db)
@@ -1240,7 +1338,8 @@ def test_email_sync_agent_stays_inside_its_tables(mailbox, monkeypatch):
     db = _db()
     spec = email_sync.SPEC
     assert spec.schedule.interval_minutes == 30 and spec.permissions.max_llm_calls == 0
-    assert spec.permissions.tables_write == ["email_messages", "communications", "leads", "todos", "integrations"]
+    assert spec.permissions.tables_write == ["email_messages", "communications", "leads", "todos", "integrations",
+                                             "suggestions"]
     assert spec.permissions.may_emit == ["lead.replied"]
     _people(db)
     with patch.object(mail.imaplib, "IMAP4_SSL", FakeIMAP(_inbox())):

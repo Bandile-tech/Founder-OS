@@ -3000,7 +3000,7 @@ function renderSuggestions(){
   if(!_suggestions.length){host.classList.remove("show");host.innerHTML="";if(chip)chip.style.display="none";_suggOpen=false;return;}
   if(chip){chip.style.display="inline-flex";if(chipText)chipText.textContent=`${_suggestions.length} suggestion${_suggestions.length>1?"s":""}`;}
   host.classList.toggle("show",_suggOpen);
-  const kindLabel=k=>k==="todo_add"?"Add task":k==="todo_complete"?"Complete":k==="inbox_add"?"Inbox idea":k==="project_pause"?"Pause project":k;
+  const kindLabel=k=>k==="todo_add"?"Add task":k==="todo_complete"?"Complete":k==="inbox_add"?"Inbox idea":k==="project_pause"?"Pause project":k==="lead_reply"?"Mark replied":k;
   host.innerHTML=`<div class="chg-head"><span>${_suggestions.length} suggestion${_suggestions.length>1?"s":""} waiting</span><button class="sug-btn dismiss" onclick="toggleSuggestions(false)" aria-label="Hide">✕</button></div>
     <div class="sug-strip">${_suggestions.map(sg=>`
       <div class="sug-row" id="sug-${Number(sg.id)}">

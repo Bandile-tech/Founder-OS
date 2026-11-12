@@ -240,6 +240,17 @@ def accept_suggestion(db: Session, sid: int) -> dict:
     if s.status != "pending":
         return {**_suggestion_dict(s), "applied": False, "reason": f"already {s.status}"}
     payload = json.loads(s.payload_json)
+    if s.kind == "lead_reply":
+        # An email in a lead's name whose sender could not be verified: accepting it is
+        # Bandile saying the lead did reply.
+        import integrations_email
+        with change_log.batch_scope(db, "ui"):
+            result = integrations_email.confirm_reply(db, payload)
+            changes = change_log.current_batch_changes(db)
+        s.status = "accepted"
+        s.resolved_at = datetime.utcnow()
+        db.commit()
+        return {**_suggestion_dict(s), "applied": True, "updates": {"lead_id": result["id"]}, "changes": changes}
     parsed: dict = {}
     if s.kind == "todo_add":
         parsed["todos_add"] = [{**payload, "intent": "commitment", "confidence": 1.0}]

@@ -1326,6 +1326,9 @@ class EmailMessage(Base):
     outreach_message_id = Column(Integer, nullable=True)
     processed_at        = Column(DateTime, nullable=True)
     created_at          = Column(DateTime, default=datetime.utcnow)
+    # pass | fail | none (no trusted header) | confirmed (Bandile accepted it); NULL on rows
+    # from before the check and on sent mail
+    auth_result         = Column(String, nullable=True)
 
 
 # ── PHASE 6D: NOTIFICATIONS ──────────────────────────────────

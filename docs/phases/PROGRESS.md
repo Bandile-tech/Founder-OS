@@ -962,7 +962,11 @@ email variables itself.
 
 Decisions where the spec was silent:
 - Clients have no email column, so "a client email" means the email of one of the client's
-  contacts. A sender is known when the address is a lead's or a contact's.
+  contacts. A sender is known when the address is a lead's or a contact's. (Tightened in the
+  review round: a known address in the From line is not enough. A message only moves a lead
+  when the mail server's own `Authentication-Results` header says DMARC passed, or an aligned
+  DKIM or SPF did. Anything else is stored with `auth_result` fail or none, changes nothing,
+  and is offered as a "Mark replied" suggestion.)
 - `CONTENT-TYPE` and `CONTENT-TRANSFER-ENCODING` are fetched with the listed headers, so the
   snippet can be decoded (HTML, multipart, base64, quoted-printable). Quoted lines and
   everything after "On … wrote:" are dropped from the snippet. A body that cannot be decoded

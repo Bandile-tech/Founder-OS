@@ -5,6 +5,8 @@ Column added:
   change_log.undoable  — FALSE on a change that records something which has already left
                          the system (a sent email or WhatsApp message). Undo keeps those
                          rows. NULL and TRUE both mean undoable, so existing rows are.
+  email_messages.auth_result — whether the receiving mail server vouched for the sender:
+                         pass | fail | none | confirmed. NULL on rows stored before the check.
 
 SQLite + Postgres. Idempotent. No drops, no data changes.
 """
@@ -26,6 +28,7 @@ def run(db=None):
         d = dialect(conn, TAG)
         with conn.begin():
             add_column_if_missing(conn, d, "change_log", "undoable", "BOOLEAN DEFAULT TRUE", TAG)
+            add_column_if_missing(conn, d, "email_messages", "auth_result", "VARCHAR", TAG)
         print(f"[{TAG}] Review-round migration complete on {d}.")
     finally:
         conn.close()

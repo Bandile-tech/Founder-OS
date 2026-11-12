@@ -3004,7 +3004,9 @@ def email_lookup(db, who: str):
         models.EmailMessage.received_at.desc(), models.EmailMessage.id.desc()).limit(5).all()
     name = lead.name if lead is not None else (_client_label(client) if client is not None else contact.name)
     messages = [{"direction": "from them" if m.direction == "in" else "to them", "subject": m.subject or "(no subject)",
-                 "snippet": m.snippet or "", "when": m.received_at.date().isoformat() if m.received_at else "unknown"}
+                 "snippet": m.snippet or "", "when": m.received_at.date().isoformat() if m.received_at else "unknown",
+                 **({"warning": "the sender of this message could not be verified"}
+                    if m.direction == "in" and m.auth_result in ("fail", "none") else {})}
                 for m in rows]
     if not messages:
         return ({"connected": True, "who": name, "messages": [],

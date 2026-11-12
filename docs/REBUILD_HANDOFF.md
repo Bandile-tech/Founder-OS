@@ -577,7 +577,7 @@ anything. RLS enabled on every new table on Postgres (m008 convention).
 | m020 | Phase 6B: `agents`, `agent_runs`, `agent_events`, `job_ticks`; `llm_usage.agent_run_id` |
 | m021 | Phase 6C: `integrations`, `calendar_events`, `email_messages`; `outreach_messages.replied_at` |
 | m022 | Phase 6D: `notifications`, `notification_settings` (row 1 created with the defaults) |
-| m023 | Review round: `change_log.undoable` (FALSE on the record of a sent email or WhatsApp message; undo keeps those rows) |
+| m023 | Review round: `change_log.undoable` (FALSE on the record of a sent email or WhatsApp message; undo keeps those rows); `email_messages.auth_result` (pass / fail / none / confirmed) |
 
 **Postgres notes**
 - All ADD COLUMN use `IF NOT EXISTS`; all tables `CREATE TABLE IF NOT EXISTS`.
@@ -626,6 +626,7 @@ Phases 5 and 6 add (all optional; each feature shows "not connected" without its
 | `GOOGLE_CALENDAR_ID` | `primary` | Which calendar to read and write |
 | `EMAIL_ADDRESS` / `EMAIL_APP_PASSWORD` | unset | The Gmail address and its App Password (a secret) |
 | `EMAIL_IMAP_HOST` / `EMAIL_SMTP_HOST` / `EMAIL_SMTP_PORT` / `EMAIL_FROM_NAME` | Gmail's, `465`, `Bandile Masocha` | Mail servers and the sender name |
+| `EMAIL_AUTHSERV_ID` | `mx.google.com` for Gmail | Whose `Authentication-Results` header is trusted when deciding that a sender is verified |
 
 ---
 

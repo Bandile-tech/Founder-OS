@@ -14,11 +14,15 @@ Privacy rules that hold everywhere in this module:
   * nothing is sent except through the outreach approval gate (and the test message to
     Bandile's own address)
   * credentials never reach a log line or a stored error (``integrations.redact``)
+  * a From line proves nothing: a message only changes a lead when the receiving server's
+    own Authentication-Results say DMARC, or an aligned DKIM or SPF, passed. Anything else
+    is stored as unverified and offered as a one-tap suggestion
 """
 
 import email as email_lib
 import hashlib
 import imaplib
+import json
 import os
 import re
 import smtplib
@@ -47,7 +51,8 @@ SMTP_TIMEOUT = 20
 IMAP_TIMEOUT = 20
 _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
 _ADDRESS = re.compile(r"^[^@\s<>,;]+@[^@\s<>,;]+\.[^@\s<>,;]+$")
-_HEADERS = "FROM TO SUBJECT DATE MESSAGE-ID IN-REPLY-TO CONTENT-TYPE CONTENT-TRANSFER-ENCODING"
+_HEADERS = ("FROM TO SUBJECT DATE MESSAGE-ID IN-REPLY-TO CONTENT-TYPE CONTENT-TRANSFER-ENCODING "
+            "AUTHENTICATION-RESULTS")
 
 
 # ── Configuration ────────────────────────────────────────────
@@ -79,6 +84,17 @@ def _smtp_port() -> int:
         return 465
 
 
+def _authserv_id() -> str | None:
+    """The name our own mail server signs its Authentication-Results with. Only that header
+    is believed: a sender can put any other header in a message. Gmail's is mx.google.com;
+    for another host set EMAIL_AUTHSERV_ID, and until then no sender counts as verified."""
+    named = (os.getenv("EMAIL_AUTHSERV_ID") or "").strip().lower()
+    if named:
+        return named
+    host = _imap_host().lower()
+    return "mx.google.com" if ("gmail" in host or "googlemail" in host) else None
+
+
 def _from_name() -> str:
     return os.getenv("EMAIL_FROM_NAME") or "Bandile Masocha"
 
@@ -108,7 +124,8 @@ def serialize(m: models.EmailMessage) -> dict:
     return {"id": m.id, "message_id": m.message_id, "thread_key": m.thread_key, "direction": m.direction,
             "from_addr": m.from_addr, "to_addr": m.to_addr, "subject": m.subject, "snippet": m.snippet,
             "received_at": m.received_at, "lead_id": m.lead_id, "client_id": m.client_id,
-            "contact_id": m.contact_id, "outreach_message_id": m.outreach_message_id}
+            "contact_id": m.contact_id, "outreach_message_id": m.outreach_message_id,
+            "verified": m.direction == "out" or m.auth_result in (None, "pass", "confirmed")}
 
 
 # ── Sending ──────────────────────────────────────────────────
@@ -243,6 +260,52 @@ def _snippet(headers, text_bytes: bytes) -> str:
     return _one_line(" ".join(lines))[:SNIPPET_LIMIT]
 
 
+def _aligned(domain: str, sender_domain: str) -> bool:
+    """The same domain, or one a subdomain of the other (DMARC's relaxed alignment)."""
+    a, b = (domain or "").strip().strip(".").lower(), (sender_domain or "").strip().strip(".").lower()
+    return bool(a and b) and (a == b or a.endswith("." + b) or b.endswith("." + a))
+
+
+def _auth_result(headers, sender: str) -> str:
+    """Did the receiving server vouch for the From address? ``pass``, ``fail`` or ``none``.
+
+    Reads only the topmost Authentication-Results header, and only when it carries our own
+    server's name (lower ones, and ones under another name, may have been written by the
+    sender). ``pass`` needs DMARC to pass for the From domain or, with no DMARC verdict, a
+    DKIM signature or an SPF result that passed for the From domain itself."""
+    trusted = _authserv_id()
+    values = headers.get_all("Authentication-Results") or []
+    if not trusted or not values or "@" not in sender:
+        return "none"
+    parts = [p.strip() for p in _one_line(str(values[0])).split(";")]
+    if not parts or not parts[0] or parts[0].split()[0].lower() != trusted:
+        return "none"
+    domain = sender.rsplit("@", 1)[-1]
+    seen, aligned_pass = False, False
+    for part in parts[1:]:
+        found = re.match(r"(dmarc|dkim|spf)\s*=\s*([a-z]+)", part, re.I)
+        if not found:
+            continue
+        seen = True
+        method, verdict = found.group(1).lower(), found.group(2).lower()
+
+        def prop(name: str) -> str:
+            hit = re.search(rf"\b{re.escape(name)}=\s*([^\s;()]+)", part, re.I)
+            return hit.group(1).rsplit("@", 1)[-1] if hit else ""
+
+        if method == "dmarc":
+            if verdict == "pass" and _aligned(prop("header.from") or domain, domain):
+                return "pass"
+            if verdict == "fail":
+                return "fail"
+        elif verdict == "pass":
+            signed = (prop("header.i") or prop("header.d")) if method == "dkim" else prop("smtp.mailfrom")
+            aligned_pass = aligned_pass or _aligned(signed, domain)
+    if aligned_pass:
+        return "pass"
+    return "fail" if seen else "none"
+
+
 def _parse(parts) -> dict | None:
     """One IMAP FETCH response → the fields we keep. None when it has no headers."""
     header_bytes, text_bytes, thread = b"", b"", None
@@ -272,7 +335,8 @@ def _parse(parts) -> dict | None:
     in_reply_to = _header(headers, "In-Reply-To") or None
     return {"message_id": message_id[:500], "from_addr": sender, "to_addr": _header(headers, "To")[:500] or None,
             "subject": subject[:300] or None, "received_at": _moment(when), "in_reply_to": in_reply_to,
-            "thread_key": thread or in_reply_to, "snippet": _snippet(headers, text_bytes)}
+            "thread_key": thread or in_reply_to, "snippet": _snippet(headers, text_bytes),
+            "auth": _auth_result(headers, sender)}
 
 
 # ── Who we know ──────────────────────────────────────────────
@@ -298,8 +362,48 @@ def _since_text(day: date) -> str:
     return f"{day.day:02d}-{_MONTHS[day.month - 1]}-{day.year}"
 
 
+def _suggest_reply(db: Session, lead: models.Lead, row: models.EmailMessage, parsed: dict) -> None:
+    """An unverified message that would have marked the lead as replied: ask instead."""
+    import actions
+    waiting = db.query(models.Suggestion).filter(
+        models.Suggestion.kind == "lead_reply", models.Suggestion.status == "pending").all()
+    for s in waiting:
+        try:
+            if json.loads(s.payload_json).get("lead_id") == lead.id:
+                return                              # one open question per lead is enough
+        except (ValueError, TypeError):
+            continue
+    subject = parsed["subject"] or "(no subject)"
+    actions.add_suggestion(
+        db, "lead_reply",
+        {"lead_id": lead.id, "email_message_id": row.id, "summary": f"{subject}: {(parsed['snippet'] or '')[:140]}",
+         "text": f"Mark {lead.name[:60]} as replied? An email in their name arrived: {subject[:80]}"},
+        confidence=None, source="email_sync",
+        reason="The sender could not be verified, so nothing was changed.")
+
+
+def confirm_reply(db: Session, payload: dict) -> dict:
+    """Bandile accepted an unverified reply: do what a verified one would have done.
+    The caller opens the change batch and commits."""
+    import leads
+    lead = db.query(models.Lead).filter(models.Lead.id == payload.get("lead_id")).first()
+    if lead is None:
+        raise HTTPException(409, "That lead no longer exists")
+    result = leads.log_reply(db, lead, payload.get("summary"), channel="email")
+    row = db.query(models.EmailMessage).filter(models.EmailMessage.id == payload.get("email_message_id")).first()
+    if row is not None:
+        row.auth_result = "confirmed"
+        if row.outreach_message_id:
+            sent = db.query(models.OutreachMessage).filter(
+                models.OutreachMessage.id == row.outreach_message_id).first()
+            if sent is not None and sent.replied_at is None:
+                sent.replied_at = row.received_at or datetime.utcnow()
+    return result
+
+
 def _store(db: Session, parsed: dict, who: dict, counts: dict) -> None:
-    """Keep one inbound message from a known sender, with everything that follows from it."""
+    """Keep one inbound message from a known sender, with everything that follows from it.
+    A message whose sender is not verified is kept and changes nothing."""
     import change_log
     lead, contact = who["lead"], who["contact"]
     client_id = contact.client_id if contact is not None else (lead.client_id if lead is not None else None)
@@ -315,12 +419,18 @@ def _store(db: Session, parsed: dict, who: dict, counts: dict) -> None:
         snippet=parsed["snippet"], received_at=when, lead_id=lead.id if lead is not None else None,
         client_id=client_id, contact_id=contact.id if contact is not None else None,
         outreach_message_id=outreach_message.id if outreach_message is not None else None,
-        processed_at=now, created_at=now)
+        auth_result=parsed.get("auth") or "none", processed_at=now, created_at=now)
     db.add(row)
     db.flush()
     counts["stored"] += 1
     counts["matched_leads"] += 1 if lead is not None else 0
     counts["matched_clients"] += 1 if client_id is not None else 0
+    if row.auth_result != "pass":
+        # Anyone can write a known address in a From line. Keep the message; change nothing.
+        counts["unverified"] += 1
+        if lead is not None and lead.status == "contacted":
+            _suggest_reply(db, lead, row, parsed)
+        return
     if outreach_message is not None and outreach_message.replied_at is None:
         outreach_message.replied_at = when
 
@@ -374,11 +484,12 @@ def fetch(db: Session, since: date | None = None) -> dict:
     remembered, so the next call carries on from there and a long gap is worked through
     without skipping anything. ``since`` forces a re-read from that day.
 
-    Returns ``{ok, fetched, stored, matched_leads, matched_clients, ignored, error, backlog}``;
-    ``backlog`` is how many messages are still waiting for the next call."""
+    Returns ``{ok, fetched, stored, matched_leads, matched_clients, ignored, error, backlog,
+    unverified}``; ``backlog`` is how many messages are still waiting for the next call and
+    ``unverified`` how many stored messages failed the sender check (see ``_auth_result``)."""
     import change_log
     counts = {"ok": True, "fetched": 0, "stored": 0, "matched_leads": 0, "matched_clients": 0, "ignored": 0,
-              "error": None, "backlog": 0}
+              "error": None, "backlog": 0, "unverified": 0}
     if not configured():
         return {**counts, "ok": False, "error": "Email is not configured"}
     row = _row(db)
