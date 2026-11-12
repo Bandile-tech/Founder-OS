@@ -425,11 +425,27 @@ def _clock(naive_utc: datetime | None) -> str | None:
     return schedule.to_local(naive_utc).strftime("%H:%M") if naive_utc else None
 
 
-def serialize(event: models.CalendarEvent) -> dict:
-    return {"id": event.id, "title": event.title,
-            "start_local": "all day" if event.all_day else _clock(event.start_at),
-            "end_local": None if event.all_day else _clock(event.end_at),
-            "all_day": bool(event.all_day), "date": event.start_date, "start_at": event.start_at,
+def _day_bounds(day: date) -> tuple[datetime, datetime]:
+    """The local day as naive UTC: [midnight, the next midnight)."""
+    return _local_midnight_utc(day), _local_midnight_utc(day + timedelta(days=1))
+
+
+def serialize(event: models.CalendarEvent, day: date | None = None) -> dict:
+    """An event as the app shows it. With ``day``, as it looks on that day: an event that
+    began on an earlier day reads "until HH:MM" on its last day and "all day" in between."""
+    all_day = bool(event.all_day)
+    start_local = "all day" if all_day else _clock(event.start_at)
+    end_local = None if all_day else _clock(event.end_at)
+    if day is not None and not all_day and event.start_at is not None:
+        first, last = _day_bounds(day)
+        end_at = event.end_at or event.start_at
+        if event.start_at < first:                      # it began before this day
+            if end_at >= last:
+                all_day, start_local, end_local = True, "all day", None
+            else:
+                start_local = f"until {_clock(end_at)}"
+    return {"id": event.id, "title": event.title, "start_local": start_local, "end_local": end_local,
+            "all_day": all_day, "date": event.start_date, "start_at": event.start_at,
             "end_at": event.end_at, "location": event.location, "html_link": event.html_link,
             "created_by_us": bool(event.created_by_us)}
 
@@ -440,11 +456,21 @@ def _live(db: Session):
 
 
 def today(db: Session, day: date | None = None) -> list[dict]:
-    """The day's events from the cache: all-day first, then by start time."""
+    """The day's events from the cache: all-day first, then by start time. An event is on
+    every local day it overlaps, not only the day it starts (an all-day event's end is the
+    midnight after its last day, so it stops there)."""
     day = day or schedule.to_local(datetime.utcnow()).date()
-    rows = _live(db).filter(models.CalendarEvent.start_date == day).all()
-    rows.sort(key=lambda e: (not e.all_day, e.start_at or datetime.min, e.id))
-    return [serialize(e) for e in rows]
+    first, last = _day_bounds(day)
+    rows = []
+    for event in _live(db).filter(models.CalendarEvent.start_at < last).all():
+        end_at = event.end_at or event.start_at
+        starts_today = event.start_at >= first
+        if starts_today or end_at > first:
+            rows.append(event)
+    shown = [serialize(e, day) for e in rows]
+    order = {e.id: (e.start_at or datetime.min, e.id) for e in rows}
+    shown.sort(key=lambda e: (not e["all_day"], order[e["id"]]))
+    return shown
 
 
 def week(db: Session, first: date | None = None) -> list[dict]:

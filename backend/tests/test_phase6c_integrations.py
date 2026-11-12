@@ -880,6 +880,57 @@ def test_a_transient_failure_does_not_clear_a_real_error(google):
     db.close()
 
 
+# ── Review round: multi-day events ───────────────────────────
+
+CONFERENCE = {"id": "evt-conf", "summary": "Kitwe trade fair", "start": {"date": "2026-11-16"},
+              "end": {"date": "2026-11-19"}}                                   # 16th, 17th and 18th (end is exclusive)
+NIGHT = {"id": "evt-night", "summary": "Overnight bus to Livingstone",
+         "start": {"dateTime": "2026-11-20T22:00:00+02:00"}, "end": {"dateTime": "2026-11-21T05:30:00+02:00"}}
+RETREAT = {"id": "evt-retreat", "summary": "Youth retreat",
+           "start": {"dateTime": "2026-11-23T17:00:00+02:00"}, "end": {"dateTime": "2026-11-25T12:00:00+02:00"}}
+
+
+def test_a_multi_day_event_is_on_every_day_it_spans(google):
+    """Review item 6: an event was only listed on the day it starts."""
+    db = _db()
+    _connect(db)
+    with patch.object(gcal.httpx, "get", side_effect=[_http(200, {"items": [CONFERENCE, NIGHT, RETREAT, TIMED]})]):
+        assert gcal.sync(db, now=NOW)["created"] == 4
+
+    def titles(day):
+        return [(e["title"], e["start_local"], e["end_local"]) for e in gcal.today(db, date.fromisoformat(day))]
+
+    fair = ("Kitwe trade fair", "all day", None)
+    assert titles("2026-11-15") == []
+    assert titles("2026-11-16") == [fair] and titles("2026-11-17") == [fair] and titles("2026-11-18") == [fair]
+    assert titles("2026-11-19") == []                                         # Google's end date is exclusive
+    # A timed event that runs past midnight is on both days; the second day says when it ends.
+    assert titles("2026-11-20") == [("Overnight bus to Livingstone", "22:00", "05:30")]
+    assert titles("2026-11-21") == [("Overnight bus to Livingstone", "until 05:30", "05:30")]
+    assert titles("2026-11-22") == []
+    # Three days: the evening it starts, the whole middle day, the morning it ends.
+    assert titles("2026-11-23") == [("Youth retreat", "17:00", "12:00")]
+    assert titles("2026-11-24") == [("Youth retreat", "all day", None)]
+    assert titles("2026-11-25") == [("Youth retreat", "until 12:00", "12:00")]
+    assert titles("2026-11-13") == [("Further Maths P1 past paper", "09:00", "10:30")]   # single-day: unchanged
+
+    week = client.get("/calendar/week", params={"from": "2026-11-16"}).json()["days"]
+    assert [len(d["events"]) for d in week] == [1, 1, 1, 0, 1, 1, 0]
+    with patch.object(ot, "datetime", _Clock):
+        result, summary = ot.run_tool("calendar_today", {"date": "2026-11-17"}, db)
+    assert summary == "1 event(s) 2026-11-17" and result["events"][0]["title"] == "Kitwe trade fair"
+
+    # The briefing on the middle day of the fair lists it; on the retreat's last morning it is an item.
+    block = briefing.build_briefing(db, now=datetime(2026, 11, 17, 8, 0), with_summary=False)
+    assert block["today_events"] == ["Kitwe trade fair"]
+    last = briefing.build_briefing(db, now=datetime(2026, 11, 25, 8, 0), with_summary=False)
+    assert [(e["title"], e["start_local"]) for e in last["calendar"]["events_today"]] == [("Youth retreat", "until 12:00")]
+    assert any(i["category"] == "event" and i["title"] == "Youth retreat" for i in last["items"])
+    middle = briefing.build_briefing(db, now=datetime(2026, 11, 24, 8, 0), with_summary=False)
+    assert middle["today_events"] == ["Youth retreat"]
+    db.close()
+
+
 # ════════════════════════════════════════════════════════════════
 # 6C.3 — email over IMAP and SMTP (spec tests 5, 6 and the email half of 7)
 # ════════════════════════════════════════════════════════════════
