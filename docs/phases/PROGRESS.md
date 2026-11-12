@@ -132,8 +132,9 @@ briefing items and the overdue alert.
 
 Decisions where the spec was silent:
 - `clients.currency` is added with no SQL default so that rows which predate the column are
-  the ones holding NULL; the backfill sets exactly those to `USD` and is safe to re-run. New
-  clients get `ZMW` from the ORM default.
+  the ones holding NULL; the backfill sets exactly those to `DEFAULT_CURRENCY` (ZMW unless
+  the variable says USD) and is safe to re-run. New clients get the same default from the
+  ORM. (Corrected in the review round: the first version set old clients to USD.)
 - Silence (no communication in 21 / 45 days) only counts for clients whose status is
   `active`, and is measured from the last communication or, when there is none, from the
   day the client was created.

@@ -1,6 +1,7 @@
 from sqlalchemy import Column, Integer, String, Date, Float, Text, DateTime, ForeignKey, Boolean, Index
 from sqlalchemy.orm import relationship
 from datetime import datetime
+import os
 from database import Base
 
 
@@ -242,6 +243,13 @@ class SocialScore(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+def default_currency() -> str:
+    """The currency a client is in when none is given: DEFAULT_CURRENCY (ZMW or USD),
+    Kwacha when the variable is unset or names anything else."""
+    cur = (os.getenv("DEFAULT_CURRENCY") or "ZMW").strip().upper()
+    return cur if cur in ("ZMW", "USD") else "ZMW"
+
+
 class Client(Base):
     """Aether business pipeline — prospect → active → closed."""
     __tablename__ = "clients"
@@ -256,7 +264,7 @@ class Client(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     lead_id = Column(Integer, nullable=True)          # the lead this client was converted from
-    currency = Column(String, default="ZMW")          # USD | ZMW (rows older than the CRM are USD)
+    currency = Column(String, default=default_currency)   # USD | ZMW (DEFAULT_CURRENCY, else ZMW)
     tags = Column(String, nullable=True)              # comma-separated
     health = Column(String, default="green")          # green|amber|red, computed by crm.client_health
 

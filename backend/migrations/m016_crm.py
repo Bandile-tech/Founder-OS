@@ -8,11 +8,12 @@ New tables:
   (projects carries every column the portfolio needs as well)
 
 Backfills (Python, row by row, re-runnable):
-  * clients.currency  — rows that predate the column held dollar values, so they become
-    'USD'. The column is added without a SQL default so those rows are the ones with NULL;
-    new rows get 'ZMW' from the ORM.
+  * clients.currency  — rows that predate the column get DEFAULT_CURRENCY (ZMW unless the
+    variable says USD), the same value new rows get from the ORM. The column is added
+    without a SQL default so those rows are the ones with NULL.
   * payments          — every revenue row with a client_id gets one paid payment
-    (title 'Imported'), matched by revenue_id so a second run adds nothing.
+    (title 'Imported') in that revenue row's own currency, whatever the client's is,
+    matched by revenue_id so a second run adds nothing.
 
 SQLite + Postgres. Idempotent. No drops. RLS enabled on the new tables (Postgres).
 """
@@ -158,17 +159,22 @@ _INDEXES = [
 
 
 def _backfill_client_currency(conn, d: str) -> int:
-    """Clients with no currency predate the column; their ``value`` was in dollars."""
+    """Clients with no currency predate the column. They get the default currency
+    (DEFAULT_CURRENCY, else ZMW): Bandile works in Kwacha, so nothing is assumed to be dollars."""
     if not table_exists(conn, d, "clients"):
         return 0
+    from models import default_currency
+    cur = default_currency()
     ids = [r[0] for r in conn.execute(text("SELECT id FROM clients WHERE currency IS NULL")).fetchall()]
     for cid in ids:
-        conn.execute(text("UPDATE clients SET currency = 'USD' WHERE id = :id"), {"id": cid})
+        conn.execute(text("UPDATE clients SET currency = :cur WHERE id = :id"), {"cur": cur, "id": cid})
     return len(ids)
 
 
 def _backfill_payments(conn, d: str) -> int:
-    """One paid payment per existing revenue row that names a client; idempotent by revenue_id."""
+    """One paid payment per existing revenue row that names a client; idempotent by revenue_id.
+    The payment is in the revenue row's own currency (a revenue row with none predates
+    revenue.currency and was in dollars, as m012 recorded), never the client's."""
     if not (table_exists(conn, d, "revenue") and table_exists(conn, d, "payments")):
         return 0
     linked = {r[0] for r in conn.execute(
@@ -209,7 +215,7 @@ def run(db=None):
             currencies = _backfill_client_currency(conn, d)
             payments = _backfill_payments(conn, d)
             if currencies:
-                print(f"[{TAG}] Set currency USD on {currencies} existing client(s).")
+                print(f"[{TAG}] Set the default currency on {currencies} existing client(s).")
             if payments:
                 print(f"[{TAG}] Backfilled {payments} paid payment(s) from revenue.")
         print(f"[{TAG}] CRM migration complete on {d}.")

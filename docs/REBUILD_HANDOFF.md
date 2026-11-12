@@ -602,6 +602,7 @@ anything. RLS enabled on every new table on Postgres (m008 convention).
 | `ASSISTANT_SUMMARY_BATCH` | `10` | Messages that must fall out of the window before the summary refreshes |
 | `INTENT_CONFIDENCE_MIN` | `0.7` | Below this an extracted item becomes a suggestion |
 | `ZMW_PER_USD` | `27.0` | Kwacha→dollar rate for the $10K scoreboard. **Set this.** |
+| `DEFAULT_CURRENCY` | `ZMW` | Currency of a client when none is given (`ZMW` or `USD`) |
 | `LLM_PRICING_JSON` | built-in table | Override per-model prices for `llm_usage` cost estimates |
 | `ORCHESTRATOR_MODEL` | — | Legacy; still honoured if `ASSISTANT_MODEL` is unset |
 

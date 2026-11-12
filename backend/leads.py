@@ -683,7 +683,7 @@ def convert(db: Session, lead: models.Lead) -> dict:
     client = models.Client(
         name=lead.name, company=lead.company or "", status="active",
         service=(last_sent.brief or "")[:200] if last_sent is not None else "",
-        notes="", lead_id=lead.id, currency="ZMW", created_at=now, updated_at=now)
+        notes="", lead_id=lead.id, currency=models.default_currency(), created_at=now, updated_at=now)
     db.add(client)
     changes.append(change_log.record_create(db, client, f"New client: {lead.name[:60]}"))
     changes += close_follow_ups(db, lead)

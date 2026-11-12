@@ -2,7 +2,7 @@
 Phase 5C — CRM acceptance tests.
 
   1. migration backfill: one paid payment per existing revenue row with a client, on
-     repeated runs; pre-existing clients become USD
+     repeated runs; pre-existing clients get DEFAULT_CURRENCY (ZMW), never USD
   6. update_deal(stage=won) creates a project linked both ways, once
   7. log_communication resolves the client, bumps last_activity_at, writes a row; an
      ambiguous name returns candidates and writes nothing
@@ -57,39 +57,85 @@ def _client(db, name="Wamu's Bakes & Cakes", **kw):
 
 # ── 1. migration backfill ─────────────────────────────────────
 
-def test_m016_backfills_payments_once_and_marks_old_clients_usd():
+def _null_currency(client_id):
+    """The state of a client that existed before the column."""
     from sqlalchemy import text
+    with engine.connect() as conn:
+        conn.execute(text("UPDATE clients SET currency = NULL WHERE id = :i"), {"i": client_id})
+        conn.commit()
+
+
+def test_m016_gives_old_clients_the_default_currency_and_payments_keep_their_own(monkeypatch):
     from migrations import m016_crm as m016
     from migrations._helpers import dialect
 
+    monkeypatch.delenv("DEFAULT_CURRENCY", raising=False)
     db = _db()
     old = _client(db, "Old Client")
     db.add(models.Revenue(amount=150, currency="USD", source="Old Client", client_id=old.id,
                           date=TODAY - timedelta(days=40)))
+    db.add(models.Revenue(amount=2500, currency="ZMW", source="Old Client", client_id=old.id,
+                          date=TODAY - timedelta(days=10)))
     db.add(models.Revenue(amount=900, currency="ZMW", source="Walk-in", client_id=None, date=TODAY))
     db.commit()
     old_id = old.id
     db.close()
-    with engine.connect() as conn:
-        conn.execute(text("UPDATE clients SET currency = NULL WHERE id = :i"), {"i": old_id})
-        conn.commit()   # the state of a client that existed before the column
+    _null_currency(old_id)
 
-    for expected in ((1, 1), (0, 0)):           # two consecutive runs
+    for expected in ((1, 2), (0, 0)):           # two consecutive runs
         with engine.connect() as conn:
             with conn.begin():
                 d = dialect(conn, "test")
                 assert (m016._backfill_client_currency(conn, d), m016._backfill_payments(conn, d)) == expected
 
     db = _db()
-    assert db.query(models.Client).filter(models.Client.id == old_id).one().currency == "USD"
-    payments = db.query(models.Payment).all()
-    assert len(payments) == 1
-    p = payments[0]
-    assert (p.client_id, p.title, p.status, p.amount, p.currency) == (old_id, "Imported", "paid", 150, "USD")
-    assert p.paid_at == TODAY - timedelta(days=40) and p.revenue_id is not None
+    # Bandile works in Kwacha: a client that predates the column is not turned into a dollar client.
+    assert db.query(models.Client).filter(models.Client.id == old_id).one().currency == "ZMW"
+    payments = db.query(models.Payment).order_by(models.Payment.amount).all()
+    # Each payment keeps the currency of the revenue row it came from, whatever the client's is.
+    assert [(p.client_id, p.title, p.status, p.amount, p.currency) for p in payments] == [
+        (old_id, "Imported", "paid", 150, "USD"), (old_id, "Imported", "paid", 2500, "ZMW")]
+    assert payments[0].paid_at == TODAY - timedelta(days=40) and payments[0].revenue_id is not None
     fresh = _client(db, "New Client")
     assert fresh.currency == "ZMW"              # new clients are in Kwacha
     db.close()
+
+
+def test_default_currency_env_var_sets_the_client_default(monkeypatch):
+    from migrations import m016_crm as m016
+    from migrations._helpers import dialect
+
+    monkeypatch.setenv("DEFAULT_CURRENCY", "usd")
+    db = _db()
+    old = _client(db, "Dollar Client")
+    old_id = old.id
+    assert old.currency == "USD"                # the ORM default follows the variable
+    db.close()
+    _null_currency(old_id)
+    with engine.connect() as conn:
+        with conn.begin():
+            assert m016._backfill_client_currency(conn, dialect(conn, "test")) == 1
+    db = _db()
+    assert db.query(models.Client).filter(models.Client.id == old_id).one().currency == "USD"
+    db.close()
+    assert client.get(f"/clients/{old_id}").json()["currency"] == "USD"
+
+    monkeypatch.setenv("DEFAULT_CURRENCY", "bitcoin")      # not a currency the app knows
+    assert models.default_currency() == "ZMW"
+    monkeypatch.delenv("DEFAULT_CURRENCY")
+    assert models.default_currency() == "ZMW"
+
+
+def test_a_client_with_no_currency_reads_as_the_default_not_usd(monkeypatch):
+    monkeypatch.delenv("DEFAULT_CURRENCY", raising=False)
+    db = _db()
+    c = _client(db, "No Currency Ltd")
+    cid = c.id
+    db.close()
+    _null_currency(cid)
+    assert client.get(f"/clients/{cid}").json()["currency"] == "ZMW"
+    made = client.post("/deals", json={"client_id": cid, "title": "Site", "amount": 100}).json()
+    assert made["currency"] == "ZMW"
 
 
 # ── 6. winning a deal creates its project once ────────────────

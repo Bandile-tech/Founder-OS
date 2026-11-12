@@ -229,7 +229,7 @@ def client_extras(db: Session, client: models.Client) -> dict:
     recurring = db.query(models.RecurringRevenue).filter(
         models.RecurringRevenue.client_id == client.id, models.RecurringRevenue.active == True).all()   # noqa: E712
     return {
-        "currency": client.currency or "USD",
+        "currency": client.currency or models.default_currency(),
         "health": client_health(db, client),
         "tags": tag_list(client.tags),
         "lead_id": client.lead_id,
@@ -349,7 +349,7 @@ def create_deal(db: Session, client: models.Client, title: str, amount: float | 
     deal = models.Deal(
         client_id=client.id, title=title, stage="lead",
         amount=float(amount) if amount is not None else None,
-        currency=_currency(currency, client.currency or "ZMW"),
+        currency=_currency(currency, client.currency or models.default_currency()),
         probability=STAGE_PROBABILITY["lead"], expected_close=expected_close,
         created_at=datetime.utcnow(), updated_at=datetime.utcnow())
     db.add(deal)

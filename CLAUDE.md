@@ -41,6 +41,7 @@ Environment (`backend/.env` locally, Render env vars in production):
 | `ASSISTANT_MODEL` | `gpt-5.4-mini` | Assistant, parser, summaries, briefing |
 | `EMBEDDING_MODEL` | `text-embedding-3-small` | Vault / notes / memory retrieval |
 | `ZMW_PER_USD` | `27` | Kwacha → dollar for the revenue scoreboard |
+| `DEFAULT_CURRENCY` | `ZMW` | The currency of a client when none is given (`ZMW` or `USD`); also what m016 gives clients that predate the column |
 | `REALTIME_MODEL` | `gpt-realtime-2.1-mini` | Live voice (current mini realtime model, checked 2026-11-05) |
 | `ASSISTANT_HISTORY_TURNS` / `ASSISTANT_SUMMARY_BATCH` | `20` / `10` | History budget |
 | `INTENT_CONFIDENCE_MIN` | `0.7` | Below this an extracted item becomes a suggestion |
