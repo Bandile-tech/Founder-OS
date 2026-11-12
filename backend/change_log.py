@@ -45,9 +45,22 @@ _BATCH_KEY = "change_batch"
 _KEEP_KEY = "change_irreversible"
 NOT_UNDOABLE = "A sent message cannot be undone."
 CHANGED_SINCE = "It was changed afterwards, so it was left as it is."
-# Columns the app refreshes on its own without logging (timestamps, derived health): a
-# difference in one of these does not mean somebody changed the record.
+# Columns the app refreshes on its own without logging (timestamps, derived health, what a
+# calendar sync reads back from Google): a difference in one of these does not mean
+# somebody changed the record.
 _BOOKKEEPING = {"updated_at", "last_activity_at", "health"}
+_BOOKKEEPING_BY_TABLE = {
+    "calendar_events": {"synced_at", "remote_updated_at", "html_link", "status", "calendar_id", "deleted_at",
+                        "description", "location"},
+}
+
+
+def _refreshed(table_name: str, name: str, current, stored) -> bool:
+    """True when a difference in this column is the app's own housekeeping."""
+    if name in _BOOKKEEPING or name in _BOOKKEEPING_BY_TABLE.get(table_name, ()):
+        return True
+    # A payment that fell due is flagged overdue from its date, not by anyone's hand.
+    return table_name == "payments" and name == "status" and stored == "due" and current == "overdue"
 
 
 # ── Batches ──────────────────────────────────────────────────
@@ -273,8 +286,9 @@ def _undo_row(db: Session, row: models.ChangeLog) -> dict:
             # Only remove what is still as it was created: a row somebody has worked on
             # since (a task completed, a payment marked paid) is theirs now.
             changed = after is not None and any(
-                not _same(columns[name], getattr(obj, name), value) for name, value in after.items()
-                if name in columns and name != "id" and name not in _BOOKKEEPING)
+                not _same(columns[name], getattr(obj, name), value)
+                and not _refreshed(row.table_name, name, getattr(obj, name), value)
+                for name, value in after.items() if name in columns and name != "id")
             if changed:
                 return {**_entry(row), "already_undone": False, "kept": "changed"}
             db.delete(obj)
@@ -288,7 +302,8 @@ def _undo_row(db: Session, row: models.ChangeLog) -> dict:
         else:
             # Give back only what this change set, and only where its value is still there.
             touched = [n for n in names if n not in _BOOKKEEPING and before.get(n) != after.get(n)]
-            kept_columns = [n for n in touched if not _same(columns[n], getattr(obj, n), after.get(n))]
+            kept_columns = [n for n in touched if not _same(columns[n], getattr(obj, n), after.get(n))
+                            and not _refreshed(row.table_name, n, getattr(obj, n), after.get(n))]
             if touched and len(kept_columns) == len(touched):
                 return {**_entry(row), "already_undone": False, "kept": "changed"}
             revert = [n for n in touched if n not in kept_columns]
@@ -349,6 +364,9 @@ def undo_batch(db: Session, batch_id: str) -> dict:
         raise HTTPException(409, NOT_UNDOABLE)          # nothing in the batch is left to undo
     try:
         results = [_undo_row(db, r) for r in rows]
+        if results and all(r.get("kept") for r in results if not r["already_undone"]) \
+                and any(r.get("kept") for r in results):
+            raise HTTPException(409, CHANGED_SINCE)      # nothing in the batch is still as it was left
         db.commit()
     except HTTPException:
         db.rollback()

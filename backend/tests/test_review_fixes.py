@@ -216,3 +216,49 @@ def test_an_untouched_batch_still_undoes_completely():
     assert out["undone"] == 2 and "kept" not in out
     assert db.query(models.Lead).one().qualification_score is None and db.query(models.Todo).count() == 0
     db.close()
+
+
+def test_the_apps_own_housekeeping_does_not_block_an_undo():
+    """A generated instalment that has since been flagged overdue, and a calendar event the
+    sync has since touched, are still as their change left them: undo removes them."""
+    import change_log
+    db = _db()
+    c = models.Client(name="Hope Clinic", status="active")
+    db.add(c)
+    db.commit()
+    with change_log.batch_scope(db, "agent:crm_housekeeper") as batch_id:
+        payment = models.Payment(client_id=c.id, amount=500, currency="ZMW", status="due",
+                                 due_date=date(2026, 11, 1), title="November retainer")
+        event = models.CalendarEvent(provider="google", calendar_id="primary", external_id="evt-1",
+                                     title="Clinic demo", start_at=datetime(2026, 11, 20, 12, 0),
+                                     end_at=datetime(2026, 11, 20, 13, 0), all_day=False,
+                                     start_date=date(2026, 11, 20), status="confirmed", created_by_us=True)
+        db.add_all([payment, event])
+        db.flush()
+        change_log.record_create(db, payment, "Payment due: K500 from Hope Clinic")
+        change_log.record_create(db, event, "Calendar: Clinic demo 14:00")
+        db.commit()
+    payment.status = "overdue"                                   # crm.refresh_statuses (not logged)
+    event.synced_at, event.remote_updated_at = datetime(2026, 11, 12, 9, 0), datetime(2026, 11, 12, 8, 59)
+    event.html_link = "https://calendar.example/evt-1"           # what the next sync reads back
+    db.commit()
+    from unittest.mock import patch
+    with patch("integrations_google.delete_remote", return_value=True):
+        out = client.post(f"/changes/batch/{batch_id}/undo").json()
+    assert out["undone"] == 2 and "kept" not in out
+    db.expire_all()
+    assert db.query(models.Payment).count() == 0 and db.query(models.CalendarEvent).count() == 0
+
+    # A payment that was really settled is another matter.
+    with change_log.batch_scope(db, "agent:crm_housekeeper") as batch_id:
+        paid = models.Payment(client_id=c.id, amount=700, currency="ZMW", status="due", title="December retainer")
+        db.add(paid)
+        db.flush()
+        change_log.record_create(db, paid, "Payment due: K700 from Hope Clinic")
+        db.commit()
+    paid.status, paid.paid_at = "paid", date(2026, 11, 12)
+    db.commit()
+    assert client.post(f"/changes/batch/{batch_id}/undo").status_code == 409
+    db.expire_all()
+    assert db.query(models.Payment).one().status == "paid"
+    db.close()
