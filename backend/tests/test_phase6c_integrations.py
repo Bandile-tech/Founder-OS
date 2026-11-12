@@ -616,7 +616,7 @@ def test_sync_reports_failure_without_raising(google):
         counts = gcal.sync(db, now=NOW)
     assert counts["ok"] is False and ACCESS not in counts["error"]
     row = integrations.get_or_create(db, "google_calendar")
-    assert row.status == "error" and ACCESS not in (row.last_error or "")
+    assert row.status == "connected" and row.last_error is None        # a network failure is retried, not an error
     with patch.object(gcal.httpx, "get", return_value=_http(401, {"error": {"message": "Invalid Credentials"}})):
         assert gcal.sync(db, now=NOW)["error"] == "Reconnect Google Calendar"
     db.close()
@@ -805,6 +805,78 @@ def test_briefing_lists_timed_events_between_fifty_and_seventy(google):
 
     text = notify.render_briefing(b, suppressed_overnight=[])
     assert "TODAY\n" in text and "• 09:00 Past paper (calendar)" in text and "• 20:00 Evening call (calendar)" in text
+    db.close()
+
+
+# ── Review round: transient failures ─────────────────────────
+
+def _status(db):
+    db.expire_all()
+    row = integrations.get_or_create(db, "google_calendar")
+    return row.status, row.last_error
+
+
+def test_a_transient_google_failure_never_puts_the_integration_in_error(google):
+    """Review item 5: a timeout or a 5xx is retried on the next sync; only invalid_grant or
+    a revoked token (401) means the user has to reconnect."""
+    import httpx
+
+    db = _db()
+    _connect(db)
+    # The Calendar API times out, then answers 503, then 500 with no JSON body.
+    with patch.object(gcal.httpx, "get", side_effect=httpx.ReadTimeout("timed out")):
+        counts = gcal.sync(db, now=NOW)
+    assert counts["ok"] is False and counts["transient"] is True and "could not be reached" in counts["error"]
+    assert _status(db) == ("connected", None)
+    with patch.object(gcal.httpx, "get", return_value=_http(503, {"error": {"message": "Backend Error"}})):
+        counts = gcal.sync(db, now=NOW)
+    assert counts["ok"] is False and counts["transient"] is True
+    assert _status(db) == ("connected", None)
+    broken = SimpleNamespace(status_code=500, json=lambda: (_ for _ in ()).throw(ValueError("no json")), content=b"<html>")
+    with patch.object(gcal.httpx, "get", return_value=broken):
+        assert gcal.sync(db, now=NOW)["ok"] is False
+    assert _status(db) == ("connected", None)
+    assert client.get("/integrations").json()[0]["provider"]          # the listing still renders
+    item = {i["provider"]: i for i in client.get("/integrations").json()}["google_calendar"]
+    assert item["status"] == "connected" and item["last_error"] is None
+    assert not any(a["rule_id"] == "integration_error" for a in ot.detect_off_track(db)[0])
+
+    # The token refresh times out, then Google's token endpoint answers 500: tokens are kept.
+    _connect(db, expiry="2020-01-01T00:00:00")
+    with patch.object(gcal.httpx, "post", side_effect=httpx.ConnectTimeout("timed out")):
+        assert gcal.sync(db, now=NOW)["transient"] is True
+    assert _status(db) == ("connected", None)
+    with patch.object(gcal.httpx, "post", return_value=_http(500, {"error": "internal_failure"})):
+        assert gcal.sync(db, now=NOW)["transient"] is True
+    assert _status(db) == ("connected", None)
+    held = integrations.secrets(integrations.get_or_create(db, "google_calendar"))
+    assert held["refresh_token"] == REFRESH and held["access_token"] == ACCESS
+
+    # The next sync simply works.
+    fresh = _http(200, {"access_token": "ya29.fresh-token-value-0003", "expires_in": 3599})
+    with patch.object(gcal.httpx, "post", return_value=fresh), \
+            patch.object(gcal.httpx, "get", return_value=_http(200, {"items": [TIMED]})):
+        counts = gcal.sync(db, now=NOW)
+    assert counts["ok"] is True and counts["created"] == 1
+    assert _status(db) == ("connected", None)
+
+    # A revoked token is not transient.
+    with patch.object(gcal.httpx, "get", return_value=_http(401, {"error": {"message": "Invalid Credentials"}})):
+        counts = gcal.sync(db, now=NOW)
+    assert counts["transient"] is False and _status(db) == ("error", "Reconnect Google Calendar")
+    db.close()
+
+
+def test_a_transient_failure_does_not_clear_a_real_error(google):
+    db = _db()
+    _connect(db, expiry="2020-01-01T00:00:00")
+    with patch.object(gcal.httpx, "post", return_value=_http(400, {"error": "invalid_grant"})):
+        assert gcal.sync(db, now=NOW)["transient"] is False
+    assert _status(db) == ("error", "Reconnect Google Calendar")
+    import httpx
+    with patch.object(gcal.httpx, "post", side_effect=httpx.ConnectError("dns")):
+        gcal.sync(db, now=NOW)
+    assert _status(db) == ("error", "Reconnect Google Calendar")
     db.close()
 
 

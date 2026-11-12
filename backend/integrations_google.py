@@ -52,7 +52,15 @@ AFTER_CONNECT = "/app/#settings"            # the app and the API share one host
 
 
 class GoogleError(Exception):
-    """A call to Google failed. The message is safe to show (already redacted)."""
+    """A call to Google failed. The message is safe to show (already redacted).
+
+    ``transient`` is True for everything except a sign-in Google has ended (``invalid_grant``
+    on refresh, a 401 from the API): a timeout, a 5xx or any other refusal leaves the
+    integration's status alone and is simply tried again on the next sync."""
+
+    def __init__(self, message: str, *, transient: bool = True):
+        super().__init__(message)
+        self.transient = transient
 
 
 # ── Configuration ────────────────────────────────────────────
@@ -157,8 +165,12 @@ def exchange(db: Session, code: str) -> None:
 
 
 def _token(db: Session) -> str | None:
-    """A usable access token, refreshed when it is within a minute of expiring. None (with
-    the row marked in error) when Google refuses the refresh."""
+    """A usable access token, refreshed when it is within a minute of expiring.
+
+    None, with the row marked in error, only when the sign-in is over: Google answers
+    ``invalid_grant``, or there is no refresh token to try. A refresh that fails any other
+    way (a timeout, a 5xx, a refusal that is not about the grant) raises a transient
+    GoogleError and leaves the row and its tokens exactly as they were."""
     row = _row(db)
     held = integrations.secrets(row)
     access = held.get("access_token")
@@ -179,16 +191,16 @@ def _token(db: Session) -> str | None:
             "client_id": client_id(), "client_secret": client_secret(),
             "refresh_token": held["refresh_token"], "grant_type": "refresh_token"}, timeout=TIMEOUT)
         data = resp.json()
-    except Exception as exc:  # noqa: BLE001 — a network hiccup: say so, keep the tokens
-        integrations.set_error(db, row, f"Google could not be reached ({type(exc).__name__})")
-        db.commit()
-        return None
+    except Exception as exc:  # noqa: BLE001 — a network hiccup or an unreadable body: retry later
+        raise GoogleError(f"Google could not be reached ({type(exc).__name__})")
     if resp.status_code != 200 or not isinstance(data, dict) or not data.get("access_token"):
-        refused = isinstance(data, dict) and data.get("error") == "invalid_grant"
-        integrations.set_error(db, row, RECONNECT if refused else
-                               f"Google refused the token refresh ({data.get('error') if isinstance(data, dict) else resp.status_code})")
-        db.commit()
-        return None
+        reason = data.get("error") if isinstance(data, dict) else None
+        if resp.status_code < 500 and reason == "invalid_grant":
+            integrations.set_error(db, row, RECONNECT)      # the grant is gone: only a reconnect helps
+            db.commit()
+            return None
+        raise GoogleError(integrations.redact(
+            f"Google refused the token refresh ({reason or resp.status_code})", db)[:200])
     row.secret_json = json.dumps({**held, "access_token": data["access_token"],
                                   "expiry": _expiry(data.get("expires_in"))})
     row.status, row.last_error, row.updated_at = "connected", None, datetime.utcnow()
@@ -200,16 +212,16 @@ def _call(db: Session, method: str, url: str, **kwargs):
     """An authorised call. Returns the decoded body (None for an empty one). Raises GoogleError."""
     token = _token(db)
     if token is None:
-        raise GoogleError(_row(db).last_error or NOT_CONNECTED)
+        raise GoogleError(_row(db).last_error or NOT_CONNECTED, transient=False)
     try:
         resp = getattr(httpx, method)(url, headers={"Authorization": f"Bearer {token}"}, timeout=TIMEOUT, **kwargs)
     except Exception as exc:  # noqa: BLE001
         raise GoogleError(integrations.redact(f"Google could not be reached ({type(exc).__name__})", db))
-    if resp.status_code == 401:
+    if resp.status_code == 401:                     # the token was revoked
         row = _row(db)
         integrations.set_error(db, row, RECONNECT)
         db.commit()
-        raise GoogleError(RECONNECT)
+        raise GoogleError(RECONNECT, transient=False)
     if resp.status_code >= 400:
         try:
             detail = (resp.json().get("error") or {}).get("message")
@@ -283,13 +295,16 @@ def _fields(item: dict) -> dict | None:
 def sync(db: Session, *, window_days: int = 30, now: datetime | None = None) -> dict:
     """Refresh the cache for yesterday through ``window_days`` ahead. Never raises.
 
+    A failure returns ``ok: False`` with ``error`` and ``transient``. A transient failure
+    (a timeout, a 5xx) changes nothing, not even the status: the next sync tries again.
+
     Upserts by Google's event id, marks rows in the window that Google no longer returns as
     deleted, and emits ``calendar.changed`` when anything changed. Nothing is change-logged."""
     now = now or datetime.utcnow()
     counts = {"ok": True, "created": 0, "updated": 0, "deleted": 0, "unchanged": 0, "error": None}
     row = _row(db)
     if row.status == "disconnected" or not integrations.secrets(row).get("access_token"):
-        return {**counts, "ok": False, "error": NOT_CONNECTED}
+        return {**counts, "ok": False, "error": NOT_CONNECTED, "transient": False}
     time_min, time_max = now - timedelta(days=1), now + timedelta(days=window_days)
     items, page_token = [], None
     try:
@@ -304,11 +319,11 @@ def sync(db: Session, *, window_days: int = 30, now: datetime | None = None) -> 
             if not page_token:
                 break
     except GoogleError as exc:
-        row = _row(db)
-        if row.status != "error":
-            integrations.set_error(db, row, str(exc))
-        db.commit()
-        return {**counts, "ok": False, "error": str(exc)}
+        # The status is only ever moved to "error" where the sign-in is known to be over
+        # (_token on invalid_grant, _call on a 401). Anything else is retried next time.
+        if exc.transient:
+            integrations.log(f"[google] sync failed, will retry: {exc}", db)
+        return {**counts, "ok": False, "error": str(exc), "transient": exc.transient}
 
     cal = calendar_id()
     existing = {e.external_id: e for e in db.query(models.CalendarEvent).filter(

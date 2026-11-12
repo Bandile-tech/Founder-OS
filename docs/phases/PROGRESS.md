@@ -913,8 +913,10 @@ Decisions where the spec was silent, and one correction:
   kept in the row's `config_json.pending_state` and cleared when it is used.
 - A successful callback runs one sync straight away, so the calendar is not empty until the
   next tick.
-- A 401 from the Calendar API marks the integration in error with "Reconnect Google Calendar".
-  A network failure during a refresh also marks it in error, with "Google could not be reached".
+- A 401 from the Calendar API marks the integration in error with "Reconnect Google Calendar",
+  and so does `invalid_grant` on a refresh. (Corrected in the review round: a network failure
+  or a 5xx used to mark it in error as well, after which the agent stopped syncing. Those are
+  now left alone and retried on the next sync.)
 - Cancelled events are not cached. An event that reappears upstream is revived.
 - `sync` emits `calendar.changed` itself, so it does so from the endpoint as well as the agent.
 - Undo calls Google's delete only for a change-log entry that created the event; whatever
