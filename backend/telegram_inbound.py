@@ -139,11 +139,15 @@ def _undo(db, chat_id) -> str:
                 continue
             summaries = [c.summary for c in live if c.summary]
             try:
-                change_log.undo_batch(db, batch_id)
+                outcome = change_log.undo_batch(db, batch_id)
             except HTTPException as exc:
                 db.rollback()
                 return f"Could not undo that: {exc.detail}"
-            kept = " (the sent message stays: it cannot be undone)" if len(live) < len(pending) else ""
+            changed = {c["id"] for c in outcome.get("changes") or [] if c.get("kept")}
+            summaries = [c.summary for c in live if c.summary and c.id not in changed]
+            if not summaries and changed:
+                return "Nothing was undone. " + change_log.CHANGED_SINCE
+            kept = f" ({outcome['note']})" if outcome.get("note") else ""
             return "Undone: " + ("; ".join(summaries) or "the last change") + kept
     return "Nothing to undo from the last 24 hours."
 

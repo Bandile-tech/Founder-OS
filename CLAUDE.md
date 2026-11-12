@@ -147,7 +147,7 @@ before markdown runs.
 | `conversation.py` | One default thread, verbatim window + rolling summary, replay of tool results, `GET /conversation/history` |
 | `assistant_state.py` | Everything the assistant knows about Bandile's state, from the current sources only (see below) |
 | `memory_service.py` | Long-term memory (`remember` tool, recall) |
-| `change_log.py` | Every write recorded with before/after snapshots; undo; batches live on `db.info`. Changes written inside `irreversible(db)` (a sent email or WhatsApp message) are logged but never undone |
+| `change_log.py` | Every write recorded with before/after snapshots; undo; batches live on `db.info`. Changes written inside `irreversible(db)` (a sent email or WhatsApp message) are logged but never undone. Undo gives back only the columns a change set, and only where its value is still there, so undoing an old batch never overwrites later edits |
 | `actions.py` | Pending deletes needing confirmation; suggestions accepted with one tap |
 | `notes.py` | Notes (book / bible / journal / inbox / general), search, endpoints |
 | `retrieval.py` | Shared `embeddings` table, cosine in Python, keyword fallback |

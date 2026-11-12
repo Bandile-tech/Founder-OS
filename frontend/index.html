@@ -2958,7 +2958,7 @@ async function undoChange(id,btn){
   if(btn){btn.disabled=true;btn.textContent="…";}
   try{
     const r=await fetch(`${API_BASE}/changes/${id}/undo`,{method:"POST"});
-    if(!r.ok)throw new Error("HTTP "+r.status);
+    if(!r.ok){const d=await r.json().catch(()=>({}));throw new Error(d.detail||("HTTP "+r.status));}
     const row=document.getElementById(`chg-${id}`);
     if(row){row.classList.add("undone");}
     if(btn)btn.textContent="Undone";
@@ -2976,9 +2976,9 @@ async function undoBatch(batchId,btn){
     const r=await fetch(`${API_BASE}/changes/batch/${encodeURIComponent(batchId)}/undo`,{method:"POST"});
     if(!r.ok)throw new Error("HTTP "+r.status);
     const d=await r.json();
-    (d.changes||[]).forEach(c=>{const row=document.getElementById(`chg-${c.id}`);if(row){row.classList.add("undone");const b=row.querySelector(".chg-undo");if(b){b.disabled=true;b.textContent="Undone";}}});
+    (d.changes||[]).forEach(c=>{if(c.kept)return;const row=document.getElementById(`chg-${c.id}`);if(row){row.classList.add("undone");const b=row.querySelector(".chg-undo");if(b){b.disabled=true;b.textContent="Undone";}}});
     if(btn)btn.textContent="Undone";
-    showToast(`Undid ${d.undone} change${d.undone===1?"":"s"}`+(d.kept?". The sent message stays: it cannot be undone":""),"info");
+    showToast(`Undid ${d.undone} change${d.undone===1?"":"s"}`+(d.note?". "+d.note:""),"info");
     _afterWriteRefresh();
   }catch(e){
     if(btn){btn.disabled=false;btn.textContent="Undo all";}
@@ -4574,7 +4574,8 @@ async function agentUndoRun(id,btn){
   try{
     const r=await fetch(`${API_BASE}/agents/runs/${Number(id)}/undo`,{method:"POST"});
     if(!r.ok)throw new Error((await r.json().catch(()=>({}))).detail||("HTTP "+r.status));
-    showToast("Run undone","info");
+    const d=await r.json().catch(()=>({}));
+    showToast("Run undone"+(d.note?". "+d.note:""),"info");
     _afterWriteRefresh();
   }catch(e){showToast("Undo failed: "+e.message,"error");}
   await renderAgents();

@@ -140,3 +140,79 @@ def test_no_app_code_reads_the_server_clock_for_today():
             if not line.lstrip().startswith("#") and pattern.search(line):
                 offenders.append(f"{rel}:{number}")
     assert offenders == []
+
+
+# ── Review, part 3: undoing an old batch must not overwrite what happened since ──
+
+def _old_agent_run(db):
+    """An agent run that scored a lead and created a follow-up task, in one batch."""
+    import change_log
+    lead = models.Lead(name="Mercy Banda", status="new")
+    db.add(lead)
+    db.commit()
+    batch_id = change_log.begin_batch(db, "agent:lead_qualifier")
+    before = change_log.snapshot(lead)
+    lead.qualification_score = 72
+    change_log.record_update(db, lead, before, "Scored Mercy Banda 72")
+    todo = models.Todo(text="Follow up with Mercy Banda", done=False, priority=3)
+    db.add(todo)
+    db.flush()
+    change_log.record_create(db, todo, "Added task: Follow up with Mercy Banda")
+    db.commit()
+    change_log.end_batch(db)
+    return lead, todo, batch_id
+
+
+def test_undoing_an_old_agent_run_keeps_what_was_changed_afterwards():
+    """The Agents page offers Undo on runs that may be days old. Undo restored the whole
+    row as it was before the run, wiping every later edit, and deleted rows the run had
+    created even after Bandile had worked on them."""
+    import change_log
+    db = _db()
+    lead, todo, batch_id = _old_agent_run(db)
+
+    # Later: Bandile moves the lead on (logged) and completes the task (a plain tap).
+    with change_log.batch_scope(db, "ui"):
+        before = change_log.snapshot(lead)
+        lead.status, lead.notes = "contacted", "Called her on Tuesday"
+        change_log.record_update(db, lead, before, "Contacted Mercy Banda")
+        db.commit()
+    assert client.post(f"/todos/{todo.id}/toggle").json()["done"] is True
+
+    out = client.post(f"/changes/batch/{batch_id}/undo").json()
+    db.expire_all()
+    lead = db.query(models.Lead).one()
+    # The run's own change is reversed; what Bandile did afterwards is untouched.
+    assert (lead.qualification_score, lead.status, lead.notes) == (None, "contacted", "Called her on Tuesday")
+    done = db.query(models.Todo).filter_by(text="Follow up with Mercy Banda").one()      # not deleted
+    assert done.done is True
+    assert out["undone"] == 1 and out["kept"] == 1 and "changed afterwards" in out["note"]
+    db.close()
+
+
+def test_a_column_changed_since_is_left_alone_and_a_single_undo_says_so():
+    import change_log
+    db = _db()
+    lead, todo, batch_id = _old_agent_run(db)
+    score_change = db.query(models.ChangeLog).filter_by(table_name="leads").one()
+    with change_log.batch_scope(db, "ui"):                       # the same column, changed again later
+        before = change_log.snapshot(lead)
+        lead.qualification_score = 90
+        change_log.record_update(db, lead, before, "Rescored Mercy Banda 90")
+        db.commit()
+    refused = client.post(f"/changes/{score_change.id}/undo")
+    assert refused.status_code == 409 and "changed afterwards" in refused.json()["detail"]
+    db.expire_all()
+    assert db.query(models.Lead).one().qualification_score == 90
+    assert db.query(models.ChangeLog).filter_by(id=score_change.id).one().undone_at is None
+    db.close()
+
+
+def test_an_untouched_batch_still_undoes_completely():
+    db = _db()
+    lead, todo, batch_id = _old_agent_run(db)
+    out = client.post(f"/changes/batch/{batch_id}/undo").json()
+    db.expire_all()
+    assert out["undone"] == 2 and "kept" not in out
+    assert db.query(models.Lead).one().qualification_score is None and db.query(models.Todo).count() == 0
+    db.close()
