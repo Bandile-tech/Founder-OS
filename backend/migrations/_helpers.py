@@ -90,3 +90,25 @@ def enable_rls(conn, dialect_name: str, tables: list[str], tag: str) -> None:
             continue
         conn.execute(text(f"ALTER TABLE public.{table} ENABLE ROW LEVEL SECURITY"))
         print(f"[{tag}]   RLS enabled: {table}")
+
+
+_MARKS_SQL = """
+CREATE TABLE IF NOT EXISTS migration_marks (
+    key        VARCHAR PRIMARY KEY,
+    applied_at DATETIME
+)"""
+
+
+def claim_once(conn, dialect_name: str, key: str, tag: str) -> bool:
+    """True exactly once per database for ``key``; False on every later call.
+
+    Migrations run on every startup, so their steps must be re-runnable. A data backfill that
+    is only right at migration time claims its key first: the claim and the backfill share
+    the caller's transaction, so a failed backfill is not marked as done."""
+    from datetime import datetime
+    if create_table_if_missing(conn, dialect_name, "migration_marks", _MARKS_SQL, tag) or dialect_name == "postgresql":
+        enable_rls(conn, dialect_name, ["migration_marks"], tag)
+    claimed = conn.execute(text(
+        "INSERT INTO migration_marks (key, applied_at) VALUES (:k, :now) ON CONFLICT (key) DO NOTHING"
+    ), {"k": key, "now": datetime.utcnow()})
+    return bool(claimed.rowcount)

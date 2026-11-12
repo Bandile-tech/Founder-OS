@@ -18,8 +18,29 @@ Response shape (the target home screen is built against this):
               target_type, target_id, completable, score}, ... ],
   "attention_count": int, "alert_count": int, "alerts": [...],
   "progress": {"academics": int|null, "business": int, "targets": int|null, "habits": int},
-  "counts": {...}, "exams": [...], "non_negotiables": [...], "weakness_notes": [...]
+  "business_detail": {"revenue_pct": int|null, "mrr_usd": float, "outstanding_usd": float,
+                      "overdue_count": int},
+  "counts": {...}, "exams": [...], "non_negotiables": [...], "weakness_notes": [...],
+  "delivery": {"last_sent_at": datetime|null, "channel": "telegram", "paired": bool},
+  "calendar": {"connected": bool, "events_today": [{id, title, start_local, end_local,
+               location, html_link, created_by_us}], "all_day": [{id, title, html_link}]},
+  "today_events": [titles of all-day events],
+  "integrations": {"email": status, "telegram": bool, "google_calendar": status}
 }
+
+Phase 6C adds the item category ``event`` (target type ``calendar_event``): a timed event
+today that has not ended, labelled ``HH:MM``, scored 50–70 (sooner is higher).
+
+Phase 5 adds the item categories ``payment``, ``deal``, ``client``, ``project`` (target
+types of the same names), ``outreach`` (target types ``outreach_message`` and ``lead``) and
+``opportunity`` (target types ``research_finding``, ``opportunity_pipeline`` and
+``research_objective``) and ``content`` (target types ``content_idea`` and
+``social_account``; ``progress.brand`` is posts in the last 30 days against
+``brand_target_posts_30d``, null with no account); Phase 6 adds ``application`` (target types ``application``,
+``application_requirement`` and ``application_gap``);
+none of them is completable from a checkbox. ``progress.projects`` is the share of projects
+delivered or closed in the last 90 days out of those plus the active ones (null with no
+projects).
 """
 
 import re
@@ -32,6 +53,7 @@ import models
 import llm
 import syllabus
 from database import get_db
+import user_clock
 
 router = APIRouter()
 
@@ -200,6 +222,278 @@ def _alert_items(db: Session, today: date) -> tuple[list, list]:
     return alerts, items
 
 
+def _opportunity_items(db: Session, today: date) -> tuple[list, int]:
+    """Research output that is waiting on a decision: fresh `pursue` findings, pipeline
+    entries that have gone stale or missed their date, and standing objectives that are due.
+    Returns the items and the number of new findings (not capped)."""
+    from market_intel import objectives
+    now = datetime.utcnow()
+    since = now - timedelta(days=14)
+    fresh = db.query(models.ResearchFinding).filter(
+        models.ResearchFinding.status == "surfaced", models.ResearchFinding.recommendation == "pursue",
+        models.ResearchFinding.reviewed_at.is_(None), models.ResearchFinding.created_at >= since,
+    ).order_by(models.ResearchFinding.overall_score.desc(), models.ResearchFinding.id.desc()).all()
+    items = []
+    for f in fresh[:3]:
+        items.append(_item(title=f.problem[:90], category="opportunity", today=today,
+                           due_label=f"{f.overall_score}/10", reason="Verified opportunity, not yet reviewed",
+                           action="Promote or dismiss", target_type="research_finding", target_id=f.id,
+                           score=35))
+    for e in db.query(models.OpportunityPipeline).filter(
+            models.OpportunityPipeline.stage.in_(("discovered", "researching"))).all():
+        title = (e.finding.problem if e.finding else f"Pipeline entry {e.id}")[:90]
+        overdue = e.due_date is not None and e.due_date < today
+        idle = (now - e.updated_at).days if e.updated_at else 0
+        if overdue:
+            items.append(_item(title=title, category="opportunity", due=e.due_date, today=today,
+                               reason="Next action overdue", action=e.next_action or "Decide: validate or reject",
+                               target_type="opportunity_pipeline", target_id=e.id, score=48))
+        elif idle >= 14:
+            items.append(_item(title=title, category="opportunity", today=today, due_label="",
+                               reason=f"Pipeline entry stale for {idle} days",
+                               action=e.next_action or "Decide: validate or reject",
+                               target_type="opportunity_pipeline", target_id=e.id, score=30))
+    # Once the market-intelligence agent can run them itself (enabled, with an AI key), due
+    # objectives are its job and need no tap.
+    agent = db.query(models.Agent).filter(models.Agent.key == "market_intel").first()
+    agent_runs_them = llm.is_configured() and (agent is None or bool(agent.enabled))
+    for o in ([] if agent_runs_them else objectives.due_objectives(db, now)):
+        items.append(_item(title=f"Research due: {o.objective[:70]}", category="opportunity", today=today,
+                           due_label="", reason=f"Runs every {o.cadence_days} days and is due",
+                           action="Run it (one tap on Agents)", target_type="research_objective",
+                           target_id=o.id, score=12))
+    return items, len(fresh)
+
+
+def _content_items(db: Session, today: date) -> tuple[list, int | None]:
+    """Ideas scheduled for today or overdue, accounts that cannot be read, and a posting
+    gap. Returns the items and the brand progress (None with no account)."""
+    from brand import analytics
+    items = []
+    for idea in db.query(models.ContentIdea).filter(
+            models.ContentIdea.status.in_(("idea", "drafted", "scheduled")),
+            models.ContentIdea.scheduled_for.isnot(None), models.ContentIdea.scheduled_for <= today).all():
+        days = (today - idea.scheduled_for).days
+        items.append(_item(title=idea.title, category="content", due=idea.scheduled_for, today=today,
+                           due_label="Today" if days == 0 else f"{days}d overdue",
+                           reason="Scheduled for today" if days == 0 else f"Was due to go out {days} day{'s' if days != 1 else ''} ago",
+                           action="Post it, then say 'posted'", target_type="content_idea", target_id=idea.id,
+                           score=58 if days == 0 else 66))
+    now = datetime.utcnow()
+    for account in analytics._accounts(db):
+        label = f"{account.platform.capitalize()} {account.handle or ''}".strip()
+        if account.status == "error":
+            items.append(_item(title=f"{label} cannot be read", category="content", today=today, due_label="",
+                               reason=account.last_error or "The last sync failed",
+                               action="Fix the connection in Settings", target_type="social_account",
+                               target_id=account.id, score=20))
+            continue
+        last = db.query(models.ContentPost).filter(
+            models.ContentPost.account_id == account.id, models.ContentPost.posted_at.isnot(None),
+        ).order_by(models.ContentPost.posted_at.desc()).first()
+        if last is not None and (now - last.posted_at).days > 14:
+            items.append(_item(title=f"Nothing posted on {label} lately", category="content", today=today,
+                               due_label="", reason=f"Last post {(now - last.posted_at).days} days ago",
+                               action="Pick an idea from the backlog", target_type="social_account",
+                               target_id=account.id, score=22))
+    return items, analytics.progress(db)
+
+
+def _application_items(db: Session, today: date) -> tuple[list, int]:
+    """Application deadlines inside 60 days, requirements due inside 14, and high gaps when
+    the deadline is inside 90. Returns the items and how many applications are at risk."""
+    import applications
+    items, gap_items, at_risk = [], [], 0
+    for app in db.query(models.Application).filter(
+            models.Application.status.in_(applications.STATUSES[:2])).all():
+        t = applications.timeline(db, app, today)
+        if t["at_risk"]:
+            at_risk += 1
+        days = t["days_to_deadline"]
+        outstanding = t["requirements"]["missing"] + t["requirements"]["in_progress"]
+        if days is not None and days <= 60:
+            if not t["requirements_total"]:
+                reason, action = "No requirements listed yet", "Paste the requirements page"
+            elif outstanding:
+                reason, action = f"{outstanding} requirement(s) still missing", "Work the next missing item"
+            else:
+                reason, action = "All requirements ready — submit", "Submit"
+            late = days < 0
+            items.append(_item(title=f"{app.name} application", category="application", due=app.deadline, today=today,
+                               due_label=f"{-days}d overdue" if late else f"{days} days",
+                               reason=reason, action=action, target_type="application", target_id=app.id,
+                               score=90 if late else max(10, 82 - days)))
+        for r in applications.requirements_of(db, app):
+            if r.status not in applications.REQ_OPEN or r.due_date is None:
+                continue
+            left = (r.due_date - today).days
+            if left <= 14:
+                items.append(_item(title=f"{app.name}: {r.title}", category="application", due=r.due_date, today=today,
+                                   reason="Requirement due soon" if left >= 0 else "Requirement overdue",
+                                   action="Make it a task" if r.todo_id is None else "Work the task",
+                                   target_type="application_requirement", target_id=r.id,
+                                   score=min(80, 60 + (14 - left))))
+        if days is not None and 0 <= days <= 90:
+            for g in applications.open_gaps(db, app):
+                if g.severity == "high":
+                    gap_items.append(_item(title=f"{app.name}: {g.gap[:80]}", category="application", today=today,
+                                           due_label="GAP", reason=g.evidence or "Weak relative to this application",
+                                           action="Address or accept the risk", target_type="application_gap",
+                                           target_id=g.id, score=24))
+    return items + gap_items[:2], at_risk
+
+
+def _portfolio_items(db: Session, today: date) -> tuple[list, int | None]:
+    """Blocked, overdue and waiting projects, plus the one project to focus on. Returns the
+    items and the delivery progress (delivered or closed in 90 days ÷ that plus active)."""
+    import portfolio
+    try:
+        result = portfolio.full_review(db)
+    except Exception as exc:  # noqa: BLE001 — the briefing must still render
+        db.rollback()
+        print(f"[briefing] portfolio review failed: {exc}")
+        return [], None
+    items = []
+    focus_done = False
+    for e in result["ranked"]:
+        p, att = e["project"], e["attention"]
+        if p["status"] != "active":
+            continue
+        pid, who = p["id"], p["client_name"]
+        title = p["title"] + (f" — {who}" if who else "")
+        due = date.fromisoformat(str(p["due_date"])[:10]) if p["due_date"] else None
+        if att["components"]["blocked"]:
+            items.append(_item(title=title, category="project", due=due, today=today, due_label="BLOCKED",
+                               reason=f"Blocked: {p['blocked_reason']}", action="Unblock or re-plan",
+                               target_type="project", target_id=pid, score=62))
+        elif att["overdue_days"]:
+            days = att["overdue_days"]
+            items.append(_item(title=title, category="project", due=due, today=today, due_label=f"{days}d overdue",
+                               reason=f"Due {days} day{'s' if days != 1 else ''} ago", action="Deliver or re-date",
+                               target_type="project", target_id=pid, score=70 + min(days, 9)))
+        elif att["components"]["waiting"]:
+            items.append(_item(title=title, category="project", due=due, today=today, due_label="",
+                               reason=f"Waiting on {who or 'the client'} for {att['waiting_days']} days",
+                               action=f"Nudge {who or 'the client'}", target_type="project", target_id=pid,
+                               score=36))
+        elif e["rank"] == 1 and e["recommendation"] == "focus" and not focus_done:
+            items.append(_item(title=title, category="project", due=due, today=today, due_label="FOCUS",
+                               reason=_cap_first(e["bottleneck"]) if e["bottleneck"] else "Highest attention score",
+                               action=p["next_action"] or "Decide the next action", target_type="project",
+                               target_id=pid, score=45))
+        if e["rank"] == 1:
+            focus_done = True
+    since = datetime.utcnow() - timedelta(days=90)
+    done = db.query(models.Project).filter(
+        models.Project.status.in_(("delivered", "closed")), models.Project.delivered_at >= since).count()
+    active = result["totals"]["active"]
+    progress = round(100 * done / max(1, done + active)) if (done or active) else None
+    return items, progress
+
+
+def _cap_first(text: str) -> str:
+    return text[:1].upper() + text[1:] if text else text
+
+
+def _outreach_items(db: Session, today: date) -> tuple[list, int]:
+    """Drafts waiting for approval and contacted leads that have gone quiet."""
+    names = {l.id: l for l in db.query(models.Lead).all()}
+    now = datetime.utcnow()
+    stale_pending = {p.id for p in db.query(models.PendingAction).filter(
+        models.PendingAction.kind == "send_outreach",
+        models.PendingAction.created_at < now - timedelta(hours=24)).all()}
+    drafts = [m for m in db.query(models.OutreachMessage).filter(
+        models.OutreachMessage.direction == "out",
+        models.OutreachMessage.status.in_(("draft", "approved")),
+    ).order_by(models.OutreachMessage.id.desc()).all() if m.pending_action_id not in stale_pending]
+    items = []
+    for m in drafts[:3]:
+        lead = names.get(m.lead_id)
+        who = lead.name if lead else "a lead"
+        items.append(_item(title=f"{m.channel.capitalize()} draft to {who}", category="outreach", today=today,
+                           due_label="", reason="Draft waiting for your approval",
+                           action="Approve & send or dismiss", target_type="outreach_message",
+                           target_id=m.id, score=38))
+    quiet = []
+    for lead in names.values():
+        if lead.status != "contacted" or lead.last_contact_at is None:
+            continue
+        days = (now - lead.last_contact_at).days
+        if days <= 7:
+            continue
+        has_follow_up = db.query(models.Todo).filter(
+            models.Todo.lead_id == lead.id, models.Todo.done == False,   # noqa: E712
+            models.Todo.category == "outreach").first() is not None
+        if not has_follow_up:
+            quiet.append((days, lead))
+    quiet.sort(key=lambda pair: -pair[0])
+    for days, lead in quiet[:3]:
+        items.append(_item(title=f"{lead.name} has not replied", category="outreach", today=today,
+                           due_label="", reason=f"No reply in {days} days", action="Follow up or mark lost",
+                           target_type="lead", target_id=lead.id, score=28))
+    return items, len(drafts)
+
+
+def _crm_items(db: Session, today: date) -> tuple[list, dict]:
+    """Payments, deals and quiet clients. Runs the CRM housekeeping first (recurring
+    instalments that have fallen due, overdue flags) so the list is current."""
+    import crm
+    try:
+        crm.housekeeping(db, "job:crm")
+    except Exception as exc:  # noqa: BLE001 — the briefing must still render
+        db.rollback()
+        print(f"[briefing] crm housekeeping failed: {exc}")
+    names = {c.id: c.name for c in db.query(models.Client).all()}
+    items, overdue_count = [], 0
+    open_payments = db.query(models.Payment).filter(models.Payment.status.in_(crm.OPEN_PAYMENT)).all()
+    for p in open_payments:
+        if p.due_date is None:
+            continue
+        who = names.get(p.client_id, "a client")
+        label = crm.money_label(p.amount, p.currency)
+        if p.due_date < today:
+            days = (today - p.due_date).days
+            overdue_count += 1
+            items.append(_item(title=f"{label} from {who}", category="payment", due=p.due_date, today=today,
+                               due_label=f"{days}d overdue", reason=f"{label} from {who} overdue",
+                               action="Chase it or mark paid", target_type="payment", target_id=p.id,
+                               score=72 + min(days, 14)))
+        elif p.due_date <= today + timedelta(days=7):
+            items.append(_item(title=f"{label} from {who}", category="payment", due=p.due_date, today=today,
+                               reason=f"{label} from {who} is due", action="Expect payment",
+                               target_type="payment", target_id=p.id, score=42))
+    now = datetime.utcnow()
+    for d in db.query(models.Deal).filter(models.Deal.stage.notin_(("won", "lost"))).all():
+        stale = (d.stage == "negotiation" and d.updated_at is not None
+                 and (now - d.updated_at).days > crm.AMBER_NEGOTIATION_DAYS)
+        late = d.expected_close is not None and d.expected_close < today
+        if stale or late:
+            who = names.get(d.client_id, "a client")
+            reason = ("Expected to close by now" if late
+                      else f"In negotiation for {(now - d.updated_at).days} days")
+            items.append(_item(title=f"{d.title} — {who}", category="deal", due=d.expected_close, today=today,
+                               reason=reason, action="Close or mark lost", target_type="deal",
+                               target_id=d.id, score=40))
+    quiet = []
+    for c in db.query(models.Client).filter(models.Client.status == "active").all():
+        last = crm.last_contact_at(db, c) or c.created_at
+        if last is not None and (now - last).days >= crm.AMBER_SILENCE_DAYS:
+            quiet.append(((now - last).days, c))
+    quiet.sort(key=lambda pair: -pair[0])
+    for days, c in quiet[:3]:
+        items.append(_item(title=f"Check in with {c.name}", category="client", today=today, due_label="",
+                           reason=f"No contact in {days} days", action="Check in", target_type="client",
+                           target_id=c.id, score=26))
+    recurring = db.query(models.RecurringRevenue).filter(models.RecurringRevenue.active == True).all()   # noqa: E712
+    detail = {
+        "revenue_pct": _business_pct(db),
+        "mrr_usd": crm._totals(recurring, amount_of=crm.monthly_amount)["total_usd"],
+        "outstanding_usd": crm._totals(open_payments)["total_usd"],
+        "overdue_count": overdue_count,
+    }
+    return items, detail
+
+
 def _business_pct(db: Session) -> int | None:
     """Progress of the revenue annual target, or None when no revenue target is set.
     (The old $10K scoreboard is no longer read.)"""
@@ -269,10 +563,65 @@ def _summary(db: Session, core: dict, refresh: bool) -> tuple[str | None, str | 
     return text, greeting_line, False
 
 
+def _calendar(db: Session, clock: datetime) -> tuple[list, dict]:
+    """Today's calendar: timed events still to come (or under way) as items, and the
+    ``calendar`` block for the home screen. ``clock`` is the local wall clock."""
+    block = {"connected": False, "events_today": [], "all_day": []}
+    try:
+        import integrations_google
+        from agents import schedule
+        block["connected"] = integrations_google.connected(db)
+        events = integrations_google.today(db, clock.date())
+    except Exception:  # noqa: BLE001 — the briefing never fails over the calendar
+        return [], block
+    items = []
+    for event in events:
+        if event["all_day"]:
+            block["all_day"].append({"id": event["id"], "title": event["title"], "html_link": event["html_link"]})
+            continue
+        block["events_today"].append({k: event[k] for k in ("id", "title", "start_local", "end_local", "location",
+                                                            "html_link", "created_by_us")})
+        start = schedule.to_local(event["start_at"]).replace(tzinfo=None)
+        end = schedule.to_local(event["end_at"]).replace(tzinfo=None) if event["end_at"] else start
+        if end <= clock:
+            continue                                  # already over
+        hours_until = (start - clock).total_seconds() / 3600
+        items.append(_item(title=event["title"], category="event", due=clock.date(), today=clock.date(),
+                           due_label=event["start_local"], reason=event["location"] or "Calendar",
+                           action="Be there", target_type="calendar_event", target_id=event["id"],
+                           score=min(70.0, 50 + max(0.0, 20 - hours_until * 2))))
+    return items, block
+
+
+def _integration_statuses(db: Session) -> dict:
+    """Connection states for the home screen's warnings."""
+    try:
+        import integrations
+        import integrations_telegram
+        by = integrations.statuses(db)
+        return {"email": by.get("email"), "telegram": integrations_telegram.is_paired(db),
+                "google_calendar": by.get("google_calendar")}
+    except Exception:  # noqa: BLE001
+        return {"email": None, "telegram": False, "google_calendar": None}
+
+
+def _delivery(db: Session, today: date) -> dict:
+    """When today's briefing went to Telegram, for "Sent to Telegram at 06:00"."""
+    try:
+        import notify
+        return notify.delivery(db, today)
+    except Exception:  # noqa: BLE001 — the briefing never fails over its delivery note
+        return {"last_sent_at": None, "channel": "telegram", "paired": False}
+
+
 # ── Assemble ─────────────────────────────────────────────────
 
 def build_briefing(db: Session, *, refresh: bool = False, now: datetime | None = None, with_summary: bool = True) -> dict:
-    now = now or datetime.now()
+    # "Today" and the timed calendar both follow the user's wall clock: the caller's ``now``
+    # when one is given, else the real time in FOUNDER_OS_TZ (the server's clock may be UTC).
+    if now is None:
+        now = user_clock.now()
+    clock = now
     today = now.date()
 
     task_items, counts = _task_items(db, today)
@@ -280,12 +629,27 @@ def build_briefing(db: Session, *, refresh: bool = False, now: datetime | None =
     exams, exam_items = _exam_items(db, today)
     syl_items, weakness_notes = _syllabus_items(db, today)
     target_items, targets_pct = _target_items(db, today)
+    crm_items, business_detail = _crm_items(db, today)
+    outreach_items, drafts_waiting = _outreach_items(db, today)
+    portfolio_items, projects_pct = _portfolio_items(db, today)
+    opportunity_items, opportunities_new = _opportunity_items(db, today)
+    application_items, applications_at_risk = _application_items(db, today)
+    content_items, brand_pct = _content_items(db, today)
     alerts, alert_items = _alert_items(db, today)
+    event_items, calendar = _calendar(db, clock)
 
-    items = task_items + nn_items + exam_items + syl_items + target_items + alert_items
+    items = (task_items + nn_items + exam_items + syl_items + target_items + alert_items
+             + crm_items + outreach_items + portfolio_items + opportunity_items + application_items
+             + content_items + event_items)
     items.sort(key=lambda i: i["score"], reverse=True)
 
-    attention = counts["overdue"] + len(target_items) + sum(1 for a in alerts if a.get("severity") == "critical")
+    counts["payments_overdue"] = business_detail["overdue_count"]
+    counts["drafts_waiting"] = drafts_waiting
+    counts["opportunities_new"] = opportunities_new          # informational: not in attention_count
+    counts["applications_at_risk"] = applications_at_risk
+    attention = (counts["overdue"] + len(target_items)
+                 + sum(1 for a in alerts if a.get("severity") == "critical")
+                 + counts["payments_overdue"] + counts["applications_at_risk"])
 
     core = {
         "date": today.isoformat(), "today_date": today, "weekday": today.strftime("%A"), "badge": _badge(today),
@@ -299,12 +663,19 @@ def build_briefing(db: Session, *, refresh: bool = False, now: datetime | None =
             "business": _business_pct(db),
             "targets": targets_pct,
             "habits": habits_pct,
+            "projects": projects_pct,
+            "brand": brand_pct,
         },
+        "brand_target_posts_30d": 8,
+        "business_detail": business_detail,
         "counts": {**counts, "items": len(items), "non_negotiables_done": sum(1 for r in nn_rows if r["done"]),
                    "non_negotiables_total": len(nn_rows), "exams_upcoming": len(exams)},
         "exams": exams[:6],
         "non_negotiables": nn_rows,
         "weakness_notes": weakness_notes,
+        "calendar": calendar,
+        "today_events": [e["title"] for e in calendar["all_day"]],
+        "integrations": _integration_statuses(db),
     }
 
     summary, greeting_line, cached = (None, None, False)
@@ -315,6 +686,7 @@ def build_briefing(db: Session, *, refresh: bool = False, now: datetime | None =
     core["summary_cached"] = cached
     core["greeting_line"] = greeting_line or _deterministic_greeting_line(core)
     core.pop("today_date")
+    core["delivery"] = _delivery(db, today)
     return core
 
 

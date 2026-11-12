@@ -10,6 +10,12 @@
  *   3. advancing a syllabus row by tapping it
  *   4. a show_view directive (as the orchestrator emits it) opens the stage filtered to S1,
  *      Esc closes it, the close directive closes it
+ *   5. Business page: the Clients tab lists a client, a tap opens it, and Paid on a due
+ *      payment marks it paid and logs the revenue
+ *   6. Portfolio tab: Focus makes a project priority 1 and demotes the previous one
+ *   7. Agents page: the registry lists the agents, the toggle switches one off, Run runs one
+ *   8. Applications page: a tap advances a requirement, Make it a task creates its task
+ *   9. Brand tab: says "Not connected" with no account; Advance moves an idea on
  *
  * Run from the repo root:
  *     node tests/e2e/smoke.js
@@ -62,6 +68,9 @@ async function api(token, method, p, body, isForm) {
     FOUNDER_OS_ORIGINS: BASE,
     VAULT_REPO_URL: "https://127.0.0.1/none.git", // never clone a real vault in a smoke run
     VAULT_LOCAL_PATH: path.join(tmp, "vault"),
+    // The backend takes "today" from FOUNDER_OS_TZ; this script seeds with this machine's
+    // local date, so the server runs in this machine's zone.
+    FOUNDER_OS_TZ: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
   };
   delete env.OPENAI_API_KEY;
   const server = spawn(PYTHON, ["-m", "uvicorn", "main:app", "--port", String(PORT)], {
@@ -81,7 +90,10 @@ async function api(token, method, p, body, isForm) {
     const login = await api("", "POST", "/auth/login", { password: PASSWORD });
     check(login.status === 200 && login.json.token, "API login returns a token");
     const token = login.json.token;
-    const today = new Date().toISOString().slice(0, 10);
+    // The local date, as the backend sees it (toISOString() alone is UTC, which is still
+    // yesterday for the first hours after local midnight).
+    const now = new Date();
+    const today = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
     const todo = await api(token, "POST", "/todos", { text: "Finalise Bel Baby delivery", due: today, priority: 1, category: "business" });
     check(todo.status === 200 && todo.json.id, "seeded a task due today");
     const csv = fs.readFileSync(path.join(ROOT, "backend", "tests", "fixtures", "syllabus_sample.csv"));
@@ -175,6 +187,93 @@ async function api(token, method, p, body, isForm) {
     check(!closed.shown && closed.orbHome, "Esc closed the stage and the orb returned home");
     await page.evaluate(() => { handleUiDirective({ view: "brief" }); handleUiDirective({ view: "close" }); });
     check(!(await page.evaluate(() => document.getElementById("stage").classList.contains("show"))), "close directive closes the stage");
+
+    // ── 5. Business: Clients → client → Paid ──
+    console.log("5. business: mark a payment paid");
+    const cl = await api(token, "POST", "/clients", { name: "Smoke Test Bakery", status: "active" });
+    const pay = await api(token, "POST", "/payments", { client_id: cl.json.id, amount: 1200, currency: "ZMW", title: "Deposit", due_date: today });
+    check(pay.status === 201 && pay.json.status === "due", "seeded a client with a due payment");
+    await page.evaluate(() => openBusinessTile("clients"));
+    await page.waitForSelector("#biz-body .row--tap", { timeout: 15000 });
+    check((await page.locator("#biz-tabs .tab.is-on").textContent()).trim() === "Clients", "the Clients tab is selected");
+    await page.locator("#biz-body .row--tap", { hasText: "Smoke Test Bakery" }).click();
+    await page.waitForSelector("#biz-body button:has-text('Paid')", { timeout: 15000 });
+    await page.locator("#biz-body button:has-text('Paid')").first().click();
+    await page.waitForTimeout(1200);
+    const paid = (await api(token, "GET", `/clients/${cl.json.id}`)).json.payments[0];
+    check(paid.status === "paid" && paid.revenue_id, "Paid marked the payment paid and linked its revenue");
+    const rev = (await api(token, "GET", "/revenue")).json.records.find((r) => r.id === paid.revenue_id);
+    check(rev && rev.amount === 1200 && rev.currency === "ZMW", "the revenue row was written in Kwacha");
+    check((await page.locator("#ucmd-changes .chg-row").count()) >= 1, "the change is shown with Undo in the dock");
+
+    // ── 6. Portfolio: Focus ──
+    console.log("6. portfolio: focus a project");
+    const projA = await api(token, "POST", "/projects", { title: "Smoke project one", priority: 1 });
+    const projB = await api(token, "POST", "/projects", { title: "Smoke project two", priority: 3 });
+    await page.evaluate(() => businessTab("portfolio"));
+    await page.waitForSelector("#biz-body .row", { timeout: 15000 });
+    await page.locator("#biz-body .row", { hasText: "Smoke project two" }).locator("button:has-text('Focus')").click();
+    await page.waitForTimeout(1200);
+    const projects = (await api(token, "GET", "/projects")).json;
+    const pr = (id) => projects.find((p) => p.id === id).priority;
+    check(pr(projB.json.id) === 1 && pr(projA.json.id) === 2, "Focus made the project priority 1 and demoted the other");
+    check((await page.locator("#biz-body .row", { hasText: "Smoke project two" }).locator("text=In focus").count()) === 1, "the row shows it is in focus");
+
+    // ── 7. Agents: toggle and Run ──
+    console.log("7. agents: toggle and run");
+    await page.evaluate(() => openAgentsTile());
+    await page.waitForSelector("#ag-list .row", { timeout: 15000 });
+    check((await page.locator("#ag-list .row").count()) >= 6, "the registry lists the shipped agents");
+    const qualifier = page.locator('#ag-list .row[data-key="lead_qualifier"]');
+    await qualifier.locator("button.toggle").click();
+    await page.waitForTimeout(1200);
+    const agentsNow = (await api(token, "GET", "/agents")).json;
+    check(agentsNow.find((a) => a.key === "lead_qualifier").enabled === false, "the toggle switched the agent off");
+    await page.locator('#ag-list .row[data-key="portfolio_reviewer"]').locator("button:has-text('Run')").click();
+    await page.waitForTimeout(1500);
+    const reviewerRuns = (await api(token, "GET", "/agents/portfolio_reviewer/runs")).json;
+    check(reviewerRuns.length === 1 && reviewerRuns[0].trigger === "manual", "Run ran the agent once");
+    await page.locator('#ag-list .row[data-key="portfolio_reviewer"]').click();
+    await page.waitForSelector("#ag-runs .row", { timeout: 15000 });
+    check((await page.locator("#ag-detail-head").textContent()).includes("Portfolio reviewer"), "a tap opens the agent with its run log");
+
+    // ── 8. Applications: advance and make a task ──
+    console.log("8. applications: advance a requirement, make it a task");
+    const appl = await api(token, "POST", "/applications", { name: "Smoke University", deadline: today });
+    const reqA = await api(token, "POST", `/applications/${appl.json.id}/requirements`, { title: "Personal essay", kind: "essay" });
+    await page.evaluate(() => openApplicationsTile());
+    await page.waitForSelector("#apps-body .row--tap", { timeout: 15000 });
+    check((await page.locator("#apps-body .card", { hasText: "Smoke University" }).textContent()).includes("At risk"), "an application due today with a missing requirement is marked at risk");
+    await page.locator("#apps-body .row--tap", { hasText: "Personal essay" }).locator(".row-title").click();
+    await page.waitForTimeout(1200);
+    let reqNow = (await api(token, "GET", `/applications/${appl.json.id}`)).json.requirements[0];
+    check(reqNow.status === "in_progress", "a tap moved the requirement to in progress");
+    await page.locator("#apps-body .row--tap", { hasText: "Personal essay" }).locator("button:has-text('Make it a task')").click();
+    await page.waitForTimeout(1200);
+    reqNow = (await api(token, "GET", `/applications/${appl.json.id}`)).json.requirements[0];
+    const taskRow = (await api(token, "GET", "/todos")).json.find((x) => x.id === reqNow.todo_id);
+    check(reqNow.status === "in_progress" && taskRow && taskRow.text === "Smoke University: Personal essay", "Make it a task created the task without moving the requirement");
+
+    // ── 9. Brand: not connected, and advancing an idea ──
+    console.log("9. brand: not connected state, advance an idea");
+    const idea = await api(token, "POST", "/brand/ideas", { title: "Smoke content idea" });
+    await page.evaluate(() => openBusinessTile("brand"));
+    await page.waitForSelector("#biz-body .card", { timeout: 15000 });
+    await page.waitForFunction(() => document.getElementById("biz-body").textContent.includes("Accounts"), null, { timeout: 15000 });
+    const brandText = await page.locator("#biz-body").textContent();
+    check(brandText.includes("No account is connected") && brandText.includes("Not connected"), "with no account the tab says it is not connected");
+    check(!/\b0 followers\b/.test(brandText), "no follower number is shown for an unconnected platform");
+    await page.locator(`#idea-${idea.json.id} button`).click();
+    await page.waitForTimeout(1200);
+    let ideaNow = (await api(token, "GET", "/brand/ideas")).json.find((i) => i.id === idea.json.id);
+    check(ideaNow.status === "drafted", "Advance moved the idea to drafted");
+    await page.locator(`#idea-${idea.json.id} button`).click();          // drafted → scheduled needs a date
+    await page.waitForSelector(`#idea-date-${idea.json.id}`, { timeout: 15000 });
+    await page.fill(`#idea-date-${idea.json.id}`, today);
+    await page.locator(`#idea-${idea.json.id} button.btn--primary`).click();
+    await page.waitForTimeout(1200);
+    ideaNow = (await api(token, "GET", "/brand/ideas")).json.find((i) => i.id === idea.json.id);
+    check(ideaNow.status === "scheduled" && ideaNow.scheduled_for === today, "scheduling asked for a day and set it");
 
     check(pageErrors.length === 0, `no page errors (${pageErrors.join("; ") || "none"})`);
   } catch (e) {

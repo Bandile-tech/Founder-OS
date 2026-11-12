@@ -9,6 +9,18 @@ Undo restores the before-state: an update is reverted column by column, a create
 removed, a delete is re-inserted with its original id. Undo is idempotent — a change
 already undone reports ``already_undone`` and touches nothing.
 
+Some changes record something that has already left the system: an email that was sent, a
+WhatsApp message that was approved and opened. They are written inside
+``with irreversible(db):`` and stored with ``undoable = False``. Undo never touches them:
+undoing one is refused (409), and undoing a batch reverses the rest and reports them as
+``kept``.
+
+Undo is also careful with time. A change may be undone long after it was made (an agent's
+run from last week), and the record may have moved on since. So an update only gives back
+the columns that change set, and only those still holding the value it left; a created row
+is only removed while it is still as it was created. Whatever was changed afterwards is
+left alone and reported as ``kept``.
+
 Endpoints:
   GET  /changes                       recent changes (newest first)
   POST /changes/{id}/undo
@@ -16,6 +28,7 @@ Endpoints:
 """
 
 import json
+import math
 import uuid
 from datetime import date, datetime
 
@@ -29,6 +42,25 @@ from database import get_db
 router = APIRouter()
 
 _BATCH_KEY = "change_batch"
+_KEEP_KEY = "change_irreversible"
+NOT_UNDOABLE = "A sent message cannot be undone."
+CHANGED_SINCE = "It was changed afterwards, so it was left as it is."
+# Columns the app refreshes on its own without logging (timestamps, derived health, what a
+# calendar sync reads back from Google): a difference in one of these does not mean
+# somebody changed the record.
+_BOOKKEEPING = {"updated_at", "last_activity_at", "health"}
+_BOOKKEEPING_BY_TABLE = {
+    "calendar_events": {"synced_at", "remote_updated_at", "html_link", "status", "calendar_id", "deleted_at",
+                        "description", "location"},
+}
+
+
+def _refreshed(table_name: str, name: str, current, stored) -> bool:
+    """True when a difference in this column is the app's own housekeeping."""
+    if name in _BOOKKEEPING or name in _BOOKKEEPING_BY_TABLE.get(table_name, ()):
+        return True
+    # A payment that fell due is flagged overdue from its date, not by anyone's hand.
+    return table_name == "payments" and name == "status" and stored == "due" and current == "overdue"
 
 
 # ── Batches ──────────────────────────────────────────────────
@@ -81,6 +113,29 @@ class batch_scope:
         return False
 
 
+class irreversible:
+    """``with irreversible(db):`` — every change recorded inside is a record of something
+    that has already left (a sent message). It is logged like any other and never undone."""
+
+    def __init__(self, db: Session, active: bool = True):
+        self.db = db
+        self.active = active
+        self.previous = None
+
+    def __enter__(self):
+        self.previous = self.db.info.get(_KEEP_KEY)
+        if self.active:
+            self.db.info[_KEEP_KEY] = True
+        return self
+
+    def __exit__(self, *exc):
+        if self.previous is None:
+            self.db.info.pop(_KEEP_KEY, None)
+        else:
+            self.db.info[_KEEP_KEY] = self.previous
+        return False
+
+
 # ── Snapshots ────────────────────────────────────────────────
 
 def _json_safe(value):
@@ -112,6 +167,17 @@ def _coerce(column, value):
     return value
 
 
+def _same(column, current, stored) -> bool:
+    """Does the live value equal a value from a snapshot?"""
+    wanted = _coerce(column, stored)
+    if isinstance(current, float) or isinstance(wanted, float):
+        try:
+            return math.isclose(float(current), float(wanted), rel_tol=1e-6, abs_tol=1e-9)
+        except (TypeError, ValueError):
+            return current == wanted
+    return current == wanted
+
+
 def _model_for(table_name: str):
     for mapper in models.Base.registry.mappers:
         if mapper.local_table.name == table_name:
@@ -126,6 +192,7 @@ def _entry(row: models.ChangeLog) -> dict:
         "id": row.id, "summary": row.summary, "table": row.table_name,
         "action": row.action, "record_id": row.record_id, "batch_id": row.batch_id,
         "undone": row.undone_at is not None,
+        "undoable": row.undoable is not False,
     }
 
 
@@ -144,6 +211,7 @@ def _record(db: Session, *, table_name: str, record_id, action: str, before, aft
         before_json=json.dumps(before, default=str) if before is not None else None,
         after_json=json.dumps(after, default=str) if after is not None else None,
         summary=summary,
+        undoable=not db.info.get(_KEEP_KEY),
     )
     db.add(row)
     db.flush()
@@ -182,33 +250,67 @@ def record_delete(db: Session, obj, summary: str, source: str | None = None) -> 
 
 # ── Undo ─────────────────────────────────────────────────────
 
-def _after_undo_hook(db: Session, table_name: str):
-    """Keep in-memory state in step with the database after an undo."""
+def _after_undo_hook(db: Session, table_name: str, row: models.ChangeLog | None = None):
+    """Keep in-memory state, and the outside world, in step with the database after an undo."""
     if table_name == "kpi_snapshots":
         import main
         main.load_kpi_state(db)
+    elif table_name == "calendar_events" and row is not None and row.action == "create":
+        # The event was created on Google too: remove it there. Best effort — the cache row
+        # is already gone whatever Google answers.
+        try:
+            external_id = (json.loads(row.after_json) if row.after_json else {}).get("external_id")
+            if external_id:
+                import integrations_google
+                integrations_google.delete_remote(db, external_id)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[change_log] calendar undo: remote delete failed ({type(exc).__name__})")
 
 
 def _undo_row(db: Session, row: models.ChangeLog) -> dict:
     if row.undone_at is not None:
         return {**_entry(row), "already_undone": True}
+    if row.undoable is False:
+        raise HTTPException(409, NOT_UNDOABLE)
     model = _model_for(row.table_name)
     if model is None:
         raise HTTPException(400, f"Cannot undo changes to unknown table '{row.table_name}'")
     before = json.loads(row.before_json) if row.before_json else None
+    after = json.loads(row.after_json) if row.after_json else None
     columns = {c.name: c for c in model.__table__.columns}
+    kept_columns: list[str] = []
 
     if row.action == "create":
         obj = db.query(model).filter(model.id == row.record_id).first()
         if obj is not None:
+            # Only remove what is still as it was created: a row somebody has worked on
+            # since (a task completed, a payment marked paid) is theirs now.
+            changed = after is not None and any(
+                not _same(columns[name], getattr(obj, name), value)
+                and not _refreshed(row.table_name, name, getattr(obj, name), value)
+                for name, value in after.items() if name in columns and name != "id")
+            if changed:
+                return {**_entry(row), "already_undone": False, "kept": "changed"}
             db.delete(obj)
     elif row.action == "update":
         obj = db.query(model).filter(model.id == row.record_id).first()
         if obj is None:
             raise HTTPException(409, f"Record {row.table_name}#{row.record_id} no longer exists")
-        for name, value in (before or {}).items():
-            if name in columns and name != "id":
-                setattr(obj, name, _coerce(columns[name], value))
+        names = [n for n in (before or {}) if n in columns and n != "id"]
+        if after is None:
+            revert = names                                    # no after-state on record: the old rule
+        else:
+            # Give back only what this change set, and only where its value is still there.
+            touched = [n for n in names if n not in _BOOKKEEPING and before.get(n) != after.get(n)]
+            kept_columns = [n for n in touched if not _same(columns[n], getattr(obj, n), after.get(n))
+                            and not _refreshed(row.table_name, n, getattr(obj, n), after.get(n))]
+            if touched and len(kept_columns) == len(touched):
+                return {**_entry(row), "already_undone": False, "kept": "changed"}
+            revert = [n for n in touched if n not in kept_columns]
+            if not kept_columns:
+                revert += [n for n in names if n in _BOOKKEEPING]
+        for name in revert:
+            setattr(obj, name, _coerce(columns[name], before[name]))
     elif row.action == "delete":
         exists = db.query(model).filter(model.id == row.record_id).first()
         if exists is None and before:
@@ -219,8 +321,11 @@ def _undo_row(db: Session, row: models.ChangeLog) -> dict:
 
     row.undone_at = datetime.utcnow()
     db.flush()
-    _after_undo_hook(db, row.table_name)
-    return {**_entry(row), "already_undone": False}
+    _after_undo_hook(db, row.table_name, row)
+    result = {**_entry(row), "already_undone": False}
+    if kept_columns:
+        result["kept_columns"] = kept_columns               # changed since: left as they are
+    return result
 
 
 def undo_change(db: Session, change_id: int) -> dict:
@@ -229,6 +334,8 @@ def undo_change(db: Session, change_id: int) -> dict:
         raise HTTPException(404, "Change not found")
     try:
         result = _undo_row(db, row)
+        if result.get("kept"):
+            raise HTTPException(409, CHANGED_SINCE)
         db.commit()
     except HTTPException:
         db.rollback()
@@ -241,7 +348,8 @@ def undo_change(db: Session, change_id: int) -> dict:
 
 
 def undo_batch(db: Session, batch_id: str) -> dict:
-    """All-or-nothing: if any change in the batch cannot be undone, nothing is undone."""
+    """Undo a batch. An error undoes nothing (all or nothing). What may not be undone (a
+    sent message) or was changed afterwards is left as it is and counted in ``kept``."""
     rows = (
         db.query(models.ChangeLog)
         .filter(models.ChangeLog.batch_id == batch_id)
@@ -250,8 +358,15 @@ def undo_batch(db: Session, batch_id: str) -> dict:
     )
     if not rows:
         raise HTTPException(404, "Batch not found")
+    kept = [r for r in rows if r.undoable is False]
+    rows = [r for r in rows if r.undoable is not False]
+    if kept and not any(r.undone_at is None for r in rows):
+        raise HTTPException(409, NOT_UNDOABLE)          # nothing in the batch is left to undo
     try:
         results = [_undo_row(db, r) for r in rows]
+        if results and all(r.get("kept") for r in results if not r["already_undone"]) \
+                and any(r.get("kept") for r in results):
+            raise HTTPException(409, CHANGED_SINCE)      # nothing in the batch is still as it was left
         db.commit()
     except HTTPException:
         db.rollback()
@@ -259,12 +374,20 @@ def undo_batch(db: Session, batch_id: str) -> dict:
     except IntegrityError as exc:
         db.rollback()
         raise HTTPException(409, f"Cannot undo batch: a record is still referenced ({exc.orig})")
-    return {
+    changed = [r for r in results if r.get("kept")]
+    out = {
         "batch_id": batch_id,
-        "undone": sum(1 for r in results if not r["already_undone"]),
+        "undone": sum(1 for r in results if not r["already_undone"] and not r.get("kept")),
         "already_undone": sum(1 for r in results if r["already_undone"]),
         "changes": results,
     }
+    if kept or changed:
+        out["kept"] = len(kept) + len(changed)
+        notes = ([NOT_UNDOABLE] if kept else []) + (
+            [f"{len(changed)} change{'s' if len(changed) != 1 else ''} left as "
+             f"{'they are' if len(changed) != 1 else 'it is'}: changed afterwards."] if changed else [])
+        out["note"] = " ".join(notes)
+    return out
 
 
 # ── Endpoints ────────────────────────────────────────────────

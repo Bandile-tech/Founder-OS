@@ -26,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import models
 import orchestrator_tools as ot
-from market_intel import memory as mi_memory
+from market_intel import memory as mi_memory, scoring
 from market_intel.adapters import WebSearchAdapter
 from market_intel.agent import run_market_research
 from tests.conftest import TestSessionLocal, client
@@ -44,7 +44,7 @@ FAKE_EVIDENCE = [{
 }]
 
 
-def _fake_llm(system, user, temperature=0.4):
+def _fake_llm(system, user, temperature=0.4, **_):
     """Canned outputs per role, keyed on distinctive system-prompt phrases."""
     if "Research Planner" in system:
         return {
@@ -101,6 +101,12 @@ def _fake_llm(system, user, temperature=0.4):
     return {}
 
 
+EXPECTED_OVERALL = scoring.overall({
+    "pain_severity": 8, "frequency": 8, "financial_value": 7, "market_size": 6,
+    "competition_gap": 7, "founder_fit": 9, "speed_to_mvp": 8,
+})
+
+
 def _run(db, objective="find painful problems in Zambian SMEs where AI helps",
          llm=_fake_llm, evidence=FAKE_EVIDENCE):
     with patch("market_intel.agent._llm_json", side_effect=llm), \
@@ -126,9 +132,9 @@ class TestResearchRun:
         assert opp["customer_segment"] == "independent pharmacies, Lusaka"
         assert opp["evidence"][0]["ref"] == FAKE_EVIDENCE[0]["ref"]
         assert opp["first_customer_path"].startswith("walk into")
-        # overall computed in Python: mean of (8,8,7,6,7,9,8) = 7.6
-        assert opp["scores"]["overall"] == 7.6
-        assert opp["overall_score"] == 7.6
+        # overall computed in Python: the weighted mean of the seven axes
+        assert opp["scores"]["overall"] == EXPECTED_OVERALL
+        assert opp["overall_score"] == EXPECTED_OVERALL
 
         project = db.query(models.ResearchProject).get(result["project_id"])
         assert project.status == "completed"
@@ -174,7 +180,7 @@ class TestResearchRun:
 class TestQualityBar:
 
     def test_verifier_rejection_drops_candidate(self):
-        def llm(system, user, temperature=0.4):
+        def llm(system, user, temperature=0.4, **_):
             if "You are the Verifier" in system:
                 return {"verdicts": [{"id": "c1", "verdict": "reject",
                                       "reason": "generic, no specific customer"}]}
@@ -190,7 +196,7 @@ class TestQualityBar:
     def test_unevidenced_candidate_rejected_despite_llm_accept(self):
         """Hard floor: a candidate whose evidence_indexes are invalid carries no
         evidence and must be rejected even if the Verifier model says accept."""
-        def llm(system, user, temperature=0.4):
+        def llm(system, user, temperature=0.4, **_):
             if "Researcher in a market intelligence" in system:
                 out = _fake_llm(system, user, temperature)
                 out["candidates"][0]["evidence_indexes"] = [99]   # out of range
@@ -360,7 +366,7 @@ class TestRest:
 
         detail = client.get(f"/research/projects/{projects[0]['id']}").json()
         assert detail["status"] == "completed"
-        assert detail["findings"][0]["scores"]["overall"] == 7.6
+        assert detail["findings"][0]["scores"]["overall"] == EXPECTED_OVERALL
 
     def test_promote_endpoint_and_pipeline_listing(self):
         db = _db()

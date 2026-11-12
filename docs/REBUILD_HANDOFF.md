@@ -186,6 +186,368 @@ All responses are JSON. Dates are ISO strings. `changes` entries have the shape
 ### Usage
 - `GET /usage/summary?days=90` → `{days, total{calls,input_tokens,cached_input_tokens,output_tokens,estimated_cost_usd}, by_day[], by_month[], by_model[]}`
 
+### Market intelligence v2 (Phase 5A — `backend/market_intel/`)
+
+A finding now also carries `recommendation` (`pursue` at 7.5 and above, `watch` at 6.0 and
+above, else `park`), `times_seen`, `dismissed_reason` and `reviewed_at`. `overall` is a
+weighted mean (weights in `context/core/opportunity_weights.json`).
+
+| Method & path | Body / query | Returns |
+|---|---|---|
+| `POST /research/findings/{id}/dismiss` | `{reason?}` | the finding + `change`; a repeat returns `already_dismissed: true` and `change: null`; 404 for an unknown id |
+| `GET /research/objectives` | | `[{id, objective, cadence_days, enabled, max_opportunities, last_run_at, last_project_id, due}]` |
+| `POST /research/objectives` | `{objective, cadence_days?, max_opportunities?}` | 201 objective + `created`, `change`. Text that restates an existing objective updates that one (`created: false`) |
+| `PATCH /research/objectives/{id}` | `{objective?, cadence_days?, enabled?, max_opportunities?}` | objective + `change` |
+| `POST /research/objectives/{id}/run` | | the research run's result (`project_id, title, opportunities[], rejected_count, lessons_updated, repeated[], cost_usd, llm_calls`) plus `objective_id`, `objective`, `changes`; 503 with no AI key. Slow: a full run |
+| `GET /research/projects/{id}` | | existing fields plus `cost_usd`, `llm_calls`, `objective_id`, `repeated: [{finding_id, problem}]` |
+| `GET /research/pipeline` | | existing fields plus `next_action`, `due_date`; each `finding` carries `recommendation` |
+| `PATCH /research/pipeline/{id}` | existing `stage?`, `notes?` plus `next_action?`, `due_date?` | `{id, stage, notes, next_action, due_date, change}` |
+| `POST /research/promote` | unchanged | existing fields plus `changes` |
+
+`due` is `enabled and (never run, or last run at least cadence_days ago)`. A research
+run's result lists findings it came across again under `repeated` instead of surfacing them
+twice; the existing finding's `times_seen` goes up and it gains the new evidence.
+
+Briefing additions: items with category `opportunity` — a `pursue` finding surfaced in the
+last 14 days and not yet promoted or dismissed (target type `research_finding`, score 35,
+`due_label` its score out of ten, at most three); a pipeline entry in `discovered` or
+`researching` that is past its `due_date` (48) or untouched for 14 days (30) (target type
+`opportunity_pipeline`); a standing objective that is due (target type
+`research_objective`, 12). `counts.opportunities_new` is the number of such findings; it is
+not part of `attention_count`.
+
+### Leads and outreach (Phase 5B — `backend/leads.py`, `backend/outreach.py`)
+
+A lead: `{id, name, company, role, email, phone, whatsapp, linkedin_url, website, location,
+segment, source, status, qualification_score, qualification, opportunity_id, client_id,
+notes, last_contact_at, next_follow_up_at, created_at, updated_at, open_follow_up,
+last_message}`. `status` is `new → qualified | disqualified → contacted → replied →
+converted | lost`. `qualification` is `{fit, reasons[], disqualifiers[], suggested_angle,
+model, scored_at}` or null. `open_follow_up` is `{todo_id, due_date}` or null;
+`last_message` is `{id, channel, status, created_at}` or null. Emails are stored
+lower-cased; phone and WhatsApp numbers as digits with an optional leading `+`.
+
+A message: `{id, lead_id, lead_name, channel, direction, subject, body, status, version,
+supersedes_id, brief, pending_action_id, approved_at, sent_at, external_id, error,
+created_by, created_at, updated_at}`. `channel` is `whatsapp | email | linkedin | call |
+other`; `status` is `draft → approved → sent | failed`, or `cancelled`; inbound rows are
+`direction: in`, `status: received`.
+
+| Method & path | Body / query | Returns |
+|---|---|---|
+| `GET /leads` | `status?`, `segment?`, `q?` (contains, on name or company), `limit=100` | `[lead]` |
+| `GET /leads/segments` | | `[{segment, total, by_status{}}]` |
+| `GET /leads/{id}` | | lead + `messages[]` + `follow_ups[]` (`{todo_id, text, due_date}`, open only) |
+| `POST /leads` | `{name, company?, role?, email?, phone?, whatsapp?, linkedin_url?, website?, location?, segment?, notes?}` | 201 lead + `change`, `deduped: false`; when the details match an existing lead, 200 with that lead updated and `deduped: true` |
+| `PATCH /leads/{id}` | any lead field, `status` | lead + `change` (400 for an unknown status) |
+| `POST /leads/import` | multipart `file` (CSV), `segment?`, `mapping?` (JSON `{csv header: column}`) | `{import_id, created, updated, skipped, total_rows, segment, columns_mapped{}, batch_id}` |
+| `POST /leads/qualify` | `{ids: [..≤20]}` or `{segment}` (the first 20 `new` leads of it) | `{results: [{lead_id, name, pre_score, score, status, fit, reasons, disqualifiers, suggested_angle, outcome?, error?, skipped_llm?}], changes}`; 400 above 20 |
+| `POST /leads/{id}/replied` | `{summary?}` | lead + `change`, `changes`, `message_id` |
+| `POST /leads/{id}/convert` | | `{lead, client: {id, name, company, status, service, lead_id}, changes}` (+ `already_converted: true` on a repeat) |
+| `GET /outreach` | `status?` (comma list, e.g. `draft`), `lead_id?` | `[message]` newest first |
+| `GET /outreach/stats` | `days=90` | `{days, by_segment: [{segment, leads, contacted, replied, converted, reply_rate, conversion_rate}], by_channel: [{channel, sent, contacted, replied, converted, reply_rate, conversion_rate}], totals: {leads, sent, contacted, replied, converted, reply_rate, conversion_rate}}` |
+| `GET /outreach/{id}` | | message |
+| `POST /outreach/{id}/send` | | `{message, changes, open_url?, follow_up_todo_id?}`; 409 unless the message is `draft` or `approved`. A failed send returns 200 with `message.status: failed` and `message.error` |
+| `POST /outreach/{id}/cancel` | | message + `change`; 409 unless `draft` or `approved` |
+
+`POST /outreach/{id}/send` is the Approve & send tap: the tap is the approval, so it sends
+in one step. For WhatsApp the response carries `open_url` (a `wa.me` link the UI opens in a
+new tab) and the message is marked sent. A successful send also moves the lead to
+`contacted`, creates the follow-up todo three days out (`category` and `source`
+`outreach`, `lead_id` set) and logs a communication. The assistant cannot send: its
+`request_send` tool only creates a pending action of kind `send_outreach`, and its
+`confirm_action` is refused with `{"error": "confirmation must come in a later message"}`
+until Bandile has written again. `POST /actions/{id}/confirm` (the dock tap) executes it.
+
+Briefing additions: items with category `outreach` — a draft awaiting approval (target type
+`outreach_message`, score 38, at most three) and a contacted lead with no reply for more
+than seven days and no open follow-up (target type `lead`, score 28, at most three);
+`counts.drafts_waiting`. Alert `outreach_stalled` (warn): at least three qualified leads
+and nothing sent in seven days.
+
+### CRM (Phase 5C — `backend/crm.py`)
+
+Money is always `amount` + `currency` (`USD` | `ZMW`); serialised money rows also carry
+`amount_usd` (converted at `ZMW_PER_USD`). Totals are `{by_currency: {ZMW: n, USD: n},
+total_usd: n}`. Every write returns `change` (one entry) and, where more than one row was
+written, `changes`.
+
+| Method & path | Body / query | Returns |
+|---|---|---|
+| `GET /clients` | `status?`, `q?` | the existing fields plus `currency`, `health` (`green\|amber\|red`, computed live), `tags[]`, `lead_id`, `contacts_count`, `open_deals`, `outstanding{…}`, `mrr{…}`, `last_contact_at` |
+| `GET /clients/{id}` | | the list row plus `contacts[]`, `deals[]`, `projects[]`, `payments[]`, `recurring[]`, `communications[]` (last 50) |
+| `PATCH /clients/{id}` | existing `status?`, `value?`, `notes?`, `service?` plus `currency?`, `tags?: [str]` | `{id, status, currency, tags, change}`; status must be `prospect\|active\|paused\|closed\|lost` (400 otherwise) |
+| `POST /clients/{id}/contacts` | `{name, role?, email?, phone?, whatsapp?, is_primary?}` | 201 contact + `change`, `changes` |
+| `PATCH /contacts/{id}` | any contact field | contact + `change` |
+| `GET /deals` | `stage?`, `client_id?` | `[deal]` with `client_name`, `amount_usd` |
+| `POST /deals` | `{client_id, title, amount?, currency?, stage?, expected_close?}` | 201 deal + `change`, `changes` (+ `project` when created as won) |
+| `PATCH /deals/{id}` | `{stage?, amount?, currency?, probability?, expected_close?, lost_reason?, notes?}` | deal + `change`, `changes` (+ `project` the first time the stage becomes `won`) |
+| `GET /payments` | `status?` (comma list, default `due,overdue`; `all` for everything), `client_id?`, `from?`, `to?` | `[payment]` with `client_name`, `amount_usd` |
+| `POST /payments` | `{client_id, amount, currency?, status?: due\|paid, title?, due_date?, deal_id?, project_id?}` | 201 payment + `change`, `changes` (a `paid` payment also creates its `revenue` row) |
+| `POST /payments/{id}/paid` | `{paid_at?}` | payment with `revenue_id` + `changes`; a second call returns `already_paid: true` and writes nothing; 409 for a cancelled payment |
+| `POST /payments/{id}/cancel` | | payment + `change`; 409 when it is already paid |
+| `GET /recurring` | | `[recurring]` with `client_name`, `monthly_amount` |
+| `POST /recurring` | `{client_id, title, amount, currency?, interval?: monthly\|quarterly\|annual, day_of_month?, start?}` | 201 + `change` |
+| `PATCH /recurring/{id}` | `{active?, amount?, currency?, interval?, day_of_month?, ended_at?}` | + `change` |
+| `GET /communications` | `client_id?`, `lead_id?`, `limit=50` | `[communication]` newest first |
+| `POST /communications` | `{client_id?, lead_id?, contact_id?, channel, direction?, summary, occurred_at?}` | 201 + `change` |
+| `GET /crm/summary` | | `{clients:{active, paused, total}, deals:{by_stage:{stage:{count, amount_usd}}, weighted_pipeline_usd}, payments:{due_usd, overdue_usd, overdue_count, paid_30d_usd}, mrr:{by_currency, total_usd}, revenue_30d_usd, health:{green, amber, red}}` |
+
+`GET /crm/summary` and `GET /briefing/today` first run `crm.housekeeping` (create the due
+payment for each recurring period that has arrived, flip `due` to `overdue`, link stray
+revenue rows to open payments, store client health), so both can write. Deal stages:
+`lead → proposal → negotiation → won | lost`; a stage change sets the default probability
+(10 / 40 / 70 / 100 / 0) unless one is given. `GET /revenue` is unchanged.
+
+Briefing additions: items with category `payment` (overdue: score 72 + min(days, 14);
+due within 7 days: 42), `deal` (40) and `client` (26, at most three); `counts.payments_overdue`
+(included in `attention_count`); a new top-level `business_detail: {revenue_pct, mrr_usd,
+outstanding_usd, overdue_count}`. `progress.business` is unchanged.
+
+### Project portfolio (Phase 5E — `backend/portfolio.py`)
+
+A project: `{id, title, kind (client|internal), client_id, client_name, deal_id, status,
+priority (1 high … 5 low), expected_value, currency, expected_value_usd, effort_hours_week,
+start_date, due_date, delivered_at, next_action, blocked_reason, last_activity_at, health,
+notes, created_at, updated_at}`. `status` is `planned | active | paused | delivered |
+closed | cancelled`.
+
+`attention`: `{score, components: {value 0–3, urgency 0–4, staleness 0–2, blocked 0|2,
+priority 0.4–2, waiting 0|1}, bottleneck, overdue_days, idle_days, waiting_days}`. The
+bottleneck is the first that applies of: `blocked: <reason>`, `overdue by N days`,
+`waiting on client for N days`, `no activity for N days`, `payment overdue (K…)`, or null.
+
+| Method & path | Body / query | Returns |
+|---|---|---|
+| `GET /portfolio` | `include_paused=1` | `{ranked: [entry], paused: [entry], pause_suggestions: [suggestion], bottlenecks: [{project_id, title, bottleneck}], totals: {active, paused, blocked, overdue, value_usd_active}}`; an entry is `{project, attention, bottleneck, recommendation, rank}` |
+| `GET /projects` | `status?`, `kind?`, `client_id?` | `[project + attention]` |
+| `GET /projects/{id}` | | project + `attention`, `updates[]`, `payments[]`, `communications[]` (the client's last 20) |
+| `POST /projects` | `{title, kind?, client_id?, priority?, expected_value?, currency?, due_date?, effort_hours_week?, next_action?}` | 201 project + `change`, `changes` |
+| `PATCH /projects/{id}` | any of the above plus `status?`, `blocked_reason?`, `notes?` | project + `change`, `changes`. An empty `blocked_reason` clears the block and writes an `unblocked` update; a new reason writes a `blocker` update |
+| `POST /projects/{id}/status` | `{status}`: `paused`, `active`, `delivered` or `closed` | project + `change`, `changes` (the project and a `status` update row); 400 for any other status |
+| `POST /projects/{id}/focus` | | project (now priority 1) + `changes`; every other active priority-1 project drops to 2, all in one batch |
+| `POST /projects/{id}/updates` | `{text, kind?: note\|milestone\|blocker\|unblocked, occurred_at?}` | 201 `{id, project_id, project, kind, text, occurred_at, blocked_reason, health, change, changes}` |
+
+`ranked` holds active, planned and delivered projects, highest score first; `rank` is set
+for active projects only. `recommendation` is checked in this order: `close` (delivered
+more than 30 days ago), `pause` (active, no activity for more than 14 days, nothing due
+within 30 days, value under a third of the $5,000 cap), `focus` (one of the three
+highest-scoring active projects that are not recommended for a pause), else `maintain`.
+`GET /portfolio` stores each project's `health` and files one `project_pause` suggestion
+per pause recommendation (none while one is already open), so it can write. Accepting the
+suggestion (`POST /suggestions/{id}/accept`) pauses the project; nothing is paused
+otherwise.
+
+Briefing additions: items with category `project` — blocked (62), overdue (70 + min(days,
+9)), waiting on the client for more than seven days (36) and the rank-1 focus project (45,
+`due_label` `FOCUS`); `progress.projects` (delivered or closed in 90 days ÷ that plus
+active, null with no projects). Alert `projects_blocked` (warn) at two blocked active
+projects.
+
+### Personal brand (Phase 5D — `backend/brand/`)
+
+Real platform data only. A number the platform did not give is `null`, never 0; nothing is
+estimated and no metric can be typed in.
+
+An account: `{id, platform, handle, external_id, access (api_key|export|oauth), status
+(connected|error|disconnected), last_synced_at, last_error, created_at, updated_at,
+followers, followers_delta_30d, following, posts_count, total_views, metrics_captured_at,
+posts_stored}`. A post: `{id, account_id, platform, external_id, url, title, kind
+(video|short|post|article|thread), posted_at, idea_id, topic_tags[], views, likes, comments,
+shares, saves, impressions, watch_time_s, engagement, engagement_rate, captured_at}` where
+`engagement` is likes + comments + shares + saves over the values that were measured and
+`engagement_rate` is engagement ÷ views (or impressions when there are no views). An idea:
+`{id, title, angle, platform, format, status (idea|drafted|scheduled|posted|dropped),
+scheduled_for, posted_post_id, source, score, created_at, updated_at}`.
+
+| Method & path | Body / query | Returns |
+|---|---|---|
+| `GET /brand/accounts` | | `[account]` |
+| `POST /brand/accounts` | `{platform, handle?, external_id?}` | 201 account + `change`. YouTube resolves the handle to the channel id now; a failure is 400 with the adapter's message (`YOUTUBE_API_KEY not set`, `no YouTube channel found for @x`). LinkedIn is connected by importing its export |
+| `POST /brand/accounts/{id}/sync` | | `{ok, posts_new, posts_updated, metrics_rows, account_rows, status, last_error, account, changes}`; a failed sync is 200 with `ok: false`, `status: error` |
+| `DELETE /brand/accounts/{id}` | | account (`status: disconnected`) + `change`; nothing is deleted |
+| `POST /brand/import` | multipart `file` (CSV saved from the platform's export), `platform` (`linkedin`) | `{account_id, platform, account_created, rows, posts_new, posts_updated, metrics_rows, batch_id}`; 400 when the file has none of the expected columns or the platform has no importer |
+| `GET /brand/performance` | `platform?`, `days=90` | `{connected, platform, days, accounts[], top_posts: [{post, views, impressions, engagement, engagement_rate, posted_at}], by_format: {kind: {count, median_views, median_engagement_rate}}, cadence: {posts_in_window, per_week, gap_days_since_last}, trend: [{week_start, posts, views, engagement}] (12 weeks), insight, brand_target_posts_30d, posts_last_30d}` |
+| `GET /brand/posts` | `platform?`, `limit=50` | `[post]` newest first |
+| `PATCH /brand/posts/{id}` | `{topic_tags?: [str], idea_id?}` | post + `change` |
+| `GET /brand/ideas` | `status?` (comma list) | `[idea]` |
+| `POST /brand/ideas` | `{title, angle?, platform?, format?, scheduled_for?}` | 201 idea + `change` (a date makes it `scheduled`) |
+| `PATCH /brand/ideas/{id}` | `{title?, angle?, platform?, format?, status?, scheduled_for?, score?, posted_post_id?}` | idea + `change` |
+| `POST /brand/ideas/{id}/advance` | | idea + `change` (idea → drafted → scheduled → posted); 409 `scheduling needs a date` when the next step is `scheduled` and there is no date; 400 once it is posted or dropped |
+| `GET /brand/calendar` | `from?`, `to?` (default this week and next) | `{from, to, days: [{date, is_today, ideas[], posted[]}], backlog[]}` |
+| `GET /brand/insight` | `platform?`, `refresh=0\|1` | `{week_start, platform, text \| null, cached}` |
+
+Snapshots are append-only and written only when a number changed. The weekly insight is at
+most one model call per platform per ISO week; `GET /brand/performance` returns the cached
+text and never generates it. Briefing additions: items with category `content` — an idea
+scheduled for today (58) or overdue (66), an account in `error` (20), no post for more than
+14 days on a connected account (22); `progress.brand` (posts in 30 days against
+`brand_target_posts_30d: 8`, `null` with no account).
+
+### Agents and the scheduler (Phase 6B — `backend/agents/`)
+
+An agent in the registry: `{key, name, description, phase, enabled, schedule: {interval_minutes,
+at_time, weekdays, effective, overridden}, events[], permissions: {tools[], tables_write[],
+may_notify, may_emit[], max_llm_calls, max_seconds}, last_run: {at, status, summary,
+cost_usd} | null, runs_count, cost_usd_total, cost_usd_month, next_due_estimate}`.
+`schedule.effective` is a phrase: `every 60 min`, `daily at 06:00`, `Sun at 07:00`, or
+`on events only`.
+
+A run: `{id, agent_key, agent_name, trigger (schedule|event|manual|in_process), tick_id,
+started_at, finished_at, duration_ms, status (running|completed|skipped|failed|violation),
+summary, result, error, log, llm_calls, cost_usd, changes_count, batch_id, over_time,
+changes[]}` (`changes` — at most ten change entries — on the listing endpoints).
+
+| Method & path | Body / query | Returns |
+|---|---|---|
+| `GET /agents` | | `[agent]` in run order (couriers last) |
+| `GET /agents/{key}` | | agent + `config` + `runs` (the last 20) |
+| `PATCH /agents/{key}` | `{enabled?, interval_minutes?, at_time?, weekdays?, config?}` | agent + `change` (the toggle is change-logged, so it can be undone). `interval_minutes: 0`, `at_time: ""` and `weekdays: []` clear an override; 400 for a bad time or weekday |
+| `POST /agents/{key}/run` | | runs now (`trigger: manual`), whatever the schedule or the toggle say → the run |
+| `GET /agents/{key}/runs` | `limit=20` | `[run]` |
+| `GET /agents/runs` | `limit=50`, `status?` | the activity log across agents, newest first |
+| `POST /agents/runs/{id}/undo` | | undoes the run's whole batch; 409 when the run changed nothing |
+| `GET /jobs/status` | | `{last_tick: {id, trigger, started_at, finished_at, agents_run, agents_skipped, events_consumed, errors, duration_ms} \| null, ticks_24h, agents_due_now: [keys], token_configured, in_process_scheduler}` |
+| `POST /jobs/tick` | header `X-Jobs-Token` | `{tick_id, trigger, ran: [{key, status, summary}], skipped: [{key, reason}], deferred: [keys], events_consumed, events_dropped, errors, duration_ms}`; 401 for a wrong or missing token; 503 while `JOBS_TOKEN` is unset. Exempt from the session login |
+
+Shipped agents and their defaults: `crm_housekeeper` (every 60 min), `lead_qualifier`
+(every 180 min, at most 20 model calls), `follow_up_sentinel` (daily at 05:30, and on
+`lead.replied`), `portfolio_reviewer` (daily at 05:40), `brand_sync` (daily at 04:00),
+`market_intel` (every 60 min; one due objective per run, at most 12 model calls). Times are
+in `FOUNDER_OS_TZ`. An agent whose module is not built reports `skipped`.
+
+How agents run: the in-process scheduler calls the tick every 15 minutes while the process
+is awake (`JOBS_IN_PROCESS`, default on); `POST /jobs/tick` does the same when called.
+`.github/workflows/jobs-tick.yml` calls that endpoint but ships with its schedule commented
+out (see ADR-0001's amendment). A write by an agent outside its `tables_write` undoes the
+run's whole batch and marks the run `violation`.
+
+### Applications (Phase 6A — `backend/applications.py`)
+
+An application: `{id, name, institution, programme, kind, deadline, deadline_source
+(user|document|unknown), decision_date, status, priority, portal_url, notes,
+requirements_updated_at, gaps_reviewed_at, created_at, updated_at, timeline, gaps_open}`.
+`status` is `researching → preparing → submitted → interview → accepted | rejected |
+withdrawn`. `timeline` is `{days_to_deadline | null, requirements: {missing, in_progress,
+ready, submitted}, requirements_total, next_due: {requirement_id, title, due_date, days,
+from_deadline} | null, at_risk}`.
+
+A requirement: `{id, application_id, title, kind, status (missing|in_progress|ready|
+submitted|not_required), due_date, due_source (user|document|null), details, todo_id,
+note_id, sort_order, created_at, updated_at}`. A gap: `{id, application_id, gap, severity
+(high|medium|low), evidence, suggested_action, status (open|addressed|accepted_risk|
+superseded), review_batch, created_at, updated_at}`.
+
+| Method & path | Body / query | Returns |
+|---|---|---|
+| `GET /applications` | `status?` | `[application]` sorted by deadline (undated last) |
+| `GET /applications/{id}` | | application + `requirements[]` + `gaps[]` (open, high first) |
+| `POST /applications` | `{name, institution?, programme?, kind?, deadline?, priority?, portal_url?}` | 201 application + `change`. A deadline given here is `deadline_source: user` |
+| `PATCH /applications/{id}` | any field incl. `status`, `deadline` (sets the source to `user`), `decision_date`, `notes` | application + `change`; 400 for an unknown status |
+| `POST /applications/{id}/requirements/import` | `{text}` | `{application_id, application, created, updated, deadline_set, deadline, deadline_source, dates_dropped, changes, batch_id}`; 400 when the text is too short or the answer unreadable; 503 with no AI key |
+| `POST /applications/{id}/requirements` | `{title, kind?, due_date?, details?}` | 201 requirement + `change` |
+| `PATCH /requirements/{id}` | `{title?, kind?, status?, due_date?, details?}` | requirement + `change` |
+| `POST /requirements/{id}/advance` | | requirement + `change` (missing → in_progress → ready → submitted → missing) |
+| `POST /requirements/{id}/todo` | | `{todo: {id, text, due_date, done, category}, change, changes, existing}`; while that task is open a repeat returns it with `existing: true` |
+| `GET /applications/{id}/gaps` | `refresh=0\|1` | `{application_id, application, gaps_reviewed_at, cached, stale, gaps[]}`; 503 for `refresh=1` with no AI key; 502 when the review cannot be read |
+| `PATCH /gaps/{id}` | `{status: open\|addressed\|accepted_risk}` | gap + `change` |
+
+Dates: the import keeps a date only when the model also gives the phrase it came from and
+that phrase is in the pasted text; anything else is dropped and counted in
+`dates_dropped`. A deadline or due date Bandile set himself is never overwritten by an
+import. The gap review is one model call and is cached: `GET …/gaps` makes no call while
+the last review is at least as new as the last change to the requirements. A new review
+marks the previous open gaps `superseded`.
+
+Briefing additions: items with category `application` — an application in preparation
+whose deadline is within 60 days (target type `application`, score `max(10, 82 − days)`,
+90 once the deadline has passed); a missing or in-progress requirement with its own due
+date within 14 days (target type `application_requirement`, `60 + (14 − days)`, capped at
+80); open high gaps when the deadline is within 90 days (target type `application_gap`,
+24, at most two). `counts.applications_at_risk` is included in `attention_count`. Alert
+`application_at_risk` (critical): a deadline inside 14 days with requirements not ready.
+Agent `application_watch` (daily at 05:45) emits `application.deadline_near` once per
+application, mark (30, 14, 7, 3, 1 days) and deadline, and refreshes stale gap reviews (at
+most two a run).
+
+### Integrations (Phase 6C — `backend/integrations.py`, `backend/integrations_telegram.py`)
+
+An integration: `{provider (google_calendar|email|telegram|youtube), label, status
+(disconnected|pending|connected|error), account_label, connected_at, last_sync_at,
+last_error (only while failing), configured (are its env vars set), actions[]}`. `actions`
+is the list of buttons the Settings card may show: `connect`, `sync`, `disconnect`, `pair`,
+`set_webhook`. Tokens live in `integrations.secret_json`, which no endpoint returns; every
+stored error and log line goes through `integrations.redact()`.
+
+| Method & path | Body / query | Returns |
+|---|---|---|
+| `GET /integrations` | | `[integration]`, always the four providers in the order above |
+| `POST /integrations/telegram/set-webhook` | | `{ok, description, url}`; 503 naming the missing env var (`TELEGRAM_BOT_TOKEN`, `FOUNDER_OS_API_URL`, `TELEGRAM_WEBHOOK_SECRET`) |
+| `POST /integrations/telegram/unpair` | | the telegram integration |
+
+### Google Calendar (Phase 6C — `backend/integrations_google.py`)
+
+An event: `{id, title, start_local ("HH:MM" | "all day"), end_local, all_day, date, start_at,
+end_at (naive UTC), location, html_link, created_by_us}`.
+
+| Method & path | Body / query | Returns |
+|---|---|---|
+| `GET /integrations/google/start` | | `{url}` — send the browser there; 503 until `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and `FOUNDER_OS_API_URL` are set |
+| `GET /integrations/google/callback` | `code`, `state` (from Google; no session) | 302 to `/app/#settings?connected=google` or `/app/#settings?error=google_denied|google_state|google_exchange` |
+| `POST /integrations/google/sync` | | `{ok, created, updated, deleted, unchanged, error}` |
+| `POST /integrations/google/disconnect` | | the google_calendar integration |
+| `GET /calendar/today` | `date?` (YYYY-MM-DD) | `{connected, events: [event]}` |
+| `GET /calendar/week` | `from?` (YYYY-MM-DD) | `{connected, days: [{date, events}]}` — seven days |
+| `POST /calendar/events` | `{title, start, duration_minutes?, location?, notes?}` | event + `change`; 422 without a date and time; 503 when not connected; 502 when Google refuses |
+
+`GET /briefing/today` now carries `calendar: {connected, events_today, all_day}`,
+`today_events` (all-day titles) and `integrations: {email, telegram, google_calendar}`; timed
+events today are items of category `event` (target type `calendar_event`).
+
+### Email (Phase 6C — `backend/integrations_email.py`)
+
+A stored message: `{id, message_id, thread_key, direction (in|out), from_addr, to_addr,
+subject, snippet (at most 500 characters), received_at, lead_id, client_id, contact_id,
+outreach_message_id}`. Bodies are never stored; mail from unknown senders is never stored.
+
+| Method & path | Body / query | Returns |
+|---|---|---|
+| `POST /integrations/email/sync` | | `{ok, fetched, stored, matched_leads, matched_clients, ignored, error}`; 503 until `EMAIL_ADDRESS` and `EMAIL_APP_PASSWORD` are set |
+| `POST /integrations/email/test` | | `{ok, error}` — sends a test message to `EMAIL_ADDRESS` |
+| `GET /email/messages` | `lead_id?`, `client_id?`, `limit=50` | `[message]`, newest first |
+
+An outreach message on the `email` channel is now really sent when it is approved
+(`POST /outreach/{id}/send`); `external_id` is the `Message-ID`, and a reply to it sets
+`replied_at` on the outreach message.
+
+### Notifications (Phase 6D — `backend/notify.py`, `backend/telegram_inbound.py`)
+
+A notification: `{id, created_at, channel, kind (briefing|evening|alert|deadline|reminder|
+reply|test), title, body, dedupe_key, send_at, status (queued|sent|failed|suppressed|
+cancelled), sent_at, error, source, agent_run_id, suppressed_reason (quiet_hours|daily_cap|
+channel_disabled|not_paired)}`. Settings: `{enabled, morning_time, evening_time | null,
+quiet_start, quiet_end, alert_min_severity (info|warn|critical), daily_cap, channels,
+deadline_days, muted_until, updated_at, paired, pair_code, bot_link | null,
+channel_configured}`. Times are local `HH:MM`.
+
+| Method & path | Body / query | Returns |
+|---|---|---|
+| `GET /notifications/settings` | | settings |
+| `PATCH /notifications/settings` | any of `enabled`, `morning_time`, `evening_time` (`"off"` or null turns it off), `quiet_start`, `quiet_end`, `alert_min_severity`, `daily_cap` | settings + `change`; 422 for a bad value |
+| `GET /notifications` | `limit=50`, `status?`, `kind?` | `[notification]`, newest first |
+| `POST /notifications/test` | | `{status, error}` — sends "Founder OS connected" |
+| `POST /notifications/brief-now` | | `{status, error}` — sends today's briefing now |
+| `POST /notifications/{id}/cancel` | | notification; 409 unless it is queued |
+| `POST /integrations/telegram/webhook` | a Telegram `Update`; header `X-Telegram-Bot-Api-Secret-Token` | `{}`; 403 unless the header equals `TELEGRAM_WEBHOOK_SECRET`. No session needed |
+
+`GET /briefing/today` now carries `delivery: {last_sent_at, channel, paired}`.
+
+Telegram commands: the six-character code (or `/start <code>`) pairs; then `/brief`,
+`/undo`, `/yes`, `/no`, `/mute 2h` (`/mute off`), `/help`. Any other text is an assistant
+turn (`orchestrator.run_turn`), saved in the one thread with `session_id =
+telegram:<chat_id>`; the reply ends with `Changed: …` and `/undo to reverse` when something
+changed, and `Reply /yes to confirm or /no.` when a delete or a send was proposed.
+
 ### Tool registry (for the UI's reference)
 `route_brain_dump, get_dashboard_state, detect_off_track, synthesize_weekly_review,
 surface_weakest_topics, query_war_room, add_todos, query_cold_archive,
@@ -206,6 +568,16 @@ anything. RLS enabled on every new table on Postgres (m008 convention).
 | m011 | `change_log`, `pending_actions`, `suggestions`, `notes` |
 | m012 | `revenue.currency` (backfilled USD), `todos.due_date` (Python backfill), `embeddings`, `exam_dates`; one-off copy of books + Bible log into notes |
 | m013 | `syllabus_points`, `briefing_summaries` |
+| m014 | Phase 5A: `research_objectives`; columns on `research_projects`, `research_findings`, `opportunity_pipeline`; a Python backfill of `recommendation` |
+| m015 | Phase 5B: `leads`, `lead_imports`, `outreach_messages`; `todos.lead_id`, `todos.client_id` |
+| m016 | Phase 5C: `contacts`, `deals`, `projects`, `payments`, `recurring_revenue`, `communications`; `clients.lead_id/currency/tags/health`. **Backfills**: existing clients get `DEFAULT_CURRENCY` (ZMW); every revenue row with a client gets one paid payment in that revenue row's own currency. The payment backfill runs once per database (a row in `migration_marks`), never on a later startup, so it cannot get ahead of `crm.reconcile`. Back up before the first production run |
+| m017 | Phase 5D: `social_accounts`, `content_posts`, `content_metrics`, `account_metrics`, `content_ideas`, `brand_insights` |
+| m018 | Phase 5E: `project_updates` |
+| m019 | Phase 6A: `applications`, `application_requirements`, `application_gaps` |
+| m020 | Phase 6B: `agents`, `agent_runs`, `agent_events`, `job_ticks`; `llm_usage.agent_run_id` |
+| m021 | Phase 6C: `integrations`, `calendar_events`, `email_messages`; `outreach_messages.replied_at` |
+| m022 | Phase 6D: `notifications`, `notification_settings` (row 1 created with the defaults) |
+| m023 | Review round: `agent_event_deliveries` (which subscriber has been handed which event); `change_log.undoable` (FALSE on the record of a sent email or WhatsApp message; undo keeps those rows); `email_messages.auth_result` (pass / fail / none / confirmed); `agents.claimed_at` (the one-run-at-a-time claim) |
 
 **Postgres notes**
 - All ADD COLUMN use `IF NOT EXISTS`; all tables `CREATE TABLE IF NOT EXISTS`.
@@ -231,8 +603,30 @@ anything. RLS enabled on every new table on Postgres (m008 convention).
 | `ASSISTANT_SUMMARY_BATCH` | `10` | Messages that must fall out of the window before the summary refreshes |
 | `INTENT_CONFIDENCE_MIN` | `0.7` | Below this an extracted item becomes a suggestion |
 | `ZMW_PER_USD` | `27.0` | Kwacha→dollar rate for the $10K scoreboard. **Set this.** |
+| `DEFAULT_CURRENCY` | `ZMW` | Currency of a client when none is given (`ZMW` or `USD`) |
+| `DEFAULT_COUNTRY_CODE` | `260` | Country code added to local numbers in `wa.me` links |
 | `LLM_PRICING_JSON` | built-in table | Override per-model prices for `llm_usage` cost estimates |
 | `ORCHESTRATOR_MODEL` | — | Legacy; still honoured if `ASSISTANT_MODEL` is unset |
+
+Phases 5 and 6 add (all optional; each feature shows "not connected" without its variables):
+
+| Var | Default | Purpose |
+|---|---|---|
+| `RESEARCH_MODEL` | the assistant model | Model for the market-intelligence roles |
+| `JOBS_TOKEN` | unset | Secret for `POST /jobs/tick`; 32+ random characters. Unset or under 16 characters: the endpoint answers 503 |
+| `FOUNDER_OS_TZ` | `Africa/Lusaka` | The user's zone: "today" everywhere, schedules and notification times |
+| `JOBS_TICK_BUDGET` | `80` | Seconds a tick may spend starting agents |
+| `JOBS_IN_PROCESS` | `1` | `0` turns off the in-process 15-minute tick |
+| `YOUTUBE_API_KEY` | unset | YouTube Data API v3 key for the Brand tab |
+| `FOUNDER_OS_API_URL` | unset | The service's public URL, no trailing slash. Needed for the Telegram webhook and the Google redirect |
+| `TELEGRAM_BOT_TOKEN` | unset | Secret. The bot's token from @BotFather |
+| `TELEGRAM_BOT_USERNAME` | unset | The bot's username, for the link in Settings |
+| `TELEGRAM_WEBHOOK_SECRET` | unset | Secret. A random string Telegram sends back with each update; 32+ characters, refused under 16 |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | unset | The Google OAuth client (the secret is a secret) |
+| `GOOGLE_CALENDAR_ID` | `primary` | Which calendar to read and write |
+| `EMAIL_ADDRESS` / `EMAIL_APP_PASSWORD` | unset | The Gmail address and its App Password (a secret) |
+| `EMAIL_IMAP_HOST` / `EMAIL_SMTP_HOST` / `EMAIL_SMTP_PORT` / `EMAIL_FROM_NAME` | Gmail's, `465`, `Bandile Masocha` | Mail servers and the sender name |
+| `EMAIL_AUTHSERV_ID` | `mx.google.com` for Gmail | Whose `Authentication-Results` header is trusted when deciding that a sender is verified |
 
 ---
 

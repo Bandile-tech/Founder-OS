@@ -73,6 +73,37 @@ app.include_router(_briefing.router)
 app.include_router(_voice_realtime.router)
 import conversation as _conversation
 app.include_router(_conversation.router)
+import leads as _leads
+app.include_router(_leads.router)
+import outreach as _outreach
+app.include_router(_outreach.router)
+import crm as _crm
+app.include_router(_crm.router)
+import portfolio as _portfolio
+app.include_router(_portfolio.router)
+from market_intel import objectives as _research_objectives
+app.include_router(_research_objectives.router)
+import applications as _applications
+app.include_router(_applications.router)
+import brand as _brand
+app.include_router(_brand.router)
+import integrations as _integrations
+import integrations_telegram as _integrations_telegram
+app.include_router(_integrations.router)
+app.include_router(_integrations_telegram.router)
+import notify as _notify
+app.include_router(_notify.router)
+import telegram_inbound as _telegram_inbound
+app.include_router(_telegram_inbound.router)
+import integrations_google as _integrations_google
+app.include_router(_integrations_google.router)
+import integrations_email as _integrations_email
+app.include_router(_integrations_email.router)
+import agents as _agents
+from agents import api as _agents_api
+import user_clock
+_agents.load_all()                       # every shipped agent registers itself
+app.include_router(_agents_api.router)
 
 # Serve frontend from ../frontend if it exists
 FRONTEND_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend")
@@ -129,6 +160,15 @@ async def startup():
     from migrations.m004_warroom import run as run_m004
     if not _auth.auth_required():
         print("[startup] WARNING: FOUNDER_OS_PASSWORD is not set — the API is open. Set it on Render.")
+    if os.getenv("JOBS_TOKEN") and len(os.getenv("JOBS_TOKEN")) < 32:
+        print("[startup] WARNING: JOBS_TOKEN is shorter than 32 characters. Use a longer random value "
+              "(under 16, POST /jobs/tick answers 503).")
+    if os.getenv("TELEGRAM_WEBHOOK_SECRET") and len(os.getenv("TELEGRAM_WEBHOOK_SECRET")) < 32:
+        print("[startup] WARNING: TELEGRAM_WEBHOOK_SECRET is shorter than 32 characters. Use a longer random "
+              "value (under 16, the webhook refuses every update).")
+    if _auth.auth_required() and not os.getenv("FOUNDER_OS_SECRET"):
+        print("[startup] NOTE: FOUNDER_OS_SECRET is not set, so session tokens are signed with a key derived "
+              "from the password. Set a random FOUNDER_OS_SECRET on Render.")
     db = SessionLocal()
     try:
         load_kpi_state(db)
@@ -154,6 +194,26 @@ async def startup():
         run_m012(db)        # m012 — revenue.currency, todos.due_date, embeddings, exam_dates
         from migrations.m013_syllabus_briefing import run as run_m013
         run_m013(db)        # m013 — syllabus_points, briefing_summaries
+        from migrations.m014_market_intel_v2 import run as run_m014
+        run_m014(db)        # m014 — research cost/recommendation/dedup columns, research_objectives
+        from migrations.m015_leads_outreach import run as run_m015
+        run_m015(db)        # m015 — leads, lead_imports, outreach_messages, todos.lead_id/client_id
+        from migrations.m016_crm import run as run_m016
+        run_m016(db)        # m016 — contacts, deals, projects, payments, recurring_revenue, communications
+        from migrations.m017_brand import run as run_m017
+        run_m017(db)        # m017 — social_accounts, content_posts/metrics, account_metrics, content_ideas, brand_insights
+        from migrations.m018_portfolio import run as run_m018
+        run_m018(db)        # m018 — project_updates
+        from migrations.m019_applications import run as run_m019
+        run_m019(db)        # m019 — applications, application_requirements, application_gaps
+        from migrations.m020_agents import run as run_m020
+        run_m020(db)        # m020 — agents, agent_runs, agent_events, job_ticks, llm_usage.agent_run_id
+        from migrations.m021_integrations import run as run_m021
+        run_m021(db)        # m021 — integrations, calendar_events, email_messages, outreach_messages.replied_at
+        from migrations.m022_notifications import run as run_m022
+        run_m022(db)        # m022 — notifications, notification_settings (row 1)
+        from migrations.m023_review_round import run as run_m023
+        run_m023(db)        # m023 — agent_event_deliveries, change_log.undoable, email_messages.auth_result, agents.claimed_at
         _validate_schema(engine)   # raises if any ORM column is absent from the live DB
         _seed_non_negotiables_if_empty(db)
         _verify_seed_integrity(db)
@@ -236,7 +296,7 @@ def freeze_ended_weeks_job():
     db = SessionLocal()
     try:
         snapshots = db.query(models.WeeklyTargetSnapshot).filter(
-            models.WeeklyTargetSnapshot.week_end < date.today(),
+            models.WeeklyTargetSnapshot.week_end < user_clock.today(),
             models.WeeklyTargetSnapshot.frozen == False
         ).all()
         for snapshot in snapshots:
@@ -284,8 +344,14 @@ async def start_vault_scheduler():
         id="vault_sync",
         replace_existing=True,
     )
+    if _jobs_in_process():
+        # Best effort while the process is awake; POST /jobs/tick is the scheduler of record.
+        scheduler.add_job(_jobs_tick_job, "interval", minutes=JOBS_TICK_MINUTES, id="jobs_tick",
+                          replace_existing=True)
     scheduler.start()
     print(f"[vault_sync] Scheduler started — every {VAULT_SYNC_INTERVAL_HOURS}h.")
+    if _jobs_in_process():
+        print(f"[jobs] In-process tick every {JOBS_TICK_MINUTES} min (JOBS_IN_PROCESS=0 turns it off).")
 
 
 # ── SEED HELPERS ─────────────────────────────────────────────
@@ -298,7 +364,7 @@ HABIT_DEFAULTS = [
 ]
 
 def _seed_habits_if_empty(db: Session):
-    today = date.today()
+    today = user_clock.today()
     existing = db.query(Habit).filter(Habit.date == today).count()
     if existing == 0:
         for key, label in HABIT_DEFAULTS:
@@ -383,7 +449,7 @@ def update_kpis(payload: schemas.KPIBulkUpdate, db: Session = Depends(get_db)):
     for u in payload.updates:
         if u.key in _kpi_state:
             _kpi_state[u.key]["value"] = u.value
-            db.add(KPISnapshot(key=u.key, value=u.value, date=date.today()))
+            db.add(KPISnapshot(key=u.key, value=u.value, date=user_clock.today()))
             updated.append(u.key)
     db.commit()
     return {"updated": updated, "kpis": _kpi_state}
@@ -401,7 +467,7 @@ def kpi_history(key: str, limit: int = 30, db: Session = Depends(get_db)):
 @app.get("/habits")
 def get_habits(for_date: Optional[date] = None, db: Session = Depends(get_db)):
     from models import NonNegotiable
-    target_date = for_date or date.today()
+    target_date = for_date or user_clock.today()
     active_nns = db.query(NonNegotiable).filter(NonNegotiable.is_active == True).order_by(NonNegotiable.sort_order, NonNegotiable.id).all()
     if not active_nns:
         # Fallback: seed non-negotiables then retry
@@ -441,7 +507,7 @@ def habit_streak(key: str, db: Session = Depends(get_db)):
         Habit.done == True
     ).order_by(Habit.date.desc()).all()
     streak = 0
-    check = date.today()
+    check = user_clock.today()
     for r in records:
         if r.date == check:
             streak += 1
@@ -568,8 +634,8 @@ def create_todo(todo: dict, db: Session = Depends(get_db)):
         priority=todo.get("priority", 5),
         done=False,
         category=todo.get("category", "personal"),
-        due=todo.get("due", str(date.today())),
-        due_date=_due_date_from(todo.get("due", str(date.today()))),
+        due=todo.get("due", str(user_clock.today())),
+        due_date=_due_date_from(todo.get("due", str(user_clock.today()))),
         source=todo.get("source", "manual"),
         roadmap_id=todo.get("roadmapId")
     )
@@ -591,7 +657,7 @@ def complete_todo(todo_id: int, db: Session = Depends(get_db)):
         else:
             before = change_log.snapshot(todo)
             todo.done = True
-            todo.completed_at = date.today()
+            todo.completed_at = user_clock.today()
             change = change_log.record_update(db, todo, before, f"Completed task: {todo.text[:80]}")
         db.commit()
     return {"id": todo.id, "done": todo.done, "completed_at": str(todo.completed_at) if todo.completed_at else None,
@@ -604,7 +670,7 @@ def toggle_todo(todo_id: int, db: Session = Depends(get_db)):
     if not todo:
         raise HTTPException(404, "Todo not found")
     todo.done = not todo.done
-    todo.completed_at = date.today() if todo.done else None
+    todo.completed_at = user_clock.today() if todo.done else None
     db.commit()
     return {"id": todo.id, "done": todo.done, "completed_at": str(todo.completed_at) if todo.completed_at else None}
 
@@ -620,7 +686,7 @@ _RADAR_TTL = 60.0
 @app.get("/radar")
 def get_radar(db: Session = Depends(get_db)):
     """Compute radar domain scores from live system data."""
-    today_key = date.today()
+    today_key = user_clock.today()
     now = _time.monotonic()
     if (
         _radar_cache["key"] == today_key
@@ -629,7 +695,7 @@ def get_radar(db: Session = Depends(get_db)):
     ):
         return _radar_cache["payload"]
 
-    habits_today = {h.key: h.done for h in db.query(Habit).filter(Habit.date == date.today()).all()}
+    habits_today = {h.key: h.done for h in db.query(Habit).filter(Habit.date == user_clock.today()).all()}
     annual = [
         {"name": t.name, "current": t.current_value, "target": t.target_value}
         for t in db.query(AnnualTarget).filter(
@@ -643,7 +709,7 @@ def get_radar(db: Session = Depends(get_db)):
         Habit.key == "scripture_prayer", Habit.done == True
     ).order_by(Habit.date.desc()).all()
     streak = 0
-    check = date.today()
+    check = user_clock.today()
     for r in bible_records:
         if r.date == check:
             streak += 1
@@ -868,7 +934,7 @@ def update_subtopic(subtopic_id: int, payload: schemas.SubtopicUpdate, db: Sessi
     updates = payload.model_dump(exclude_none=True)
     # Auto-set last_reviewed_date when mastery changes (unless caller provided a date)
     if "mastery_level" in updates and "last_reviewed_date" not in updates:
-        updates["last_reviewed_date"] = date.today()
+        updates["last_reviewed_date"] = user_clock.today()
     for field, val in updates.items():
         setattr(st, field, val)
     db.commit()
@@ -957,7 +1023,7 @@ def _get_or_create_weekly_health(db: Session, week_start: date) -> WeeklyHealth:
 
 
 def _current_week_start() -> date:
-    today = date.today()
+    today = user_clock.today()
     return today - timedelta(days=today.weekday())  # last Monday
 
 
@@ -1007,7 +1073,7 @@ def _compute_health_radar(db: Session) -> dict:
     Compute the Health radar axis from the last 7 DailyHealth rows.
     Returns None for each component when fewer than 3 rows exist.
     """
-    cutoff = date.today() - timedelta(days=6)
+    cutoff = user_clock.today() - timedelta(days=6)
     rows = db.query(DailyHealth).filter(DailyHealth.date >= cutoff).all()
     if len(rows) < 3:
         return {"insufficient_data": True, "score": None}
@@ -1016,7 +1082,7 @@ def _compute_health_radar(db: Session) -> dict:
 
     training_days_in_window = sum(
         1 for i in range(7)
-        if ((date.today() - timedelta(days=i)).weekday() in TRAINING_WEEKDAYS)
+        if ((user_clock.today() - timedelta(days=i)).weekday() in TRAINING_WEEKDAYS)
     )
     sessions_done = sum(1 for r in rows if r.session_done)
     session_pct = (sessions_done / max(training_days_in_window, 1)) * 100
@@ -1041,7 +1107,7 @@ def _compute_health_radar(db: Session) -> dict:
 
 @app.get("/health/daily/today")
 def get_daily_health_today(db: Session = Depends(get_db)):
-    return _serialize_daily_health(_get_or_create_daily_health(db, date.today()))
+    return _serialize_daily_health(_get_or_create_daily_health(db, user_clock.today()))
 
 
 @app.patch("/health/daily/{log_date}")
@@ -1056,7 +1122,7 @@ def patch_daily_health(log_date: date, payload: schemas.DailyHealthPatch, db: Se
 
 @app.get("/health/daily/recent")
 def get_daily_health_recent(days: int = Query(14, ge=1, le=90), db: Session = Depends(get_db)):
-    cutoff = date.today() - timedelta(days=days - 1)
+    cutoff = user_clock.today() - timedelta(days=days - 1)
     rows = db.query(DailyHealth).filter(DailyHealth.date >= cutoff).order_by(DailyHealth.date.desc()).all()
     return [_serialize_daily_health(r) for r in rows]
 
@@ -1166,13 +1232,13 @@ def create_lift_log(payload: schemas.LiftLogCreate, db: Session = Depends(get_db
 
 @app.get("/health/lift-logs/today")
 def get_lift_logs_today(db: Session = Depends(get_db)):
-    logs = db.query(LiftLog).filter(LiftLog.date == date.today()).order_by(LiftLog.id).all()
+    logs = db.query(LiftLog).filter(LiftLog.date == user_clock.today()).order_by(LiftLog.id).all()
     return [_serialize_lift_log(l) for l in logs]
 
 
 @app.get("/health/lift-logs/recent")
 def get_lift_logs_recent(days: int = Query(14, ge=1, le=90), db: Session = Depends(get_db)):
-    cutoff = date.today() - timedelta(days=days - 1)
+    cutoff = user_clock.today() - timedelta(days=days - 1)
     logs = db.query(LiftLog).filter(LiftLog.date >= cutoff).order_by(LiftLog.date.desc(), LiftLog.id).all()
     return [_serialize_lift_log(l) for l in logs]
 
@@ -1561,6 +1627,20 @@ def _apply_parse_updates_inner(db: Session, parsed: dict, today: date) -> dict:
         change_log.record_create(db, rev, f"Revenue {currency} {float(amount):g} from {source or 'unknown'}")
         result["revenue_logged"].append({"amount": float(amount), "currency": currency, "source": source})
 
+    # ── Project status changes (accepted suggestions only; not in the parser schema) ──
+    for pu in parsed.get("project_updates") or []:
+        import portfolio as portfolio_mod
+        try:
+            project_id = int(pu.get("project_id"))
+        except (TypeError, ValueError):
+            continue
+        project = db.query(models.Project).filter(models.Project.id == project_id).first()
+        status = pu.get("status")
+        if project is None or not status or status == project.status:
+            continue
+        portfolio_mod.set_status(db, project, status, source="suggestion")
+        result.setdefault("projects_updated", []).append({"id": project.id, "status": status})
+
     # ── DailyLog entry ────────────────────────────────────────
     if parsed.get("log_entry"):
         log = models.DailyLog(
@@ -1640,7 +1720,7 @@ def _run_parse(db: Session, text: str) -> dict:
     """Call the parser with the standard context. Raises AIUnavailable / ParseFailed /
     SDK errors to the caller — callers translate via ``_ai_http_error``."""
     roadmap_ids = [t.task_id for t in db.query(RoadmapTask).all()]
-    context = {"roadmap_ids": roadmap_ids, "today": str(date.today())}
+    context = {"roadmap_ids": roadmap_ids, "today": str(user_clock.today())}
     return get_parse_response(text, context)
 
 
@@ -1651,7 +1731,7 @@ def parse_brain_dump(payload: schemas.ParseRequest, db: Session = Depends(get_db
         parsed = _run_parse(db, payload.text)
     except Exception as exc:  # noqa: BLE001
         raise _ai_http_error(exc)
-    updates = apply_parse_updates(db, parsed, date.today())
+    updates = apply_parse_updates(db, parsed, user_clock.today())
 
     # Backward-compatible response: keep existing top-level fields, add "updates" object
     response: dict = {
@@ -1697,7 +1777,7 @@ def unified_input(request: schemas.UnifiedInputRequest, db: Session = Depends(ge
 
         context_parts: list[str] = []
         today_logs = db.query(models.DailyLog).filter(
-            models.DailyLog.date == date.today()
+            models.DailyLog.date == user_clock.today()
         ).order_by(models.DailyLog.id.asc()).all()
         if today_logs:
             log_lines = "\n".join(f"- {l.entry}" for l in today_logs if l.entry)
@@ -1721,7 +1801,7 @@ def unified_input(request: schemas.UnifiedInputRequest, db: Session = Depends(ge
             parsed = _run_parse(db, text)
         except Exception as exc:  # noqa: BLE001
             raise _ai_http_error(exc)
-        updates = apply_parse_updates(db, parsed, date.today())
+        updates = apply_parse_updates(db, parsed, user_clock.today())
 
         resp: dict = {
             "type":     "log",
@@ -1785,7 +1865,7 @@ def chat_endpoint(request: schemas.ChatRequest, db: Session = Depends(get_db)):
     context_parts: list[str] = []
 
     today_logs = db.query(models.DailyLog).filter(
-        models.DailyLog.date == date.today()
+        models.DailyLog.date == user_clock.today()
     ).order_by(models.DailyLog.id.asc()).all()
     if today_logs:
         log_lines = "\n".join(f"- {l.entry}" for l in today_logs if l.entry)
@@ -1877,7 +1957,7 @@ def bible_streak_endpoint(db: Session = Depends(get_db)):
         BibleEntry.done == True
     ).order_by(BibleEntry.date.desc()).all()
     streak = 0
-    check = date.today()
+    check = user_clock.today()
     for r in records:
         if r.date == check:
             streak += 1
@@ -1896,7 +1976,7 @@ def _serialize_bible_log(e: DailyBibleLog) -> dict:
 @app.post("/bible-log", status_code=201)
 def create_bible_log(payload: schemas.DailyBibleLogCreate, db: Session = Depends(get_db)):
     entry = DailyBibleLog(
-        date=payload.entry_date or date.today(),
+        date=payload.entry_date or user_clock.today(),
         book=payload.book.strip(),
         chapter=payload.chapter,
         notes=payload.notes,
@@ -1909,14 +1989,14 @@ def create_bible_log(payload: schemas.DailyBibleLogCreate, db: Session = Depends
 
 @app.get("/bible-log/today")
 def get_bible_log_today(db: Session = Depends(get_db)):
-    today = date.today()
+    today = user_clock.today()
     entries = db.query(DailyBibleLog).filter(DailyBibleLog.date == today).order_by(DailyBibleLog.created_at.asc()).all()
     return [_serialize_bible_log(e) for e in entries]
 
 
 @app.get("/bible-log/recent")
 def get_bible_log_recent(days: int = 30, db: Session = Depends(get_db)):
-    since = date.today() - timedelta(days=days - 1)
+    since = user_clock.today() - timedelta(days=days - 1)
     entries = db.query(DailyBibleLog).filter(DailyBibleLog.date >= since).order_by(DailyBibleLog.date.desc(), DailyBibleLog.created_at.asc()).all()
     grouped: dict = {}
     for e in entries:
@@ -2134,7 +2214,7 @@ def delete_non_negotiable(nn_id: int, db: Session = Depends(get_db)):
 
 def _serialize_reading_plan(p: ReadingPlan) -> dict:
     from datetime import date as _date
-    today = _date.today()
+    today = user_clock.today()
     days_remaining = None
     if p.target_completion_date:
         days_remaining = (p.target_completion_date - today).days
@@ -2366,7 +2446,33 @@ def research_project_detail(project_id: int, db: Session = Depends(get_db)):
         "created_at": str(project.created_at) if project.created_at else None,
         "completed_at": str(project.completed_at) if project.completed_at else None,
         "findings": [_serialize_finding(f) for f in project.findings],
+        "cost_usd": project.cost_usd,
+        "llm_calls": project.llm_calls,
+        "objective_id": project.objective_id,
+        "repeated": _research_repeated(db, project),
     }
+
+
+def _research_repeated(db: Session, project) -> list:
+    """Findings from earlier runs that this run came across again (they were counted on the
+    existing finding instead of being surfaced twice)."""
+    if project.completed_at is None:
+        return []
+    rows = db.query(models.ChangeLog).filter(
+        models.ChangeLog.table_name == "research_findings", models.ChangeLog.action == "update",
+        models.ChangeLog.summary.like("Seen again:%"),
+        models.ChangeLog.created_at >= project.created_at,
+        models.ChangeLog.created_at <= project.completed_at,
+    ).all()
+    out, seen = [], set()
+    for row in rows:
+        if row.record_id in seen:
+            continue
+        finding = db.query(models.ResearchFinding).filter(models.ResearchFinding.id == row.record_id).first()
+        if finding is not None and finding.project_id != project.id:
+            seen.add(row.record_id)
+            out.append({"finding_id": finding.id, "problem": finding.problem})
+    return out
 
 
 @app.get("/research/pipeline")
@@ -2382,8 +2488,23 @@ def research_pipeline(db: Session = Depends(get_db)):
         "notes": e.notes,
         "promoted_at": str(e.promoted_at) if e.promoted_at else None,
         "updated_at": str(e.updated_at) if e.updated_at else None,
+        "next_action": e.next_action,
+        "due_date": str(e.due_date) if e.due_date else None,
         "finding": _serialize_finding(e.finding) if e.finding else None,
     } for e in entries]
+
+
+@app.post("/research/findings/{finding_id}/dismiss")
+def research_dismiss(finding_id: int, payload: Optional[schemas.DismissFindingRequest] = None,
+                     db: Session = Depends(get_db)):
+    """One tap Dismiss: the finding is not worth pursuing. Idempotent, logged, undoable."""
+    from market_intel.agent import dismiss_finding
+    with _change_log.batch_scope(db, "ui"):
+        result = dismiss_finding(db, finding_id, payload.reason if payload else None)
+        if result.get("error"):
+            raise HTTPException(404, result["error"])
+        db.commit()
+    return result
 
 
 @app.post("/research/promote")
@@ -2391,9 +2512,10 @@ def research_promote(payload: schemas.PromoteFindingRequest, db: Session = Depen
     """Explicitly promote a surfaced finding into the pipeline — the 'save this
     opportunity' action. The agent never does this on its own."""
     import orchestrator_tools
-    result, _summary = orchestrator_tools.promote_research_opportunity(
-        db, finding_id=payload.finding_id, notes=payload.notes
-    )
+    with _change_log.batch_scope(db, "ui"):
+        result, _summary = orchestrator_tools.promote_research_opportunity(
+            db, finding_id=payload.finding_id, notes=payload.notes
+        )
     if result.get("error"):
         raise HTTPException(404, result["error"])
     return result
@@ -2408,14 +2530,22 @@ def research_pipeline_update(entry_id: int, payload: schemas.PipelineUpdateReque
     ).first()
     if not entry:
         raise HTTPException(404, "Pipeline entry not found")
-    if payload.stage is not None:
-        if payload.stage not in _PIPELINE_STAGES:
-            raise HTTPException(400, f"Invalid stage. Must be one of: {sorted(_PIPELINE_STAGES)}")
-        entry.stage = payload.stage
-    if payload.notes is not None:
-        entry.notes = payload.notes
-    db.commit()
-    return {"id": entry.id, "stage": entry.stage, "notes": entry.notes}
+    if payload.stage is not None and payload.stage not in _PIPELINE_STAGES:
+        raise HTTPException(400, f"Invalid stage. Must be one of: {sorted(_PIPELINE_STAGES)}")
+    with _change_log.batch_scope(db, "ui"):
+        before = _change_log.snapshot(entry)
+        if payload.stage is not None:
+            entry.stage = payload.stage
+        if payload.notes is not None:
+            entry.notes = payload.notes
+        if payload.next_action is not None:
+            entry.next_action = payload.next_action.strip() or None
+        if payload.due_date is not None:
+            entry.due_date = payload.due_date
+        change = _change_log.record_update(db, entry, before, f"Pipeline entry → {entry.stage}")
+        db.commit()
+    return {"id": entry.id, "stage": entry.stage, "notes": entry.notes, "next_action": entry.next_action,
+            "due_date": str(entry.due_date) if entry.due_date else None, "change": change}
 
 
 @app.get("/research/memory")
@@ -2433,7 +2563,73 @@ def research_memory(db: Session = Depends(get_db)):
     } for n in notes]
 
 
-# ── SOCIAL SCORE ──────────────────────────────────────────────
+# ── JOBS — the scheduler of record (ADR-0001) ─────────────────
+
+JOBS_TICK_MINUTES = 15
+
+
+def _jobs_in_process() -> bool:
+    return (os.getenv("JOBS_IN_PROCESS", "1") or "1").strip().lower() not in ("0", "false", "no", "off")
+
+
+def _jobs_tick_job():
+    """The in-process tick. Never raises into the scheduler thread."""
+    try:
+        from agents import runner
+        _agents.load_all()
+        out = runner.tick("in_process")
+        if out.get("ran") or out.get("errors"):
+            ran = ", ".join(f"{r['key']}:{r['status']}" for r in out.get("ran", []))
+            print(f"[jobs] in-process tick: {ran or 'nothing ran'} ({out.get('errors', 0)} error(s))")
+    except Exception as exc:  # noqa: BLE001
+        print(f"[jobs] in-process tick failed: {type(exc).__name__}: {exc}")
+
+
+@app.post("/jobs/tick")
+def jobs_tick(request: Request):
+    """Run every due agent once. Called by the scheduler with ``X-Jobs-Token``; exempt from
+    the session login and gated by its own token. 503 until ``JOBS_TOKEN`` is set."""
+    import hmac
+    from agents import runner
+    expected = os.getenv("JOBS_TOKEN") or ""
+    if not expected:
+        raise HTTPException(503, "JOBS_TOKEN is not set")
+    if len(expected) < 16:      # a token that can be guessed is not a token; 32+ random characters are asked for
+        raise HTTPException(503, "JOBS_TOKEN must be at least 16 characters")
+    given = request.headers.get("x-jobs-token") or ""
+    if not hmac.compare_digest(given.encode("utf-8"), expected.encode("utf-8")):
+        raise HTTPException(401, "Invalid jobs token")
+    import agents
+    agents.load_all()
+    return runner.tick("github")
+
+
+@app.get("/jobs/status")
+def jobs_status(db: Session = Depends(get_db)):
+    """When the scheduler last ran, and what is due now."""
+    import agents
+    from agents import runner
+    agents.load_all()
+    last = db.query(models.JobTick).order_by(models.JobTick.id.desc()).first()
+    since = datetime.utcnow() - timedelta(hours=24)
+    try:
+        due = runner.due_now(db)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[jobs] could not compute due agents: {exc}")
+        due = []
+    return {
+        "last_tick": ({"id": last.id, "trigger": last.trigger, "started_at": last.started_at,
+                       "finished_at": last.finished_at, "agents_run": last.agents_run,
+                       "agents_skipped": last.agents_skipped, "events_consumed": last.events_consumed,
+                       "errors": last.errors, "duration_ms": last.duration_ms} if last else None),
+        "ticks_24h": db.query(models.JobTick).filter(models.JobTick.started_at >= since).count(),
+        "agents_due_now": due,
+        "token_configured": bool(os.getenv("JOBS_TOKEN")),
+        "in_process_scheduler": _jobs_in_process(),
+    }
+
+
+# ── SOCIAL SCORE ──────────────────────────────────────────────# ── SOCIAL SCORE ──────────────────────────────────────────────
 @app.get("/social-score")
 def get_social_score(db: Session = Depends(get_db)):
     latest = db.query(SocialScore).order_by(SocialScore.date.desc()).first()
@@ -2442,18 +2638,25 @@ def get_social_score(db: Session = Depends(get_db)):
 
 @app.post("/social-score")
 def update_social_score(payload: schemas.SocialScoreUpdate, db: Session = Depends(get_db)):
-    db.add(SocialScore(value=payload.value, date=date.today()))
+    db.add(SocialScore(value=payload.value, date=user_clock.today()))
     db.commit()
     return {"value": payload.value}
 
 
 # ── CLIENTS ───────────────────────────────────────────────────
 @app.get("/clients")
-def get_clients(db: Session = Depends(get_db)):
-    clients = db.query(Client).order_by(Client.created_at.desc()).all()
+def get_clients(status: Optional[str] = None, q: Optional[str] = None, db: Session = Depends(get_db)):
+    query = db.query(Client)
+    if status:
+        query = query.filter(Client.status == status)
+    if q and q.strip():
+        frag = q.strip().lower()
+        query = query.filter(func.lower(Client.name).contains(frag)
+                             | func.lower(func.coalesce(Client.company, "")).contains(frag))
+    clients = query.order_by(Client.created_at.desc()).all()
     return [{"id": c.id, "name": c.name, "company": c.company, "status": c.status,
              "value": c.value, "service": c.service, "notes": c.notes,
-             "created_at": str(c.created_at)} for c in clients]
+             "created_at": str(c.created_at), **_crm.client_extras(db, c)} for c in clients]
 
 
 @app.post("/clients")
@@ -2470,17 +2673,27 @@ def update_client(client_id: int, payload: schemas.ClientUpdate, db: Session = D
     client = db.query(Client).filter(Client.id == client_id).first()
     if not client:
         raise HTTPException(404, "Client not found")
-    if payload.status is not None:
-        client.status = payload.status
-    if payload.value is not None:
-        client.value = payload.value
-    if payload.notes is not None:
-        client.notes = payload.notes
-    if payload.service is not None:
-        client.service = payload.service
-    client.updated_at = datetime.utcnow()
-    db.commit()
-    return {"id": client.id, "status": client.status}
+    if payload.status is not None and payload.status not in _crm.CLIENT_STATUSES:
+        raise HTTPException(400, f"Invalid status. Must be one of: {', '.join(_crm.CLIENT_STATUSES)}")
+    with _change_log.batch_scope(db, "ui"):
+        before = _change_log.snapshot(client)
+        if payload.status is not None:
+            client.status = payload.status
+        if payload.value is not None:
+            client.value = payload.value
+        if payload.notes is not None:
+            client.notes = payload.notes
+        if payload.service is not None:
+            client.service = payload.service
+        if payload.currency is not None:
+            client.currency = _normalise_currency(payload.currency)
+        if payload.tags is not None:
+            client.tags = ",".join(t.strip() for t in payload.tags if t and t.strip()) or None
+        client.updated_at = datetime.utcnow()
+        change = _change_log.record_update(db, client, before, f"Updated client: {client.name[:70]}")
+        db.commit()
+    return {"id": client.id, "status": client.status, "currency": client.currency,
+            "tags": _crm.tag_list(client.tags), "change": change}
 
 
 @app.delete("/clients/{client_id}")
@@ -2538,7 +2751,7 @@ def delete_revenue(revenue_id: int, db: Session = Depends(get_db)):
 # ── Helpers ───────────────────────────────────────────────────
 
 def _serialize_prop_account(a: PropFirmAccount) -> dict:
-    days_active = (date.today() - a.start_date).days if a.start_date else 0
+    days_active = (user_clock.today() - a.start_date).days if a.start_date else 0
     drawdown_pct = round((a.peak_balance - a.current_balance) / a.peak_balance * 100, 2) if a.peak_balance else 0.0
     profit_target_usd = a.starting_balance * (a.profit_target_pct / 100)
     profit_made = a.current_balance - a.starting_balance
@@ -2820,7 +3033,7 @@ def monthly_scoreboard(month: str = Query(..., regex=r"^\d{4}-\d{2}$"), db: Sess
 @app.get("/scoreboard/ten-k")
 def ten_k_scoreboard(db: Session = Depends(get_db)):
     target_date = date(2026, 9, 30)
-    days_remaining = max(0, (target_date - date.today()).days)
+    days_remaining = max(0, (target_date - user_clock.today()).days)
 
     ai_revenue = _revenue_usd_total(db, since=TEN_K_START_DATE)   # ZMW converted via ZMW_PER_USD
 
@@ -2836,7 +3049,7 @@ def ten_k_scoreboard(db: Session = Depends(get_db)):
     breakdown = []
     # Walk months from TEN_K_START_DATE to today
     cur = TEN_K_START_DATE.replace(day=1)
-    today_month = date.today().replace(day=1)
+    today_month = user_clock.today().replace(day=1)
     while cur <= today_month:
         yr, mo = cur.year, cur.month
         _, last_day = monthrange(yr, mo)
@@ -2918,7 +3131,7 @@ def create_log(log: schemas.DailyLogCreate, db: Session = Depends(get_db)):
 def get_today_logs(db: Session = Depends(get_db)):
     """Return all DailyLog entries for today, newest first."""
     logs = db.query(models.DailyLog).filter(
-        models.DailyLog.date == date.today()
+        models.DailyLog.date == user_clock.today()
     ).order_by(models.DailyLog.id.desc()).all()
     return [{"id": l.id, "entry": l.entry, "weekly_target_id": l.weekly_target_id,
              "impact_score": l.impact_score, "date": str(l.date)} for l in logs]
@@ -2928,7 +3141,7 @@ def get_today_logs(db: Session = Depends(get_db)):
 def get_recent_logs(days: int = 30, db: Session = Depends(get_db)):
     """Return DailyLog entries from the last N days (default 30), newest first."""
     from datetime import timedelta
-    cutoff = date.today() - timedelta(days=days)
+    cutoff = user_clock.today() - timedelta(days=days)
     logs = db.query(models.DailyLog).filter(
         models.DailyLog.date >= cutoff
     ).order_by(models.DailyLog.date.desc(), models.DailyLog.id.desc()).all()
@@ -3165,7 +3378,7 @@ def read_recent_memory(limit: int = Query(5, le=20), context_type: str | None = 
 
 # ── UTILS ────────────────────────────────────────────────────
 def _year_pct() -> float:
-    now = datetime.now()
+    now = user_clock.now()
     start = datetime(now.year, 1, 1)
     end = datetime(now.year + 1, 1, 1)
     return (now - start) / (end - start)

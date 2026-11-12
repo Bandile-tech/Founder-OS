@@ -256,6 +256,10 @@ body.nav-open #nav-scrim{display:block}
 .badge--danger{background:rgba(255,92,92,0.12);color:#FF8A8A;border-color:rgba(255,92,92,0.4)}
 .badge--purple{background:rgba(167,139,250,0.12);color:#C8B6FF;border-color:rgba(167,139,250,0.4)}
 .badge--muted{background:rgba(234,238,242,0.05);color:var(--muted);border-color:rgba(234,238,242,0.12)}
+/* A short code to copy by eye (a pairing code). */
+.code{display:inline-flex;align-items:center;flex:none;height:30px;padding:0 var(--sp-3);border-radius:var(--r-sm);
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:var(--fs-md);font-weight:600;letter-spacing:0.18em;
+  color:#fff;background:rgba(8,10,14,0.6);border:1px solid rgba(167,235,242,0.32);user-select:all}
 
 /* List row */
 .row{display:flex;align-items:center;gap:var(--sp-3);min-height:var(--row-h);padding:var(--sp-2) var(--sp-1);border-bottom:1px solid var(--line);min-width:0}
@@ -321,6 +325,8 @@ mark.hl{background:rgba(167,235,242,0.18);color:#fff;border-radius:3px;padding:0
 .field:last-child{border-bottom:none}
 .field-label{font-size:var(--fs-2xs);letter-spacing:var(--track-caps);text-transform:uppercase;color:var(--muted);font-weight:500}
 .field-control{display:flex;align-items:center;gap:var(--sp-2);flex-wrap:wrap;min-width:0}
+.field-control > .input--narrow{width:132px;flex:none}
+.field-control > select.input--narrow{width:auto;min-width:132px;max-width:100%}
 .hint{font-size:var(--fs-xs);color:var(--muted);line-height:1.55}
 
 /* Button */
@@ -379,6 +385,7 @@ mark.hl{background:rgba(167,235,242,0.18);color:#fff;border-radius:3px;padding:0
 .kpi-value small{font-family:var(--font-body);font-size:var(--fs-sm);font-weight:500;color:var(--muted);margin-left:4px;letter-spacing:0}
 .kpi-value .green{color:#5EE8C8}.kpi-value .red{color:#FF8080}
 .kpi-sub{font-size:var(--fs-xs);color:var(--muted);margin-top:var(--sp-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kpi-sub.wrap{white-space:normal;line-height:1.45}
 .kpi .bar{margin-top:var(--sp-3);height:5px}
 
 /* Chip, empty, skeleton, table, markdown */
@@ -405,6 +412,19 @@ mark.hl{background:rgba(167,235,242,0.18);color:#fff;border-radius:3px;padding:0
 .md h1,.md h2,.md h3{color:#fff;font-size:var(--fs-md);margin:var(--sp-3) 0 var(--sp-1)}
 .md blockquote{border-left:2px solid var(--glow);padding-left:var(--sp-2);color:var(--muted)}
 
+/* Tabs — the sub-views of one page */
+.tabs{display:flex;gap:var(--sp-1);width:fit-content;max-width:100%;padding:3px;border-radius:var(--r-pill);background:var(--well);border:1px solid var(--line);overflow-x:auto;scrollbar-width:none}
+.tabs::-webkit-scrollbar{display:none}
+.tab{flex:none;height:calc(var(--control-h) - 8px);padding:0 var(--sp-4);border:none;border-radius:var(--r-pill);background:none;color:var(--text-2);font:inherit;font-size:var(--fs-sm);white-space:nowrap;cursor:pointer;transition:color var(--t-base),background-color var(--t-base)}
+@media(hover:hover) and (pointer:fine){.tab:hover{color:var(--text)}}
+.tab.is-on{color:#fff;background:rgba(167,235,242,0.14);box-shadow:inset 0 0 0 1px rgba(167,235,242,0.4)}
+/* Chips that filter or step a state are buttons; the current one is lit */
+button.chip{font:inherit;font-size:var(--fs-xs);cursor:pointer;transition:border-color var(--t-base),color var(--t-base)}
+@media(hover:hover) and (pointer:fine){button.chip:hover{border-color:rgba(167,235,242,0.45);color:var(--text)}}
+button.chip:active{transform:scale(0.97)}
+.chip.is-on{color:#E9FBFE;background:rgba(167,235,242,0.12);border-color:rgba(167,235,242,0.5)}
+.chip.is-dim{opacity:0.45}
+
 /* ═══ PAGES — only the layout the components above do not cover ═══ */
 /* Design guide */
 .gd-probe{position:absolute;visibility:hidden;height:0}
@@ -428,6 +448,9 @@ mark.hl{background:rgba(167,235,242,0.18);color:#fff;border-radius:3px;padding:0
 .score-val{min-width:2.5ch;font-size:var(--fs-md);font-weight:600;color:var(--glow);font-variant-numeric:tabular-nums;text-align:right}
 .tt-time{width:7.5em;color:var(--muted)}
 .row.is-now .tt-time{color:var(--glow)}
+/* Business */
+.draft-subject{margin-top:var(--sp-2);font-weight:600;color:#fff}
+.draft-body{margin-top:var(--sp-2);color:var(--text);white-space:pre-wrap;overflow-wrap:anywhere}
 .card--button{display:block;width:100%;text-align:left;font:inherit;color:inherit;cursor:pointer;transition:border-color var(--t-base),transform var(--t-fast) var(--ease-out)}
 @media(hover:hover) and (pointer:fine){.card--button:hover{border-color:var(--edge-hi)}}
 .card--button:active{transform:scale(0.995)}
@@ -474,6 +497,14 @@ mark.hl{background:rgba(167,235,242,0.18);color:#fff;border-radius:3px;padding:0
 .home-greeting{font-size:var(--fs-display);font-weight:600;letter-spacing:-0.025em;line-height:1.15;color:#fff;margin:var(--sp-1) 0 var(--sp-2)}
 .cc-name{color:var(--glow-2);text-shadow:0 0 18px rgba(102,227,244,0.35)}
 .home-line{font-size:var(--fs-md);color:var(--text-2);min-height:1.5em}
+/* One quiet line under the greeting: today's timed events, when the briefing went out, and
+   a connection warning. Never wraps, so it cannot move the cards. */
+.home-note{font-size:var(--fs-xs);color:var(--muted);margin-top:var(--sp-1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.home-note[hidden]{display:none}
+.home-note b{font-weight:600;color:var(--text-2);letter-spacing:0.06em;text-transform:uppercase;font-size:var(--fs-2xs)}
+.home-note a{color:var(--glow);cursor:pointer;text-decoration:none}
+.home-note a.is-warn{color:var(--warn)}
+.home-note a:hover,.home-note a:focus-visible{text-decoration:underline}
 .skel-line{display:block;height:1.1em;max-width:520px}
 .home-cards{grid-area:cards;display:grid;gap:var(--sp-5);grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);align-items:stretch}
 .home-cards .card{display:flex;flex-direction:column}
@@ -894,6 +925,10 @@ button.home-tile:active{transform:scale(0.98)}
       <span class="ni"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="3.6" r="1.9"/><circle cx="3.4" cy="12.2" r="1.9"/><circle cx="12.6" cy="12.2" r="1.9"/><path d="M7.1 5.3 4.4 10.5M8.9 5.3l2.7 5.2M5.3 12.2h5.4"/></svg></span>
       <span class="nav-label">Agents</span>
     </button>
+    <button class="nav-item" onclick="nav('business',this)" title="Business">
+      <span class="ni"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4.8" width="12" height="8.6" rx="1.7"/><path d="M5.6 4.8V3.9a1.1 1.1 0 0 1 1.1-1.1h2.6a1.1 1.1 0 0 1 1.1 1.1v.9M2 8.4h12"/></svg></span>
+      <span class="nav-label">Business</span>
+    </button>
     <button class="nav-item" onclick="nav('warroom',this)" title="War Room">
       <span class="ni"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.6 13.6 4.8v6.4L8 14.4 2.4 11.2V4.8Z"/><circle cx="8" cy="8" r="1.1" fill="currentColor" stroke="none"/></svg></span>
       <span class="nav-label">War Room</span>
@@ -901,6 +936,10 @@ button.home-tile:active{transform:scale(0.98)}
     <button class="nav-item" onclick="nav('annual',this)" title="Annual Targets">
       <span class="ni"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6.3"/><circle cx="8" cy="8" r="3.3"/><circle cx="8" cy="8" r="0.9" fill="currentColor" stroke="none"/></svg></span>
       <span class="nav-label">Annual Targets</span>
+    </button>
+    <button class="nav-item" onclick="nav('applications',this)" title="Applications">
+      <span class="ni"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 13.6h12M3.4 13.6V7M12.6 13.6V7M6.2 13.6V9.4h3.6v4.2M1.6 7 8 3l6.4 4"/></svg></span>
+      <span class="nav-label">Applications</span>
     </button>
     <button class="nav-item" onclick="nav('guide',this)" title="Design Guide">
       <span class="ni"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6.4"/><path d="M10.7 5.3 9.2 9.2l-3.9 1.5 1.5-3.9Z"/></svg></span>
@@ -927,6 +966,7 @@ button.home-tile:active{transform:scale(0.98)}
           <div class="page-eyebrow">Command Centre</div>
           <h1 class="home-greeting" id="cc-greeting">Good day, <span class="cc-name">Bandile</span>.</h1>
           <p class="home-line" id="cc-line"><span class="skel skel-line"></span></p>
+          <p class="home-note" id="cc-note" hidden></p>
         </div>
 
         <div class="home-cards">
@@ -959,35 +999,30 @@ button.home-tile:active{transform:scale(0.98)}
         <div class="home-dock" id="home-dock"></div>
 
         <div class="home-tiles">
-          <div class="home-tile c-business soon" aria-disabled="true">
-            <span class="soon-tag">Soon</span>
+          <button class="home-tile c-business" onclick="openBusinessTile()">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="7" width="18" height="13" rx="2.5"/><path d="M8 7V5.5A1.5 1.5 0 0 1 9.5 4h5A1.5 1.5 0 0 1 16 5.5V7M3 12h18"/></svg>
             <div class="tt">Business</div><div class="ts">Pipeline · Outreach · Revenue</div>
-          </div>
+          </button>
           <button class="home-tile c-academics" onclick="openAcademicsTile()">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4 22 9l-10 5L2 9l10-5Z"/><path d="M6 11.5V16c0 1.7 2.7 3 6 3s6-1.3 6-3v-4.5"/><path d="M22 9v5"/></svg>
             <div class="tt">Academics</div><div class="ts">Syllabus · Exams · Study</div>
           </button>
-          <div class="home-tile c-projects soon" aria-disabled="true">
-            <span class="soon-tag">Soon</span>
+          <button class="home-tile c-projects" onclick="openBusinessTile('portfolio')">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 9 4.5-9 4.5-9-4.5L12 3Z"/><path d="m3 12 9 4.5 9-4.5"/><path d="m3 16.5 9 4.5 9-4.5"/></svg>
-            <div class="tt">Projects</div><div class="ts">Builds · Delivery · Roadmap</div>
-          </div>
-          <div class="home-tile c-content soon" aria-disabled="true">
-            <span class="soon-tag">Soon</span>
+            <div class="tt">Projects</div><div class="ts">Focus · Bottlenecks · Delivery</div>
+          </button>
+          <button class="home-tile c-content" onclick="openBusinessTile('brand')">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="m10 9 5 3-5 3V9Z" fill="currentColor" stroke="none"/></svg>
             <div class="tt">Content</div><div class="ts">Ideas · Performance · Plan</div>
-          </div>
-          <div class="home-tile c-applications soon" aria-disabled="true">
-            <span class="soon-tag">Soon</span>
+          </button>
+          <button class="home-tile c-applications" onclick="openApplicationsTile()">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21h18M5 21V10M19 21V10M9 21v-7h6v7M2 10 12 4l10 6"/></svg>
             <div class="tt">Applications</div><div class="ts">Wharton · Deadlines · Gaps</div>
-          </div>
-          <div class="home-tile c-agents soon" aria-disabled="true">
-            <span class="soon-tag">Soon</span>
+          </button>
+          <button class="home-tile c-agents" onclick="openAgentsTile()">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8L12 3Z"/><path d="M19 17l.8 2.2L22 20l-2.2.8L19 23l-.8-2.2L16 20l2.2-.8L19 17Z"/></svg>
-            <div class="tt">Agents</div><div class="ts">Research · Outreach · Execution</div>
-          </div>
+            <div class="tt">Agents</div><div class="ts">Schedules · Runs · Research</div>
+          </button>
         </div>
       </div>
     </section>
@@ -1139,43 +1174,84 @@ button.home-tile:active{transform:scale(0.98)}
     <!-- ── AGENTS ── -->
     <section class="page" id="p-agents">
       <div class="page-head">
-        <div><div class="page-eyebrow">System</div><h1 class="page-title">Agents</h1><div class="page-sub">Standing AI departments. You start them from the talk bar.</div></div>
+        <div><div class="page-eyebrow">System</div><h1 class="page-title">Agents</h1><div class="page-sub">What runs on its own: when it runs, what it did and what it cost.</div></div>
       </div>
 
-      <div id="agents-registry">
-        <button class="card card--button agent-card" onclick="openAgentDetail()">
-          <div class="card-head"><div class="card-title"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="3.6" r="1.9"/><circle cx="3.4" cy="12.2" r="1.9"/><circle cx="12.6" cy="12.2" r="1.9"/><path d="M7.1 5.3 4.4 10.5M8.9 5.3l2.7 5.2M5.3 12.2h5.4"/></svg><span>Market Intelligence</span></div><span class="badge badge--glow" id="ag-mi-status">—</span></div>
-          <p class="hint">A five-role research department (planner, parallel researchers, analyst, founder advisor, adversarial verifier) that investigates a business objective across web, War Room and vault sources, and surfaces evidence-backed opportunities scored against the founder profile.</p>
-          <div class="kpis mt-5">
-            <div class="kpi"><div class="kpi-label">Runs</div><div class="kpi-value" id="ag-mi-runs">—</div></div>
-            <div class="kpi"><div class="kpi-label">Findings</div><div class="kpi-value" id="ag-mi-findings">—</div></div>
-            <div class="kpi"><div class="kpi-label">In pipeline</div><div class="kpi-value" id="ag-mi-pipeline">—</div></div>
-            <div class="kpi"><div class="kpi-label">Lessons</div><div class="kpi-value" id="ag-mi-lessons">—</div></div>
-          </div>
-        </button>
+      <div id="agents-registry" class="stack-lg">
+        <div class="card" id="ag-scheduler"><div class="skel skel-row"></div></div>
+        <div class="card">
+          <div class="card-head"><div class="card-title"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="3.6" r="1.9"/><circle cx="3.4" cy="12.2" r="1.9"/><circle cx="12.6" cy="12.2" r="1.9"/><path d="M7.1 5.3 4.4 10.5M8.9 5.3l2.7 5.2M5.3 12.2h5.4"/></svg><span>Agents</span></div><span class="badge badge--muted" id="ag-count">—</span></div>
+          <p class="hint">Each agent runs on its own schedule and only touches what it is allowed to. Tap one to see what it did; every run can be undone.</p>
+          <div class="list mt-3" id="ag-list"><div class="skel skel-row"></div><div class="skel skel-row"></div><div class="skel skel-row"></div></div>
+        </div>
       </div>
 
       <div id="agent-detail" class="stack-lg hidden">
         <div><button class="btn btn--sm" onclick="closeAgentDetail()">← All agents</button></div>
+        <div class="card" id="ag-detail-head"><div class="skel skel-row"></div></div>
         <div class="card">
-          <div class="card-head"><div class="card-title"><span>Market Intelligence</span></div><span class="badge badge--glow" id="ag-detail-status">—</span></div>
-          <p class="hint">This page is for looking and managing; you run the agent from the talk bar. Type <code>research &lt;objective&gt;</code> to run it, or <code>promote finding &lt;id&gt;</code> to save an opportunity. The agent only surfaces findings; nothing enters the pipeline until you promote it.</p>
+          <div class="card-head"><div class="card-title"><span>Recent runs</span></div><span class="badge badge--muted" id="ag-runs-badge">0</span></div>
+          <div class="list" id="ag-runs"><div class="empty">Loading…</div></div>
         </div>
-        <div class="card">
-          <div class="card-head"><div class="card-title"><span>Research projects</span></div><span class="badge badge--muted" id="ag-proj-badge">0</span></div>
-          <div class="list" id="ag-projects"><div class="empty">Loading…</div></div>
-        </div>
-        <div class="grid">
-          <div class="card">
-            <div class="card-head"><div class="card-title"><span>Opportunity pipeline</span></div><span class="badge badge--muted" id="ag-pipe-badge">0</span></div>
-            <div class="list" id="ag-pipeline"></div>
+
+        <div id="ag-mi-detail" class="stack-lg hidden">
+          <div class="kpis">
+            <div class="kpi"><div class="kpi-label">Research runs</div><div class="kpi-value" id="ag-mi-runs">—</div></div>
+            <div class="kpi"><div class="kpi-label">Findings</div><div class="kpi-value" id="ag-mi-findings">—</div></div>
+            <div class="kpi"><div class="kpi-label">In pipeline</div><div class="kpi-value" id="ag-mi-pipeline">—</div></div>
+            <div class="kpi"><div class="kpi-label">Lessons</div><div class="kpi-value" id="ag-mi-lessons">—</div></div>
           </div>
           <div class="card">
-            <div class="card-head"><div class="card-title"><span>Lesson memory</span></div><span class="badge badge--muted" id="ag-mem-badge">0</span></div>
-            <div class="list" id="ag-memory"></div>
+            <div class="card-head"><div class="card-title"><span>Standing objectives</span></div><span class="badge badge--muted" id="ag-obj-badge">0</span></div>
+            <p class="hint">Research that repeats. Set one by telling Founder OS, for example <code>keep researching Lusaka pharmacies every two weeks</code>. A run surfaces findings; nothing enters the pipeline until you promote it.</p>
+            <div class="list mt-3" id="ag-objectives"><div class="empty">Loading…</div></div>
+          </div>
+          <div class="card">
+            <div class="card-head"><div class="card-title"><span>Research projects</span></div><span class="badge badge--muted" id="ag-proj-badge">0</span></div>
+            <p class="hint">Type <code>research &lt;objective&gt;</code> in the talk bar to run one now. Open a project to promote or dismiss its findings.</p>
+            <div class="list mt-3" id="ag-projects"><div class="empty">Loading…</div></div>
+          </div>
+          <div class="grid">
+            <div class="card">
+              <div class="card-head"><div class="card-title"><span>Opportunity pipeline</span></div><span class="badge badge--muted" id="ag-pipe-badge">0</span></div>
+              <div class="list" id="ag-pipeline"></div>
+            </div>
+            <div class="card">
+              <div class="card-head"><div class="card-title"><span>Lesson memory</span></div><span class="badge badge--muted" id="ag-mem-badge">0</span></div>
+              <div class="list" id="ag-memory"></div>
+            </div>
           </div>
         </div>
       </div>
+    </section>
+
+    <!-- ── BUSINESS — pipeline, clients, portfolio, brand ── -->
+    <section class="page" id="p-business">
+      <div class="page-head">
+        <div><div class="page-eyebrow">Business</div><h1 class="page-title">Business</h1><div class="page-sub">Tell Founder OS what happened. Tap here to approve, correct or mark something done.</div></div>
+      </div>
+      <div class="tabs" id="biz-tabs" role="tablist" aria-label="Business views">
+        <button class="tab" role="tab" data-tab="pipeline" onclick="businessTab('pipeline')">Pipeline</button>
+        <button class="tab" role="tab" data-tab="clients" onclick="businessTab('clients')">Clients</button>
+        <button class="tab" role="tab" data-tab="portfolio" onclick="businessTab('portfolio')">Portfolio</button>
+        <button class="tab" role="tab" data-tab="brand" onclick="businessTab('brand')">Brand</button>
+      </div>
+      <div id="biz-body" class="stack-lg"><div class="skel skel-row"></div><div class="skel skel-row"></div><div class="skel skel-row"></div></div>
+    </section>
+
+    <!-- ── APPLICATIONS — deadlines, requirements, gaps ── -->
+    <section class="page" id="p-applications">
+      <div class="page-head">
+        <div><div class="page-eyebrow">System</div><h1 class="page-title">Applications</h1><div class="page-sub">What each application needs, what is missing and when it is due. Tap a requirement to move it on.</div></div>
+        <div class="page-actions"><span class="badge badge--glow" id="apps-count">—</span></div>
+      </div>
+      <div class="chips" aria-label="Requirement states">
+        <span class="chip"><span class="dot danger"></span>Missing</span>
+        <span class="chip"><span class="dot warn"></span>In progress</span>
+        <span class="chip"><span class="dot blue"></span>Ready</span>
+        <span class="chip"><span class="dot success"></span>Submitted</span>
+      </div>
+      <div id="apps-body" class="stack-lg"><div class="skel skel-row"></div><div class="skel skel-row"></div><div class="skel skel-row"></div></div>
     </section>
 
     <!-- ── DESIGN GUIDE — the live tokens and components ── -->
@@ -1234,9 +1310,13 @@ button.home-tile:active{transform:scale(0.98)}
         <div class="cluster"><button class="btn btn--primary">Primary</button><button class="btn">Default</button><button class="btn btn--ghost">Ghost</button><button class="btn btn--danger">Delete</button><button class="btn btn--sm">Small</button><button class="btn btn--icon" aria-label="Close">✕</button></div>
         <div class="section-label">Inputs</div>
         <div class="form-row"><input class="input" placeholder="Text input"><select class="select input--narrow" aria-label="Example"><option>Select</option></select><input class="input input--num" type="number" placeholder="0"></div>
+        <div class="section-label">Tabs and filter chips</div>
+        <div class="cluster"><div class="tabs"><button class="tab is-on">Pipeline</button><button class="tab">Clients</button><button class="tab">Portfolio</button></div>
+          <div class="chips"><button class="chip is-on">All</button><button class="chip">Pharmacies · 4</button><span class="chip is-dim">Won</span></div></div>
         <div class="section-label">Toggles and badges</div>
         <div class="cluster"><button class="toggle is-on">Done</button><button class="toggle">Pending</button><button class="toggle is-off">Missed</button>
           <div class="seg"><button>1</button><button>2</button><button class="is-on">3</button><button>4</button><button>5</button></div></div>
+        <div class="cluster mt-3"><span class="code">K7QX2M</span><span class="hint">.code — a short code to read off the screen</span></div>
         <div class="cluster mt-3"><span class="badge badge--glow">Glow</span><span class="badge badge--success">Success</span><span class="badge badge--warn">Warn</span><span class="badge badge--danger">Danger</span><span class="badge badge--purple">Purple</span><span class="badge badge--muted">Muted</span><span class="badge">Neutral</span></div>
         <div class="section-label">Progress and KPI</div>
         <div class="meter"><div class="meter-head"><span>Academics</span><span class="v">84%</span></div><div class="bar"><div class="bar-fill academics" style="width:84%"></div></div></div>
@@ -1261,7 +1341,17 @@ button.home-tile:active{transform:scale(0.98)}
     <!-- ── SETTINGS ── -->
     <section class="page" id="p-settings">
       <div class="page-head">
-        <div><div class="page-eyebrow">System</div><h1 class="page-title">Settings</h1><div class="page-sub">Session, scores, targets and local data.</div></div>
+        <div><div class="page-eyebrow">System</div><h1 class="page-title">Settings</h1><div class="page-sub">Connections, notifications, session, scores, targets and local data.</div></div>
+      </div>
+      <div class="grid">
+        <div class="card">
+          <div class="card-head"><div class="card-title"><span>Integrations</span></div><span class="badge badge--muted" id="set-integ-count">—</span></div>
+          <div class="list" id="set-integrations"><div class="skel skel-row"></div><div class="skel skel-row"></div><div class="skel skel-row"></div></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><div class="card-title"><span>Notifications</span></div><span class="badge badge--muted" id="set-notif-state">—</span></div>
+          <div id="set-notifications"><div class="skel skel-row"></div><div class="skel skel-row"></div></div>
+        </div>
       </div>
       <div class="grid">
         <div class="card">
@@ -1907,7 +1997,38 @@ function renderHome(){
     prog.innerHTML=row("Academics","academics",pr.academics)+row("Business","business",pr.business)+row("Targets","targets",pr.targets);
   }
 
+  renderHomeNote(b);
   renderAlertsBell(b);
+}
+
+// Today's timed events, when the briefing went to Telegram, and a connection warning.
+function _clockOf(iso){
+  if(!iso)return "";
+  const t=new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(iso)?iso:iso+"Z");     // server times are UTC
+  return isNaN(t)?"":t.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"});
+}
+function openSettings(){nav("settings",document.querySelector(`.nav-item[onclick*="nav('settings'"]`));}
+function renderHomeNote(b){
+  const el=document.getElementById("cc-note");
+  if(!el)return;
+  const parts=[];
+  const cal=b.calendar||{};
+  const events=cal.events_today||[], allDay=cal.all_day||[];
+  if(events.length||allDay.length){
+    const shown=events.slice(0,3).map(e=>`${escHtml(e.start_local||"")} ${escHtml(e.title||"")}`);
+    if(events.length>3)shown.push(`+${events.length-3} more`);
+    allDay.slice(0,2).forEach(e=>shown.push(`All day: ${escHtml(e.title||"")}`));
+    parts.push(`<b>Today</b> ${shown.join(" · ")}`);
+  }
+  const integ=b.integrations||{}, delivery=b.delivery||{};
+  const sent=_clockOf(delivery.last_sent_at);
+  if(sent)parts.push(`Sent to Telegram at ${escHtml(sent)}`);
+  const broken=["google_calendar","email"].some(k=>integ[k]==="error");
+  if(broken)parts.push(`<a class="is-warn" role="button" tabindex="0" onclick="openSettings()" onkeydown="if(event.key==='Enter')openSettings()">An integration needs attention</a>`);
+  else if(integ.telegram===false)parts.push(`<a role="button" tabindex="0" onclick="openSettings()" onkeydown="if(event.key==='Enter')openSettings()">Telegram is not paired</a>`);
+  el.hidden=!parts.length;
+  el.innerHTML=parts.join(" &nbsp;·&nbsp; ");
+  el.title=el.textContent;
 }
 
 /* ── Dock placement: on the desktop home the talk bar sits in the home grid (#home-dock);
@@ -2039,6 +2160,11 @@ function openAcademicsTile(){
   nav("syllabus",document.querySelector(`.nav-item[onclick*="nav('syllabus'"]`));
 }
 
+function openAgentsTile(){
+  closeAgentDetail();
+  nav("agents",document.querySelector(`.nav-item[onclick*="nav('agents'"]`));
+}
+
 async function refreshAiPill(){
   const el=document.getElementById("h-ai");
   if(!el)return;
@@ -2088,6 +2214,8 @@ function renderPage(page){
   else if(page==="timetable"){renderTimetable()}
   else if(page==="warroom"){renderWarRoom()}
   else if(page==="agents"){renderAgents()}
+  else if(page==="business"){renderBusiness()}
+  else if(page==="applications"){renderApplications()}
   else if(page==="settings"){renderSettings()}
   else if(page==="guide"){renderGuide()}
 }
@@ -2663,50 +2791,14 @@ let _agData={projects:[],pipeline:[],memory:[]};
 const _agProjCache={};   // project_id -> detail (findings)
 const _agOpen=new Set(); // expanded project ids
 
-async function renderAgents(){
-  try{
-    const [pr,pl,mem]=await Promise.all([
-      fetch(`${API_BASE}/research/projects`).then(r=>r.ok?r.json():[]),
-      fetch(`${API_BASE}/research/pipeline`).then(r=>r.ok?r.json():[]),
-      fetch(`${API_BASE}/research/memory`).then(r=>r.ok?r.json():[]),
-    ]);
-    _agData={projects:pr||[],pipeline:pl||[],memory:mem||[]};
-  }catch(_){
-    document.getElementById("ag-mi-status").textContent="Offline";
-    document.getElementById("ag-mi-status").className="badge badge--danger";
-    return;
-  }
-  const running=_agData.projects.some(p=>p.status==="running");
-  const statusTxt=running?"Running":"Available";
-  const st=document.getElementById("ag-mi-status");
-  st.textContent=statusTxt;st.className="badge "+(running?"badge--success":"badge--glow");
-  document.getElementById("ag-mi-runs").textContent=_agData.projects.length;
-  document.getElementById("ag-mi-findings").textContent=_agData.projects.reduce((s,p)=>s+(p.finding_count||0),0);
-  document.getElementById("ag-mi-pipeline").textContent=_agData.pipeline.length;
-  document.getElementById("ag-mi-lessons").textContent=_agData.memory.length;
-  if(!document.getElementById("agent-detail").classList.contains("hidden"))renderAgentDetail();
-}
-
-function openAgentDetail(){
-  document.getElementById("agents-registry").classList.add("hidden");
-  document.getElementById("agent-detail").classList.remove("hidden");
-  renderAgentDetail();
-}
-function closeAgentDetail(){
-  document.getElementById("agent-detail").classList.add("hidden");
-  document.getElementById("agents-registry").classList.remove("hidden");
-}
-
 function _agStatusBadge(status){
   const cls=status==="completed"?"badge--success":status==="failed"?"badge--danger":status==="running"?"badge--glow":"badge--muted";
   return `<span class="badge ${cls}">${escHtml(status||"—")}</span>`;
 }
 
+// The market-intelligence part of an agent's detail: projects, pipeline, lessons.
 function renderAgentDetail(){
-  const running=_agData.projects.some(p=>p.status==="running");
-  const st=document.getElementById("ag-detail-status");
-  st.textContent=running?"Running":"Available";st.className="badge "+(running?"badge--success":"badge--glow");
-
+  if(!document.getElementById("ag-projects"))return;
   document.getElementById("ag-proj-badge").textContent=String(_agData.projects.length);
   const projEl=document.getElementById("ag-projects");
   projEl.innerHTML=_agData.projects.length
@@ -2782,7 +2874,8 @@ function _renderAgProjBody(id){
         ${axes.length?`<div class="scores">${axes.map(k=>`<div><span>${escHtml(k.replace(/_/g," "))}</span><b>${escHtml(String(sc[k]))}</b></div>`).join("")}</div>`:""}
         ${f.first_customer_path?`<div class="section-label mt-3">First customer path</div><p class="hint">${escHtml(f.first_customer_path)}</p>`:""}
         ${ev.length?`<div class="section-label mt-3">Evidence · ${ev.length}</div><ul class="evidence">${ev.slice(0,6).map(e=>`<li>(${escHtml(e.source_type||"web")}) ${escHtml(e.title||"")}${e.ref&&/^https?:/.test(e.ref)?` — <a href="${escHtml(e.ref)}" target="_blank" rel="noopener">${escHtml(e.ref)}</a>`:""}</li>`).join("")}</ul>`:""}
-        ${f.status==="surfaced"?`<div class="mt-3"><button class="btn btn--sm btn--primary" onclick="promoteFinding(${Number(f.id)})">Promote to pipeline</button></div>`:""}
+        ${f.recommendation||Number(f.times_seen)>1?`<div class="cluster mt-3">${f.recommendation?`<span class="badge ${f.recommendation==="pursue"?"badge--success":f.recommendation==="watch"?"badge--warn":"badge--muted"}">${escHtml(f.recommendation)}</span>`:""}${Number(f.times_seen)>1?`<span class="badge badge--muted">seen ${Number(f.times_seen)} times</span>`:""}</div>`:""}
+        ${f.status==="surfaced"?`<div class="cluster mt-3"><button class="btn btn--sm btn--primary" onclick="promoteFinding(${Number(f.id)})">Promote to pipeline</button><button class="btn btn--ghost btn--sm" onclick="dismissFinding(${Number(f.id)},this)">Dismiss</button></div>`:""}
       </div>`;
     }).join("")
     :`<div class="empty">No findings — ${d.error?`run failed: ${escHtml(d.error)}`:"no evidence-backed candidates survived verification."}</div>`;
@@ -2838,6 +2931,8 @@ function _afterWriteRefresh(){
   try{syncFromBackend();}catch(_){}
   try{loadBriefing();}catch(_){}
   try{if(document.getElementById("p-syllabus")&&document.getElementById("p-syllabus").classList.contains("active")&&typeof renderSyllabus==="function")renderSyllabus();}catch(_){}
+  try{if(document.getElementById("p-business")&&document.getElementById("p-business").classList.contains("active"))renderBusiness();}catch(_){}
+  try{if(document.getElementById("p-applications")&&document.getElementById("p-applications").classList.contains("active"))renderApplications();}catch(_){}
 }
 
 function renderChangesStrip(changes,container){
@@ -2845,13 +2940,17 @@ function renderChangesStrip(changes,container){
   let host=container||document.getElementById("ucmd-changes");
   if(!host){showToast(changes.map(c=>c.summary).join(" · "),"info");return;}
   const batch=changes[0].batch_id;
-  const undoAll=changes.length>1&&batch?`<button class="chg-undo" onclick="undoBatch('${escHtml(batch)}',this)">Undo all</button>`:"";
+  // A change that records a sent message (undoable:false) is shown without Undo.
+  const canUndo=changes.filter(c=>c.undoable!==false).length;
+  const undoAll=canUndo>1&&batch?`<button class="chg-undo" onclick="undoBatch('${escHtml(batch)}',this)">Undo all</button>`:"";
   host.innerHTML=`<div class="chg-head"><span>${changes.length} change${changes.length>1?"s":""}</span>${undoAll}</div>
     <div class="chg-strip">${changes.map(c=>`
       <div class="chg-row ${c.undone?"undone":""}" id="chg-${Number(c.id)}">
         <span class="chg-act">${escHtml(c.action)}</span>
         <span class="chg-text">${escHtml(c.summary||`${c.table} #${c.record_id}`)}</span>
-        <button class="chg-undo" onclick="undoChange(${Number(c.id)},this)" ${c.undone?"disabled":""}>${c.undone?"Undone":"Undo"}</button>
+        ${c.undoable===false
+          ?`<button class="chg-undo" disabled title="A sent message cannot be undone">Sent</button>`
+          :`<button class="chg-undo" onclick="undoChange(${Number(c.id)},this)" ${c.undone?"disabled":""}>${c.undone?"Undone":"Undo"}</button>`}
       </div>`).join("")}</div>`;
 }
 
@@ -2859,7 +2958,7 @@ async function undoChange(id,btn){
   if(btn){btn.disabled=true;btn.textContent="…";}
   try{
     const r=await fetch(`${API_BASE}/changes/${id}/undo`,{method:"POST"});
-    if(!r.ok)throw new Error("HTTP "+r.status);
+    if(!r.ok){const d=await r.json().catch(()=>({}));throw new Error(d.detail||("HTTP "+r.status));}
     const row=document.getElementById(`chg-${id}`);
     if(row){row.classList.add("undone");}
     if(btn)btn.textContent="Undone";
@@ -2877,9 +2976,9 @@ async function undoBatch(batchId,btn){
     const r=await fetch(`${API_BASE}/changes/batch/${encodeURIComponent(batchId)}/undo`,{method:"POST"});
     if(!r.ok)throw new Error("HTTP "+r.status);
     const d=await r.json();
-    (d.changes||[]).forEach(c=>{const row=document.getElementById(`chg-${c.id}`);if(row){row.classList.add("undone");const b=row.querySelector(".chg-undo");if(b){b.disabled=true;b.textContent="Undone";}}});
+    (d.changes||[]).forEach(c=>{if(c.kept)return;const row=document.getElementById(`chg-${c.id}`);if(row){row.classList.add("undone");const b=row.querySelector(".chg-undo");if(b){b.disabled=true;b.textContent="Undone";}}});
     if(btn)btn.textContent="Undone";
-    showToast(`Undid ${d.undone} change${d.undone===1?"":"s"}`,"info");
+    showToast(`Undid ${d.undone} change${d.undone===1?"":"s"}`+(d.note?". "+d.note:""),"info");
     _afterWriteRefresh();
   }catch(e){
     if(btn){btn.disabled=false;btn.textContent="Undo all";}
@@ -2901,7 +3000,7 @@ function renderSuggestions(){
   if(!_suggestions.length){host.classList.remove("show");host.innerHTML="";if(chip)chip.style.display="none";_suggOpen=false;return;}
   if(chip){chip.style.display="inline-flex";if(chipText)chipText.textContent=`${_suggestions.length} suggestion${_suggestions.length>1?"s":""}`;}
   host.classList.toggle("show",_suggOpen);
-  const kindLabel=k=>k==="todo_add"?"Add task":k==="todo_complete"?"Complete":k==="inbox_add"?"Inbox idea":k;
+  const kindLabel=k=>k==="todo_add"?"Add task":k==="todo_complete"?"Complete":k==="inbox_add"?"Inbox idea":k==="project_pause"?"Pause project":k==="lead_reply"?"Mark replied":k;
   host.innerHTML=`<div class="chg-head"><span>${_suggestions.length} suggestion${_suggestions.length>1?"s":""} waiting</span><button class="sug-btn dismiss" onclick="toggleSuggestions(false)" aria-label="Hide">✕</button></div>
     <div class="sug-strip">${_suggestions.map(sg=>`
       <div class="sug-row" id="sug-${Number(sg.id)}">
@@ -3087,7 +3186,166 @@ function mdHtml(text){
 /* ═══════════════════════════════════════════════════
    SETTINGS
 ═══════════════════════════════════════════════════ */
+/* ── Settings: integrations and notifications ── */
+const SET={integrations:[],notif:null,recent:[],pairOpen:false};
+const INTEG_NEEDS={google_calendar:"Needs GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and FOUNDER_OS_API_URL on the server.",
+  email:"Needs EMAIL_ADDRESS and EMAIL_APP_PASSWORD on the server.",telegram:"Needs TELEGRAM_BOT_TOKEN on the server.",
+  youtube:"Needs YOUTUBE_API_KEY on the server."};
+const INTEG_ACTIONS={connect:"Connect",sync:"Sync",disconnect:"Disconnect",pair:"Pair",set_webhook:"Set webhook"};
+
+async function loadSettingsCards(){
+  const box=document.getElementById("set-integrations"), nbox=document.getElementById("set-notifications");
+  if(!box||!nbox)return;
+  try{
+    const [integ,notif,recent]=await Promise.all([_bizGet("/integrations"),_bizGet("/notifications/settings"),_bizGet("/notifications?limit=10")]);
+    SET.integrations=integ;SET.notif=notif;SET.recent=recent;
+    renderIntegrations();renderNotifications();
+  }catch(e){
+    box.innerHTML=nbox.innerHTML=`<div class="empty">Could not load — the backend is not reachable.</div>`;
+  }
+}
+
+function _integBadge(status){
+  const cls={connected:"badge--success",pending:"badge--glow",error:"badge--danger"}[status]||"badge--muted";
+  const label={connected:"Connected",pending:"Waiting",error:"Error",disconnected:"Not connected"}[status]||status;
+  return `<span class="badge ${cls}">${escHtml(label)}</span>`;
+}
+function _integSub(i){
+  if(i.status==="error")return i.last_error||"Needs attention.";
+  if(i.status==="connected")return [i.account_label,i.last_sync_at?`synced ${_ago(i.last_sync_at)}`:null].filter(Boolean).join(" · ")||"Connected.";
+  if(i.status==="pending"){
+    if(i.provider==="telegram")return "Send the code below to the bot to pair your phone.";
+    if(i.provider==="email")return `${i.account_label||"Email"} · not checked yet. Tap Sync.`;
+    return "The key is set. Add your channel on Business → Brand.";
+  }
+  if(!i.configured)return INTEG_NEEDS[i.provider]||"Not set up on the server yet.";
+  return i.provider==="google_calendar"?"Ready to connect.":"Not connected.";
+}
+function renderIntegrations(){
+  const box=document.getElementById("set-integrations");
+  if(!box)return;
+  const on=SET.integrations.filter(i=>i.status==="connected").length;
+  safeUpdate("set-integ-count",`${on} of ${SET.integrations.length} connected`);
+  box.innerHTML=SET.integrations.map(i=>{
+    const buttons=(i.actions||[]).map(a=>`<button class="btn btn--sm${a==="disconnect"?" btn--danger":""}" data-provider="${escHtml(i.provider)}" data-action="${escHtml(a)}" onclick="integAction(this)">${escHtml(INTEG_ACTIONS[a]||a)}</button>`).join("");
+    let row=`<div class="row row--wrap">
+      <div class="row-main"><div class="row-title">${escHtml(i.label)}</div><div class="row-sub wrap">${escHtml(_integSub(i))}</div></div>
+      ${_integBadge(i.status)}
+      ${buttons?`<div class="row-actions">${buttons}</div>`:""}
+    </div>`;
+    if(i.provider==="telegram"&&i.status!=="connected"&&i.configured&&(SET.pairOpen||i.status==="pending")&&SET.notif){
+      const link=SET.notif.bot_link;
+      row+=`<div class="row row--wrap">
+        <div class="row-main"><div class="row-title">Pair your phone</div><div class="row-sub wrap">Tap Set webhook once. Then open the bot${link?"":" in Telegram"}, press Start and send it this code.</div></div>
+        <div class="row-actions"><span class="code" aria-label="Pairing code">${escHtml(SET.notif.pair_code||"")}</span>
+          ${link?`<a class="btn btn--sm" href="${escHtml(link)}" target="_blank" rel="noopener">Open bot</a>`:""}
+          <button class="btn btn--sm" onclick="loadSettingsCards()">I've sent it</button></div>
+      </div>`;
+    }
+    return row;
+  }).join("")||`<div class="empty">No integrations.</div>`;
+}
+
+// One tap = one request, with a loading state and a plain error.
+async function _setTap(btn,method,path,body){
+  if(btn){btn.disabled=true;btn.classList.add("is-loading");}
+  try{
+    const r=await fetch(`${API_BASE}${path}`,{method,headers:body?{"Content-Type":"application/json"}:{},body:body?JSON.stringify(body):undefined});
+    const data=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(data.detail||("HTTP "+r.status));
+    return data;
+  }catch(e){
+    showToast("Could not do that: "+e.message,"error");
+    return null;
+  }finally{
+    if(btn){btn.disabled=false;btn.classList.remove("is-loading");}
+  }
+}
+async function integAction(btn){
+  const provider=btn.dataset.provider, action=btn.dataset.action;
+  if(action==="pair"){SET.pairOpen=!SET.pairOpen;renderIntegrations();return;}
+  if(action==="connect"){
+    const d=await _setTap(btn,"GET","/integrations/google/start");
+    if(d&&d.url)location.href=d.url;
+    return;
+  }
+  if(action==="set_webhook"){
+    const d=await _setTap(btn,"POST","/integrations/telegram/set-webhook");
+    if(d)showToast(d.ok?"Telegram will deliver messages here":(d.description||"Telegram refused"),d.ok?"success":"error");
+    return;
+  }
+  if(action==="sync"){
+    const d=await _setTap(btn,"POST",provider==="email"?"/integrations/email/sync":"/integrations/google/sync");
+    if(d){
+      if(d.ok===false)showToast(d.error||"Sync failed","error");
+      else showToast(provider==="email"?`${d.stored} new from people you know, ${d.ignored} ignored`:`${d.created} new, ${d.updated} changed, ${d.deleted} removed`,"success");
+      loadSettingsCards();try{loadBriefing();}catch(_){}
+    }
+    return;
+  }
+  if(action==="disconnect"){
+    const name=provider==="telegram"?"Telegram":"Google Calendar";
+    if(!confirm(`Disconnect ${name}?`))return;
+    const d=await _setTap(btn,"POST",provider==="telegram"?"/integrations/telegram/unpair":"/integrations/google/disconnect");
+    if(d){showToast(`${name} disconnected`,"info");SET.pairOpen=false;loadSettingsCards();try{loadBriefing();}catch(_){}}
+  }
+}
+
+function _notifBadge(n){
+  const cls={sent:"badge--success",queued:"badge--glow",failed:"badge--danger"}[n.status]||"badge--muted";
+  const reason={quiet_hours:"quiet hours",daily_cap:"daily cap",channel_disabled:"channel off",not_paired:"not paired"}[n.suppressed_reason]||"";
+  return `<span class="badge ${cls}" title="${escHtml(n.error||reason)}">${escHtml(n.status==="suppressed"&&reason?reason:n.status)}</span>`;
+}
+function renderNotifications(){
+  const box=document.getElementById("set-notifications"), s=SET.notif;
+  if(!box||!s)return;
+  safeUpdate("set-notif-state",!s.enabled?"Off":s.paired?"Telegram":"Not paired");
+  const time=(key,value,label)=>`<input class="input input--narrow" type="time" value="${escHtml(value||"")}" aria-label="${escHtml(label)}" onchange="notifPatch('${key}',this.value)">`;
+  const caps=[...new Set([4,6,8,12,16,24,Number(s.daily_cap)])].sort((a,b)=>a-b);
+  const sev={info:"Everything",warn:"Warnings and critical",critical:"Critical only"};
+  const recent=SET.recent.map(n=>`<div class="row">
+      <div class="row-main"><div class="row-title">${escHtml(_cap(n.kind))}${n.title?` · ${escHtml(n.title)}`:""}</div><div class="row-sub">${escHtml(String(n.body||"").split("\n")[0].slice(0,120))}</div></div>
+      <span class="row-meta">${escHtml(_ago(n.sent_at||n.created_at))}</span>${_notifBadge(n)}
+    </div>`).join("")||`<div class="empty">Nothing has been sent yet.</div>`;
+  box.innerHTML=`
+    <div class="field"><div class="field-label">Messages</div><div class="field-control"><button class="toggle ${s.enabled?"is-on":"is-off"}" aria-pressed="${!!s.enabled}" onclick="notifPatch('enabled',${!s.enabled})">${s.enabled?"On":"Off"}</button><span class="hint">${s.paired?"Sent to your Telegram.":"Pair Telegram under Integrations to receive them."}</span></div></div>
+    <div class="field"><div class="field-label">Morning briefing</div><div class="field-control">${time("morning_time",s.morning_time,"Morning briefing time")}</div></div>
+    <div class="field"><div class="field-label">Evening review</div><div class="field-control">${time("evening_time",s.evening_time,"Evening review time")}${s.evening_time?`<button class="btn btn--sm btn--ghost" onclick="notifPatch('evening_time','off')">Turn off</button>`:`<span class="hint">Off. Pick a time to turn it on.</span>`}</div></div>
+    <div class="field"><div class="field-label">Quiet hours</div><div class="field-control">${time("quiet_start",s.quiet_start,"Quiet hours start")}<span class="hint">to</span>${time("quiet_end",s.quiet_end,"Quiet hours end")}</div></div>
+    <div class="field"><div class="field-label">Alerts</div><div class="field-control"><select class="select input--narrow" aria-label="Least serious alert to send" onchange="notifPatch('alert_min_severity',this.value)">${Object.keys(sev).map(k=>`<option value="${k}"${s.alert_min_severity===k?" selected":""}>${sev[k]}</option>`).join("")}</select></div></div>
+    <div class="field"><div class="field-label">Daily cap</div><div class="field-control"><select class="select input--narrow" aria-label="Most messages in a day" onchange="notifPatch('daily_cap',Number(this.value))">${caps.map(c=>`<option value="${c}"${Number(s.daily_cap)===c?" selected":""}>${c} a day</option>`).join("")}</select></div></div>
+    <div class="cluster mt-3"><button class="btn" onclick="notifSend(this,'/notifications/test')">Send test</button><button class="btn" onclick="notifSend(this,'/notifications/brief-now')">Brief now</button></div>
+    <div class="section-label">Last 10</div>
+    <div class="list">${recent}</div>`;
+}
+async function notifPatch(key,value){
+  if((key==="morning_time"||key==="quiet_start"||key==="quiet_end")&&!value){renderNotifications();return;}   // these cannot be empty
+  const d=await _setTap(null,"PATCH","/notifications/settings",{[key]:key==="evening_time"&&!value?"off":value});
+  if(d){SET.notif=d;if(d.change)showChanges([d.change]);}
+  renderNotifications();
+}
+async function notifSend(btn,path){
+  const d=await _setTap(btn,"POST",path);
+  if(!d)return;
+  if(d.status==="sent")showToast("Sent to Telegram","success");
+  else showToast(d.error||`Not sent (${d.status})`,"error");
+  try{SET.recent=await _bizGet("/notifications?limit=10");}catch(_){}
+  renderNotifications();try{loadBriefing();}catch(_){}
+}
+
+// Coming back from Google's sign-in: /app/#settings?connected=google (or ?error=…).
+function handleReturnHash(){
+  const h=location.hash||"";
+  if(!h.startsWith("#settings"))return;
+  const q=new URLSearchParams(h.split("?")[1]||"");
+  openSettings();
+  if(q.get("connected")==="google")showToast("Google Calendar connected","success");
+  else if(q.get("error"))showToast({google_denied:"Google sign-in was cancelled",google_state:"That sign-in had expired. Tap Connect again.",google_exchange:"Google refused the sign-in. Tap Connect again."}[q.get("error")]||"Could not connect","error");
+  try{history.replaceState(null,"",location.pathname+location.search);}catch(_){}
+}
+
 function renderSettings(){
+  loadSettingsCards();
   const ss=document.getElementById("social-score-slider");
   const sv=document.getElementById("social-score-val");
   if(ss){ss.value=S.social;sv.textContent=S.social;ss.style.setProperty("--pct",S.social+"%");}
@@ -3644,6 +3902,843 @@ function toggleLiveVoice(){
 /* ═══════════════════════════════════════════════════
    DESIGN GUIDE — reads the live token values from the stylesheet
 ═══════════════════════════════════════════════════ */
+/* ═══════════════════════════════════════════════════
+   BUSINESS — pipeline, clients, portfolio, brand
+   A page for looking and for one-tap corrections. Facts come in through the talk bar.
+═══════════════════════════════════════════════════ */
+const BIZ_TABS=["pipeline","clients","portfolio","brand"];
+const BIZ={tab:null,segment:"",clientId:null,showClosed:false,showPaused:false,drafts:{},seq:0};
+const LEAD_GROUPS=[["new","New"],["qualified","Qualified"],["contacted","Contacted"],["replied","Replied"],["converted","Converted"]];
+const DEAL_PATH=["lead","proposal","negotiation","won"];
+
+function _bizTab(){
+  if(!BIZ.tab){
+    let t="pipeline";
+    try{t=localStorage.getItem("founderOS_bizTab")||"pipeline";}catch(_){}
+    BIZ.tab=BIZ_TABS.includes(t)?t:"pipeline";
+  }
+  return BIZ.tab;
+}
+function businessTab(tab){
+  if(!BIZ_TABS.includes(tab))return;
+  BIZ.tab=tab;
+  try{localStorage.setItem("founderOS_bizTab",tab);}catch(_){}
+  renderBusiness();
+}
+function openBusinessTile(tab){
+  if(tab&&BIZ_TABS.includes(tab)){BIZ.tab=tab;try{localStorage.setItem("founderOS_bizTab",tab);}catch(_){}}
+  nav("business",document.querySelector(`.nav-item[onclick*="nav('business'"]`));
+}
+
+async function _bizGet(path){
+  const r=await fetch(`${API_BASE}${path}`);
+  if(!r.ok)throw new Error("HTTP "+r.status);
+  return r.json();
+}
+// One tap = one request. Shows what changed (with Undo) and redraws the page
+// (the Business tab by default; another page passes its own renderer).
+async function _bizTap(btn,method,path,body,after){
+  if(btn){btn.disabled=true;btn.classList.add("is-loading");}
+  try{
+    const r=await fetch(`${API_BASE}${path}`,{method,headers:body?{"Content-Type":"application/json"}:{},body:body?JSON.stringify(body):undefined});
+    const data=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(data.detail||("HTTP "+r.status));
+    showChanges((data.changes||(data.change?[data.change]:[])).filter(Boolean));
+    (after||renderBusiness)();
+    try{loadBriefing();}catch(_){}
+    return data;
+  }catch(e){
+    showToast("Could not do that: "+e.message,"error");
+    if(btn){btn.disabled=false;btn.classList.remove("is-loading");}
+    return null;
+  }
+}
+
+// Put a tap's changes in the dock with Undo, creating the strip's host on first use.
+function showChanges(changes){
+  if(!changes||!changes.length)return;
+  const result=document.getElementById("ucmd-result");
+  if(result){
+    result.style.display="block";
+    if(!document.getElementById("ucmd-changes"))result.innerHTML=`<div id="ucmd-changes"></div>`;
+  }
+  renderChangesStrip(changes);
+}
+
+function _money(amount,currency){
+  const n=Number(amount||0);
+  const txt=n.toLocaleString("en-GB",{maximumFractionDigits:Number.isInteger(n)?0:2});
+  return (String(currency||"ZMW").toUpperCase()==="ZMW"?"K":"$")+txt;
+}
+function _moneyBy(totals){
+  const by=(totals&&totals.by_currency)||{};
+  const parts=Object.keys(by).filter(k=>by[k]).map(k=>_money(by[k],k));
+  return parts.length?parts.join(" + "):"—";
+}
+function _usd(n){return "$"+Number(n||0).toLocaleString("en-GB",{maximumFractionDigits:0});}
+function _day(s){
+  if(!s)return "";
+  const d=new Date(String(s).length<=10?s+"T00:00:00":s);
+  return isNaN(d)?"":d.toLocaleDateString("en-GB",{day:"numeric",month:"short"});
+}
+function _pct(x){return Math.round(Number(x||0)*100)+"%";}
+function _cap(s){s=String(s||"");return s.charAt(0).toUpperCase()+s.slice(1);}
+
+async function renderBusiness(){
+  const host=document.getElementById("biz-body");
+  if(!host)return;
+  const tab=_bizTab();
+  document.querySelectorAll("#biz-tabs .tab").forEach(b=>{
+    const on=b.dataset.tab===tab;
+    b.classList.toggle("is-on",on);b.setAttribute("aria-selected",String(on));
+  });
+  if(host.dataset.tab!==tab){
+    host.dataset.tab=tab;
+    host.innerHTML=`<div class="skel skel-row"></div><div class="skel skel-row"></div><div class="skel skel-row"></div>`;
+  }
+  const seq=++BIZ.seq;
+  let html;
+  try{
+    if(tab==="pipeline")html=await renderPipeline();
+    else if(tab==="clients")html=await renderClients();
+    else if(tab==="portfolio")html=await renderPortfolio();
+    else html=await renderBrand();
+  }catch(e){
+    html=`<div class="card"><div class="empty">Waiting for the backend…</div></div>`;
+  }
+  if(seq===BIZ.seq&&_bizTab()===tab)host.innerHTML=html;   // a newer render wins
+}
+
+/* ── Pipeline ── */
+async function renderPipeline(){
+  const seg=BIZ.segment;
+  const [segments,leads,drafts,stats]=await Promise.all([
+    _bizGet("/leads/segments"),
+    _bizGet("/leads?limit=300"+(seg?`&segment=${encodeURIComponent(seg)}`:"")),
+    _bizGet("/outreach?status=draft"),
+    _bizGet("/outreach/stats"),
+  ]);
+  BIZ.drafts={};
+  drafts.forEach(d=>{BIZ.drafts[d.id]=d;});
+  const t=stats.totals||{};
+  const funnel=`<div class="card">
+    <div class="card-head"><div class="card-title"><span>Outreach, last ${Number(stats.days||90)} days</span></div><span class="badge badge--muted">${Number(t.leads||0)} leads</span></div>
+    <div class="cluster">
+      <span class="badge badge--glow">${Number(t.contacted||0)} contacted</span><span class="muted" aria-hidden="true">→</span>
+      <span class="badge badge--purple">${Number(t.replied||0)} replied · ${_pct(t.reply_rate)}</span><span class="muted" aria-hidden="true">→</span>
+      <span class="badge badge--success">${Number(t.converted||0)} converted · ${_pct(t.conversion_rate)}</span>
+    </div>
+  </div>`;
+
+  const draftCards=drafts.length?`<div class="card">
+    <div class="card-head"><div class="card-title"><span>Drafts waiting</span></div><span class="badge badge--warn">${drafts.length}</span></div>
+    <p class="hint">Nothing is sent until you approve it. To change a draft, tell Founder OS what to change.</p>
+    <div class="mt-3">${drafts.map(d=>`<div class="result draft" id="draft-${Number(d.id)}">
+      <div class="cluster"><b>${escHtml(d.lead_name||"Lead")}</b><span class="badge badge--muted">${escHtml(d.channel)}</span>${Number(d.version)>1?`<span class="badge badge--muted">v${Number(d.version)}</span>`:""}</div>
+      <div class="row-sub wrap">${d.recipient?"To "+escHtml(d.recipient):(d.channel==="whatsapp"||d.channel==="email"?"No "+(d.channel==="email"?"email address":"number")+" on file":"You send this one yourself")}</div>
+      ${d.subject?`<div class="draft-subject">${escHtml(d.subject)}</div>`:""}
+      <div class="draft-body">${escHtml(d.body||"")}</div>
+      <div class="cluster mt-3">
+        <button class="btn btn--primary btn--sm" onclick="draftSend(${Number(d.id)},this)">Approve &amp; send</button>
+        <button class="btn btn--sm" onclick="draftCopy(${Number(d.id)})">Copy</button>
+        <button class="btn btn--ghost btn--sm" onclick="_bizTap(this,'POST','/outreach/${Number(d.id)}/cancel')">Dismiss</button>
+      </div>
+    </div>`).join("")}</div>
+  </div>`:"";
+
+  const named=segments.filter(s=>s.segment);
+  const chips=named.length?`<div class="chips" role="group" aria-label="Segment">
+    <button class="chip ${seg?"":"is-on"}" onclick="pipelineSegment('')">All</button>
+    ${named.map(s=>`<button class="chip ${seg===s.segment?"is-on":""}" data-seg="${escHtml(s.segment)}" onclick="pipelineSegment(this.dataset.seg)">${escHtml(_cap(s.segment))} · ${Number(s.total)}</button>`).join("")}
+  </div>`:"";
+
+  const groups=LEAD_GROUPS.map(([status,label])=>{
+    const rows=leads.filter(l=>l.status===status);
+    if(!rows.length)return "";
+    return `<div class="section-label">${label} · ${rows.length}</div><div class="list">${rows.map(_leadRow).join("")}</div>`;
+  }).join("");
+  const closed=leads.filter(l=>l.status==="disqualified"||l.status==="lost");
+  const closedBlock=closed.length?`<div class="section-label">Disqualified and lost · ${closed.length}</div>
+    ${BIZ.showClosed?`<div class="list">${closed.map(_leadRow).join("")}</div>`:""}
+    <button class="btn btn--ghost btn--sm" onclick="BIZ.showClosed=!BIZ.showClosed;renderBusiness()">${BIZ.showClosed?"Hide":"Show"}</button>`:"";
+  const list=`<div class="card">
+    <div class="card-head"><div class="card-title"><span>Leads</span></div><span class="badge badge--muted">${leads.length}</span></div>
+    ${leads.length?groups+closedBlock:`<div class="empty">No leads yet. Tell Founder OS who you plan to approach.</div>`}
+  </div>`;
+  return funnel+draftCards+chips+list;
+}
+
+function _leadRow(l){
+  const id=Number(l.id);
+  const who=escHtml(l.name)+(l.company&&l.company!==l.name?` <span class="muted">· ${escHtml(l.company)}</span>`:"");
+  const sub=[l.segment?_cap(l.segment):"",l.location||"",l.open_follow_up&&l.open_follow_up.due_date?`follow up ${_day(l.open_follow_up.due_date)}`:""].filter(Boolean).map(escHtml).join(" · ");
+  const score=l.qualification_score!=null?`<span class="badge ${Number(l.qualification_score)>=50?"badge--glow":"badge--muted"}" title="Qualification score">${Number(l.qualification_score)}</span>`:"";
+  const last=l.last_message?`<span class="badge badge--muted">${escHtml(l.last_message.channel)} · ${escHtml(l.last_message.status)}</span>`:"";
+  let action="";
+  if(l.status==="contacted")action=`<button class="btn btn--sm" onclick="_bizTap(this,'POST','/leads/${id}/replied')">Replied</button>`;
+  else if(l.status==="replied")action=`<button class="btn btn--primary btn--sm" onclick="_bizTap(this,'POST','/leads/${id}/convert')">Convert</button>`;
+  return `<div class="row row--wrap">
+    <div class="row-main"><div class="row-title">${who}</div>${sub?`<div class="row-sub">${sub}</div>`:""}</div>
+    ${score}${last}${action?`<div class="row-actions">${action}</div>`:""}
+  </div>`;
+}
+
+function pipelineSegment(seg){BIZ.segment=seg||"";renderBusiness();}
+
+async function draftSend(id,btn){
+  const d=BIZ.drafts[id];
+  // WhatsApp sends by opening a link. Open the tab inside the tap so it is not blocked,
+  // then point it at the link once the server has approved the send.
+  const tab=d&&d.channel==="whatsapp"?window.open("","_blank"):null;
+  const data=await _bizTap(btn,"POST",`/outreach/${Number(id)}/send`);
+  const failed=!data||(data.message&&data.message.status==="failed");
+  if(data&&data.open_url&&!failed){
+    if(tab){try{tab.opener=null;}catch(_){}tab.location.href=data.open_url;}
+    else window.open(data.open_url,"_blank","noopener");
+  }else if(tab){tab.close();}
+  if(data&&failed)showToast("Not sent: "+((data.message&&data.message.error)||"the channel failed")+". Copy the text instead.","error");
+  else if(data&&!data.open_url)showToast("Marked as sent. Copy the text if you still need it.","success");
+}
+
+async function draftCopy(id){
+  const d=BIZ.drafts[id];
+  if(!d)return;
+  const text=(d.subject?d.subject+"\n\n":"")+(d.body||"");
+  try{await navigator.clipboard.writeText(text);showToast("Copied","success");}
+  catch(_){showToast("Could not copy — select the text and copy it","error");}
+}
+
+/* ── Portfolio ── */
+async function renderPortfolio(){
+  const d=await _bizGet("/portfolio");
+  try{loadSuggestions();}catch(_){}          // the review may have filed a pause suggestion
+  const t=d.totals||{};
+  const strip=`<div class="kpis">
+    <div class="kpi"><div class="kpi-label">Active</div><div class="kpi-value">${Number(t.active||0)}</div><div class="kpi-sub">${Number(t.paused||0)} paused</div></div>
+    <div class="kpi"><div class="kpi-label">Blocked</div><div class="kpi-value">${Number(t.blocked)>0?`<span class="red">${Number(t.blocked)}</span>`:"0"}</div><div class="kpi-sub">${Number(t.blocked)>0?"Clear one before starting more":"Nothing is stuck"}</div></div>
+    <div class="kpi"><div class="kpi-label">Overdue</div><div class="kpi-value">${Number(t.overdue)>0?`<span class="red">${Number(t.overdue)}</span>`:"0"}</div><div class="kpi-sub">${Number(t.overdue)>0?"Deliver or re-date":"Nothing is late"}</div></div>
+    <div class="kpi"><div class="kpi-label">Active value</div><div class="kpi-value">${_usd(t.value_usd_active)}</div><div class="kpi-sub">Expected, in dollars</div></div>
+  </div>`;
+  const waiting=(d.pause_suggestions||[]).length;
+  const ranked=d.ranked||[], paused=d.paused||[];
+  const list=`<div class="card">
+    <div class="card-head"><div class="card-title"><span>Where to put attention</span></div><span class="badge badge--muted">${ranked.length}</span></div>
+    <p class="hint">Ranked by value, urgency, staleness, blocks and priority. The recommendation is advice; nothing changes until you tap.${waiting?` ${waiting} pause suggestion${waiting>1?"s are":" is"} waiting above the talk bar.`:""}</p>
+    ${ranked.length?`<div class="list mt-3">${ranked.map(_projectRow).join("")}</div>`:`<div class="empty">No live projects. Win a deal, or tell Founder OS about a new project.</div>`}
+    ${paused.length?`<div class="section-label">Paused · ${paused.length}</div>
+      ${BIZ.showPaused?`<div class="list">${paused.map(_projectRow).join("")}</div>`:""}
+      <button class="btn btn--ghost btn--sm" onclick="BIZ.showPaused=!BIZ.showPaused;renderBusiness()">${BIZ.showPaused?"Hide":"Show"}</button>`:""}
+  </div>`;
+  return strip+list;
+}
+
+function _projectRow(e){
+  const p=e.project, a=e.attention||{}, c=a.components||{};
+  const id=Number(p.id);
+  const tone={red:"danger",amber:"warn",green:"success"};
+  const recTone={focus:"badge--glow",pause:"badge--warn",close:"badge--success",maintain:"badge--muted"};
+  const why=`Value ${c.value} · Urgency ${c.urgency} · Staleness ${c.staleness} · Blocked ${c.blocked} · Priority ${c.priority} · Waiting ${c.waiting}`;
+  const due=a.overdue_days?`${Number(a.overdue_days)}d overdue`:(p.due_date?`due ${_day(p.due_date)}`:"");
+  const line=[e.bottleneck?_cap(e.bottleneck):(p.next_action?`Next: ${p.next_action}`:""),due].filter(Boolean).map(escHtml).join(" · ");
+  const status=tap=>`_bizTap(this,'POST','/projects/${id}/status',{status:'${tap}'})`;
+  let actions="";
+  if(p.status==="active"){
+    // The button that matches the recommendation is the lit one.
+    const lit=r=>e.recommendation===r?"btn btn--primary btn--sm":"btn btn--sm";
+    actions=(Number(p.priority)===1?"":`<button class="${lit("focus")}" onclick="_bizTap(this,'POST','/projects/${id}/focus')">Focus</button>`)
+      +`<button class="btn btn--sm" onclick="${status("delivered")}">Delivered</button>`
+      +`<button class="${e.recommendation==="pause"?"btn btn--primary btn--sm":"btn btn--ghost btn--sm"}" onclick="${status("paused")}">Pause</button>`;
+  }else if(p.status==="paused"){
+    actions=`<button class="btn btn--primary btn--sm" onclick="${status("active")}">Resume</button>`;
+  }else if(p.status==="planned"){
+    actions=`<button class="btn btn--sm" onclick="${status("active")}">Start</button>`;
+  }else if(p.status==="delivered"){
+    actions=`<button class="btn btn--sm" onclick="${status("closed")}">Close</button>`;
+  }
+  return `<div class="row row--wrap">
+    <span class="badge badge--muted" title="Rank among active projects">${e.rank?Number(e.rank):"–"}</span>
+    <span class="dot ${tone[p.health]||"success"}" title="Health: ${escHtml(p.health||"green")}"></span>
+    <div class="row-main"><div class="row-title">${escHtml(p.title)}${p.client_name?` <span class="muted">· ${escHtml(p.client_name)}</span>`:""}${Number(p.priority)===1&&p.status==="active"?` <span class="badge badge--glow">In focus</span>`:""}</div>${line?`<div class="row-sub wrap">${line}</div>`:""}</div>
+    <span class="badge ${recTone[e.recommendation]||"badge--muted"}">${escHtml(_cap(e.recommendation))}</span>
+    <span class="row-meta" title="${escHtml(why)}">${Number(a.score||0).toFixed(1)}</span>
+    ${actions?`<div class="row-actions">${actions}</div>`:""}
+  </div>`;
+}
+
+/* ── Brand ── real platform numbers only: a value that was not measured shows as a dash */
+function _num(v){return v==null?"—":Number(v).toLocaleString("en-GB");}
+function _rate(v){return v==null?"—":(Number(v)*100).toFixed(1)+"%";}
+const IDEA_NEXT={idea:"Mark drafted",drafted:"Schedule",scheduled:"Mark posted"};
+const PLATFORM_NAME={youtube:"YouTube",linkedin:"LinkedIn",x:"X",instagram:"Instagram",tiktok:"TikTok"};
+function _platform(p){return PLATFORM_NAME[p]||_cap(p);}
+
+async function renderBrand(){
+  const [accounts,perf,cal]=await Promise.all([_bizGet("/brand/accounts"),_bizGet("/brand/performance"),_bizGet("/brand/calendar")]);
+  const live=accounts.filter(a=>a.status!=="disconnected");
+  const hasYouTube=live.some(a=>a.platform==="youtube");
+  const insight=perf.insight?`<div class="insight"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0-3.6 10.8c.6.5 1 1.2 1 2v.7h5.2v-.7c0-.8.4-1.5 1-2A6 6 0 0 0 12 3Z"/><path d="M9.6 20h4.8"/></svg><span>${escHtml(perf.insight)}</span></div>`:"";
+
+  const tiles=live.map(a=>{
+    const delta=a.followers_delta_30d;
+    const name=`${_platform(a.platform)}${a.handle?" · "+a.handle:""}`;
+    const when=a.last_synced_at?`${a.access==="export"?"imported":"synced"} ${_ago(a.last_synced_at)}`:"not synced yet";
+    return `<div class="kpi">
+      <div class="kpi-label">${escHtml(name)}</div>
+      <div class="kpi-value">${_num(a.followers)}${a.followers!=null?`<small>followers</small>`:""}</div>
+      <div class="kpi-sub wrap">${a.status==="error"?`<span class="cmd-err">${escHtml(a.last_error||"The last sync failed")}</span>`:
+        escHtml([a.followers==null?"Followers not reported":(delta==null?"":`${delta>=0?"+":""}${_num(delta)} in 30 days`),`${_num(a.posts_stored)} posts`,when].filter(Boolean).join(" · "))}</div>
+      <div class="cluster mt-3">
+        <span class="badge ${a.status==="error"?"badge--danger":"badge--success"}">${a.status==="error"?"Error":"Connected"}</span>
+        ${a.access==="export"?`<span class="badge badge--muted">From export</span>`:`<button class="btn btn--sm" onclick="brandSync(${Number(a.id)},this)">Sync</button>`}
+      </div>
+    </div>`;}).join("");
+  const connect=hasYouTube?"":`<div class="kpi">
+      <div class="kpi-label">YouTube</div>
+      <div class="kpi-sub wrap">Not connected. Enter the channel's handle to read its public numbers.</div>
+      <div class="form-row mt-3"><input class="input" id="brand-yt-handle" placeholder="@handle" aria-label="YouTube handle" autocomplete="off"><button class="btn btn--sm" onclick="brandConnect(this)">Connect</button></div>
+    </div>`;
+  const accountsCard=`<div class="card">
+    <div class="card-head"><div class="card-title"><span>Accounts</span></div><span class="badge ${live.length?"badge--glow":"badge--muted"}">${live.length?`${live.length} connected`:"Not connected"}</span></div>
+    ${live.length?"":`<p class="hint">No account is connected, so there are no numbers to show. Nothing here is ever estimated.</p>`}
+    <div class="kpis mt-3">${tiles}${connect}</div>
+    <div class="section-label mt-5">Import an analytics export</div>
+    <div class="form-row">
+      <select class="select input--narrow" id="brand-import-platform" aria-label="Platform"><option value="linkedin">LinkedIn</option></select>
+      <button class="btn btn--sm" onclick="document.getElementById('brand-import-file').click()">Import CSV</button>
+      <input type="file" id="brand-import-file" accept=".csv,text/csv" class="hidden" onchange="brandImport(this)">
+      <span class="hint">The CSV saved from the platform's own export.</span>
+    </div>
+  </div>`;
+
+  const top=perf.top_posts||[];
+  const formats=Object.entries(perf.by_format||{});
+  const cad=perf.cadence||{};
+  const perfCard=`<div class="card">
+    <div class="card-head"><div class="card-title"><span>What is working, last ${Number(perf.days||90)} days</span></div><span class="badge badge--muted">${_num(cad.posts_in_window)} posts</span></div>
+    ${perf.connected?`<div class="cluster">
+        <span class="badge badge--muted">${cad.per_week==null?"—":Number(cad.per_week)} a week</span>
+        <span class="badge ${cad.gap_days_since_last!=null&&cad.gap_days_since_last>14?"badge--warn":"badge--muted"}">${cad.gap_days_since_last==null?"No posts yet":`last post ${Number(cad.gap_days_since_last)} day${cad.gap_days_since_last===1?"":"s"} ago`}</span>
+        <span class="badge badge--muted">${_num(perf.posts_last_30d)} of ${Number(perf.brand_target_posts_30d||8)} this month</span>
+      </div>
+      <div class="section-label mt-5">Top posts</div>
+      ${top.length?`<div class="list">${top.map(t=>`<div class="row row--wrap">
+          <div class="row-main"><div class="row-title wrap">${t.post.url?`<a href="${escHtml(t.post.url)}" target="_blank" rel="noopener">${escHtml(t.post.title||t.post.url)}</a>`:escHtml(t.post.title||"Untitled")}</div>
+            <div class="row-sub">${escHtml([_platform(t.post.platform),t.post.kind,_day(t.posted_at)].filter(Boolean).join(" · "))}</div></div>
+          <span class="row-meta" title="Views (or impressions)">${_num(t.views!=null?t.views:t.impressions)} ${t.views!=null?"views":t.impressions!=null?"impressions":""}</span>
+          <span class="badge badge--glow" title="Engagement rate">${_rate(t.engagement_rate)}</span>
+        </div>`).join("")}</div>`:`<div class="empty">No measured posts in this window.</div>`}
+      ${formats.length?`<div class="section-label mt-5">By format</div><div class="chips">${formats.map(([k,v])=>`<span class="chip">${escHtml(_cap(k))} · ${Number(v.count)} · ${_num(v.median_views==null?null:Math.round(v.median_views))} median views · ${_rate(v.median_engagement_rate)}</span>`).join("")}</div>`:""}`
+      :`<div class="empty">Not connected. Connect YouTube or import a LinkedIn export to see what is working.</div>`}
+  </div>`;
+
+  const ideaRow=i=>`<div class="row row--wrap" id="idea-${Number(i.id)}">
+      <div class="row-main"><div class="row-title wrap">${escHtml(i.title)}</div><div class="row-sub">${escHtml([i.platform?_platform(i.platform):"",i.format||"",_cap(i.status)].filter(Boolean).join(" · "))}</div></div>
+      ${IDEA_NEXT[i.status]?`<div class="row-actions"><button class="btn btn--sm" onclick="ideaAdvance(${Number(i.id)},this)">${IDEA_NEXT[i.status]}</button></div>`:`<span class="badge badge--success">Posted</span>`}
+    </div>`;
+  // Today is always shown; other days only when something is on them.
+  const shown=(cal.days||[]).filter(d=>d.is_today||d.ideas.length||d.posted.length);
+  const lastDay=(cal.days||[]).length?new Date(cal.days[cal.days.length-1].date+"T00:00:00").toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"}):"";
+  const days=shown.map(d=>{
+    const dt=new Date(d.date+"T00:00:00");
+    const label=dt.toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short"});
+    const empty=!d.ideas.length&&!d.posted.length;
+    return `<div class="row row--wrap ${d.is_today?"is-now":""}">
+      <span class="tt-time">${escHtml(label)}</span>
+      <div class="row-main">${empty?`<div class="row-sub">${d.is_today?"Nothing scheduled today":"—"}</div>`:""}
+        ${d.ideas.map(ideaRow).join("")}
+        ${d.posted.map(p=>`<div class="row-sub wrap">Posted: ${escHtml(p.title||p.url||"a post")}</div>`).join("")}</div>
+    </div>`;}).join("");
+  const backlog=cal.backlog||[];
+  const calCard=`<div class="card">
+    <div class="card-head"><div class="card-title"><span>Next two weeks</span></div><span class="badge badge--muted">${backlog.length} in the backlog</span></div>
+    <p class="hint">Tell Founder OS an idea or when to post it. Tap to move an idea on.</p>
+    <div class="list mt-3">${days}</div>
+    <p class="hint mt-3">${shown.length>1?"Nothing else":"Nothing"} is scheduled through ${escHtml(lastDay)}.</p>
+    ${backlog.length?`<div class="section-label mt-5">Backlog</div><div class="list">${backlog.map(ideaRow).join("")}</div>`:""}
+  </div>`;
+  return insight+accountsCard+perfCard+calCard;
+}
+
+async function brandSync(id,btn){
+  const d=await _bizTap(btn,"POST",`/brand/accounts/${Number(id)}/sync`);
+  if(!d)return;
+  if(d.ok)showToast(`Synced: ${Number(d.posts_new||0)} new post${d.posts_new===1?"":"s"}, ${Number(d.metrics_rows||0)} with new numbers`,"success");
+  else showToast("Sync failed: "+(d.last_error||d.error||"the platform could not be read"),"error");
+}
+
+async function brandConnect(btn){
+  const el=document.getElementById("brand-yt-handle");
+  const handle=el?el.value.trim():"";
+  if(!handle){showToast("Enter the channel's handle","error");if(el)el.focus();return;}
+  await _bizTap(btn,"POST","/brand/accounts",{platform:"youtube",handle});
+}
+
+async function brandImport(input){
+  const file=input.files&&input.files[0];
+  if(!file)return;
+  const platform=(document.getElementById("brand-import-platform")||{}).value||"linkedin";
+  try{
+    const fd=new FormData();
+    fd.append("file",file,file.name||"export.csv");
+    fd.append("platform",platform);
+    const r=await fetch(`${API_BASE}/brand/import`,{method:"POST",body:fd});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(d.detail||("HTTP "+r.status));
+    showToast(`Imported: ${Number(d.posts_new)} new, ${Number(d.posts_updated)} updated, ${Number(d.metrics_rows)} with new numbers`,"success");
+  }catch(e){showToast("Import failed: "+e.message,"error");}
+  input.value="";
+  renderBusiness();
+  try{loadBriefing();}catch(_){}
+}
+
+async function ideaAdvance(id,btn){
+  if(btn){btn.disabled=true;btn.classList.add("is-loading");}
+  try{
+    const r=await fetch(`${API_BASE}/brand/ideas/${Number(id)}/advance`,{method:"POST"});
+    const d=await r.json().catch(()=>({}));
+    if(r.status===409){ideaAskDate(id);return;}          // it needs a date before it can be scheduled
+    if(!r.ok)throw new Error(d.detail||("HTTP "+r.status));
+    if(d.change)showChanges([d.change]);
+    renderBusiness();
+    try{loadBriefing();}catch(_){}
+  }catch(e){
+    showToast("Could not do that: "+e.message,"error");
+    if(btn){btn.disabled=false;btn.classList.remove("is-loading");}
+  }
+}
+
+// Scheduling needs a day: swap the row's button for a date picker.
+function ideaAskDate(id){
+  const row=document.getElementById(`idea-${Number(id)}`);
+  const slot=row&&row.querySelector(".row-actions");
+  if(!slot)return;
+  slot.innerHTML=`<input type="date" class="input input--narrow" id="idea-date-${Number(id)}" min="${todayStr()}" aria-label="Day to post it"><button class="btn btn--primary btn--sm" onclick="ideaSetDate(${Number(id)},this)">Schedule</button>`;
+  const el=document.getElementById(`idea-date-${Number(id)}`);
+  if(el){el.focus();try{el.showPicker&&el.showPicker();}catch(_){}}
+}
+
+async function ideaSetDate(id,btn){
+  const el=document.getElementById(`idea-date-${Number(id)}`);
+  if(!el||!el.value){showToast("Pick a day","error");return;}
+  await _bizTap(btn,"PATCH",`/brand/ideas/${Number(id)}`,{scheduled_for:el.value});
+}
+
+/* ── Clients ── */
+async function renderClients(){
+  if(BIZ.clientId)return renderClientDetail(BIZ.clientId);
+  const [summary,clients]=await Promise.all([_bizGet("/crm/summary"),_bizGet("/clients")]);
+  const p=summary.payments||{};
+  const strip=`<div class="kpis">
+    <div class="kpi"><div class="kpi-label">Monthly recurring</div><div class="kpi-value">${_usd(summary.mrr&&summary.mrr.total_usd)}</div><div class="kpi-sub">${escHtml(_moneyBy(summary.mrr))} a month</div></div>
+    <div class="kpi"><div class="kpi-label">Outstanding</div><div class="kpi-value">${_usd(Number(p.due_usd||0)+Number(p.overdue_usd||0))}</div><div class="kpi-sub">${_usd(p.paid_30d_usd)} paid in 30 days</div></div>
+    <div class="kpi"><div class="kpi-label">Overdue</div><div class="kpi-value">${Number(p.overdue_count)>0?`<span class="red">${Number(p.overdue_count)}</span>`:"0"}</div><div class="kpi-sub">${Number(p.overdue_count)>0?_usd(p.overdue_usd)+" to chase":"Nothing overdue"}</div></div>
+    <div class="kpi"><div class="kpi-label">Weighted pipeline</div><div class="kpi-value">${_usd(summary.deals&&summary.deals.weighted_pipeline_usd)}</div><div class="kpi-sub">Open deals × probability</div></div>
+  </div>`;
+  const tone={green:"success",amber:"warn",red:"danger"};
+  const rows=clients.map(c=>{
+    const out=_moneyBy(c.outstanding), mrr=_moneyBy(c.mrr);
+    const sub=[_cap(c.status),c.open_deals?`${Number(c.open_deals)} open deal${Number(c.open_deals)>1?"s":""}`:"",c.last_contact_at?`last contact ${_day(c.last_contact_at)}`:"no contact logged"].filter(Boolean).map(escHtml).join(" · ");
+    return `<div class="row row--tap row--wrap" role="button" tabindex="0" onclick="openClient(${Number(c.id)})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openClient(${Number(c.id)})}">
+      <span class="dot ${tone[c.health]||"success"}" title="Health: ${escHtml(c.health||"green")}"></span>
+      <div class="row-main"><div class="row-title">${escHtml(c.name)}${c.company&&c.company!==c.name?` <span class="muted">· ${escHtml(c.company)}</span>`:""}</div><div class="row-sub">${sub}</div></div>
+      <span class="row-meta">${out==="—"?"Nothing owed":escHtml(out)+" owed"}${mrr==="—"?"":" · "+escHtml(mrr)+"/mo"}</span>
+    </div>`;
+  }).join("");
+  const list=`<div class="card">
+    <div class="card-head"><div class="card-title"><span>Clients</span></div><span class="badge badge--muted">${clients.length}</span></div>
+    ${clients.length?`<div class="list">${rows}</div>`:`<div class="empty">No clients yet. Convert a lead, or tell Founder OS about a client.</div>`}
+  </div>`;
+  return strip+list;
+}
+
+function openClient(id){BIZ.clientId=Number(id)||null;const c=document.getElementById("content");if(c)c.scrollTop=0;renderBusiness();}
+function closeClient(){BIZ.clientId=null;renderBusiness();}
+
+async function renderClientDetail(id){
+  let c;
+  try{c=await _bizGet(`/clients/${Number(id)}`);}
+  catch(e){BIZ.clientId=null;throw e;}
+  const tone={green:"badge--success",amber:"badge--warn",red:"badge--danger"};
+  const head=`<div><button class="btn btn--sm" onclick="closeClient()">← All clients</button></div>
+  <div class="card">
+    <div class="card-head"><div class="card-title"><span>${escHtml(c.name)}</span></div><span class="badge ${tone[c.health]||"badge--success"}">${escHtml(_cap(c.health||"green"))}</span></div>
+    <div class="cluster">
+      <span class="badge badge--muted">${escHtml(_cap(c.status))}</span>
+      ${c.company&&c.company!==c.name?`<span class="badge badge--muted">${escHtml(c.company)}</span>`:""}
+      ${_moneyBy(c.outstanding)==="—"?"":`<span class="badge badge--warn">${escHtml(_moneyBy(c.outstanding))} owed</span>`}
+      ${_moneyBy(c.mrr)==="—"?"":`<span class="badge badge--muted">${escHtml(_moneyBy(c.mrr))} a month</span>`}
+      ${(c.tags||[]).map(t=>`<span class="badge badge--purple">${escHtml(t)}</span>`).join("")}
+    </div>
+  </div>`;
+
+  const contacts=`<div class="card">
+    <div class="card-head"><div class="card-title"><span>Contacts</span></div><span class="badge badge--muted">${c.contacts.length}</span></div>
+    ${c.contacts.length?`<div class="list">${c.contacts.map(x=>`<div class="row row--wrap">
+      <div class="row-main"><div class="row-title">${escHtml(x.name)}${x.is_primary?` <span class="badge badge--glow">Primary</span>`:""}</div><div class="row-sub">${escHtml([x.role,x.email].filter(Boolean).join(" · "))}</div></div>
+      <span class="row-meta">${escHtml(x.whatsapp||x.phone||"")}</span></div>`).join("")}</div>`:`<div class="empty">No contacts on file.</div>`}
+  </div>`;
+
+  const deals=`<div class="card">
+    <div class="card-head"><div class="card-title"><span>Deals</span></div><span class="badge badge--muted">${c.deals.length}</span></div>
+    ${c.deals.length?c.deals.map(d=>{
+      const at=DEAL_PATH.indexOf(d.stage);
+      const next=d.stage==="lost"||d.stage==="won"?[]:[DEAL_PATH[at+1]].concat(d.stage==="lead"?[]:["lost"]);
+      const chip=s=>{
+        if(s===d.stage)return `<span class="chip is-on">${escHtml(_cap(s))}</span>`;
+        if(next.includes(s))return `<button class="chip" title="Move to ${escHtml(s)}" onclick="_bizTap(this,'PATCH','/deals/${Number(d.id)}',{stage:'${s}'})">${escHtml(_cap(s))} →</button>`;
+        return `<span class="chip is-dim">${escHtml(_cap(s))}</span>`;
+      };
+      return `<div class="result">
+        <div class="cluster"><b>${escHtml(d.title)}</b>${d.amount!=null?`<span class="badge badge--muted">${escHtml(_money(d.amount,d.currency))}</span>`:""}${d.probability!=null?`<span class="badge badge--muted">${Number(d.probability)}%</span>`:""}${d.expected_close?`<span class="badge badge--muted">close ${escHtml(_day(d.expected_close))}</span>`:""}</div>
+        <div class="chips mt-3">${DEAL_PATH.map(chip).join("")}${d.stage==="lost"||next.includes("lost")?chip("lost"):""}</div>
+      </div>`;}).join(""):`<div class="empty">No deals yet.</div>`}
+  </div>`;
+
+  const payTone={paid:"badge--success",due:"badge--glow",overdue:"badge--danger",cancelled:"badge--muted"};
+  const payments=`<div class="card">
+    <div class="card-head"><div class="card-title"><span>Payments</span></div><span class="badge badge--muted">${c.payments.length}</span></div>
+    ${c.payments.length?`<div class="list">${c.payments.map(p=>{
+      const open=p.status==="due"||p.status==="overdue";
+      const when=p.status==="paid"?(p.paid_at?`paid ${_day(p.paid_at)}`:"paid"):(p.due_date?`due ${_day(p.due_date)}`:"no due date");
+      return `<div class="row row--wrap">
+        <div class="row-main"><div class="row-title">${escHtml(_money(p.amount,p.currency))} <span class="muted">· ${escHtml(p.title||"Payment")}</span></div><div class="row-sub">${escHtml(when)}</div></div>
+        <span class="badge ${payTone[p.status]||"badge--muted"}">${escHtml(_cap(p.status))}</span>
+        ${open?`<div class="row-actions"><button class="btn btn--primary btn--sm" onclick="_bizTap(this,'POST','/payments/${Number(p.id)}/paid')">Paid</button></div>`:""}
+      </div>`;}).join("")}</div>`:`<div class="empty">No payments recorded.</div>`}
+  </div>`;
+
+  const comms=c.communications.slice(0,10);
+  const talk=`<div class="card">
+    <div class="card-head"><div class="card-title"><span>Recent conversations</span></div><span class="badge badge--muted">${comms.length}</span></div>
+    ${comms.length?`<div class="list">${comms.map(m=>`<div class="row row--wrap">
+      <div class="row-main"><div class="row-title wrap">${escHtml(m.summary)}</div><div class="row-sub">${escHtml(_cap(m.channel))} · ${m.direction==="in"?"from them":"from you"}</div></div>
+      <span class="row-meta">${escHtml(_day(m.occurred_at))}</span></div>`).join("")}</div>`:`<div class="empty">Nothing logged. Tell Founder OS when you speak to them.</div>`}
+  </div>`;
+  return head+`<div class="grid">${contacts}${deals}</div><div class="grid">${payments}${talk}</div>`;
+}
+
+/* ── Agents: scheduler strip, registry, one agent's run log ── */
+const AG={agents:[],jobs:null,key:null,detail:null,objectives:[]};
+
+function _ago(iso){
+  if(!iso)return "";
+  const t=new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(iso)?iso:iso+"Z");     // server times are UTC
+  const mins=Math.max(0,Math.round((Date.now()-t.getTime())/60000));
+  if(mins<1)return "just now";
+  if(mins<60)return `${mins} min ago`;
+  const h=Math.round(mins/60);
+  return h<48?`${h} h ago`:`${Math.round(h/24)} days ago`;
+}
+function _ageMinutes(iso){
+  if(!iso)return Infinity;
+  const t=new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(iso)?iso:iso+"Z");
+  return (Date.now()-t.getTime())/60000;
+}
+function _agRunBadge(status){
+  const cls=status==="completed"?"badge--success":(status==="failed"||status==="violation")?"badge--danger":status==="running"?"badge--glow":"badge--muted";
+  return `<span class="badge ${cls}">${escHtml(status||"never run")}</span>`;
+}
+function _cents(n){
+  const v=Number(n||0);
+  return v<=0?"":"$"+(v<0.01?v.toFixed(4):v.toFixed(2));
+}
+
+async function renderAgents(){
+  let agents,jobs;
+  try{
+    [agents,jobs]=await Promise.all([_bizGet("/agents"),_bizGet("/jobs/status")]);
+  }catch(_){
+    const sched=document.getElementById("ag-scheduler");
+    if(sched)sched.innerHTML=`<div class="empty">Waiting for the backend…</div>`;
+    return;
+  }
+  AG.agents=agents||[];AG.jobs=jobs;
+  _renderScheduler();
+  safeUpdate("ag-count",String(AG.agents.length));
+  const list=document.getElementById("ag-list");
+  if(list)list.innerHTML=AG.agents.length?AG.agents.map(_agentRow).join(""):`<div class="empty">No agents are registered.</div>`;
+  if(AG.key&&!document.getElementById("agent-detail").classList.contains("hidden"))loadAgentDetail(AG.key);
+}
+
+function _renderScheduler(){
+  const el=document.getElementById("ag-scheduler"), j=AG.jobs;
+  if(!el||!j)return;
+  const last=j.last_tick, age=last?_ageMinutes(last.started_at):Infinity;
+  const stale=age>60;
+  const source={github:"external schedule",in_process:"in-process",manual:"manual"}[last&&last.trigger]||"";
+  const due=(j.agents_due_now||[]).length;
+  el.innerHTML=`<div class="card-head"><div class="card-title"><span>Scheduler</span></div>${stale?`<span class="badge badge--warn">${last?"Quiet":"Not run yet"}</span>`:`<span class="badge badge--success">Running</span>`}</div>
+    <div class="cluster">
+      <span class="badge badge--muted">${last?`Last tick ${escHtml(_ago(last.started_at))}${source?" · "+escHtml(source):""}`:"No tick yet"}</span>
+      <span class="badge ${due?"badge--glow":"badge--muted"}">${due} due now</span>
+      <span class="badge badge--muted">${Number(j.ticks_24h||0)} tick${Number(j.ticks_24h)===1?"":"s"} in 24 h</span>
+      <span class="badge badge--muted">${j.in_process_scheduler?"In-process tick on":"In-process tick off"}</span>
+      <span class="badge badge--muted">${j.token_configured?"Scheduler token set":"No scheduler token"}</span>
+    </div>
+    ${stale?`<p class="hint mt-3">${last?`No tick for ${escHtml(_ago(last.started_at).replace(" ago",""))}.`:"The scheduler has not ticked yet."} Agents run every 15 minutes while the app is open; nothing runs while it is closed unless the external schedule is switched on.</p>`:""}`;
+}
+
+function _agentRow(a){
+  const last=a.last_run;
+  const sub=[a.schedule.effective,last&&last.summary?last.summary:"not run yet"].filter(Boolean).map(escHtml).join(" · ");
+  const cost=_cents(a.cost_usd_month);
+  return `<div class="row row--tap row--wrap" role="button" tabindex="0" data-key="${escHtml(a.key)}" onclick="openAgentDetail(this.dataset.key)" onkeydown="if(event.target===this&&(event.key==='Enter'||event.key===' ')){event.preventDefault();openAgentDetail(this.dataset.key)}">
+    <div class="row-main"><div class="row-title">${escHtml(a.name)} <span class="badge badge--muted">Phase ${escHtml(a.phase)}</span></div><div class="row-sub">${sub}</div></div>
+    ${_agRunBadge(last?last.status:"")}
+    ${cost?`<span class="row-meta" title="Model cost this month">${escHtml(cost)}</span>`:""}
+    <div class="row-actions">
+      <button class="toggle toggle--sm ${a.enabled?"is-on":"is-off"}" aria-pressed="${a.enabled}" data-key="${escHtml(a.key)}" onclick="event.stopPropagation();agentToggle(this.dataset.key,${!a.enabled},this)">${a.enabled?"On":"Off"}</button>
+      <button class="btn btn--sm" data-key="${escHtml(a.key)}" onclick="event.stopPropagation();agentRun(this.dataset.key,this)">Run</button>
+    </div>
+  </div>`;
+}
+
+async function agentToggle(key,enabled,btn){
+  if(btn)btn.disabled=true;
+  try{
+    const r=await fetch(`${API_BASE}/agents/${encodeURIComponent(key)}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({enabled})});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(d.detail||("HTTP "+r.status));
+    if(d.change)showChanges([d.change]);
+  }catch(e){showToast("Could not change the agent: "+e.message,"error");}
+  await renderAgents();
+}
+
+async function agentRun(key,btn){
+  if(btn){btn.disabled=true;btn.classList.add("is-loading");}
+  try{
+    const r=await fetch(`${API_BASE}/agents/${encodeURIComponent(key)}/run`,{method:"POST"});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(d.detail||("HTTP "+r.status));
+    const bad=d.status==="failed"||d.status==="violation";
+    showToast(d.summary||d.status||"Done",bad?"error":"success");
+    try{loadSuggestions();loadBriefing();}catch(_){}
+  }catch(e){showToast("Run failed: "+e.message,"error");}
+  await renderAgents();
+}
+
+function openAgentDetail(key){
+  AG.key=key||"market_intel";
+  document.getElementById("agents-registry").classList.add("hidden");
+  document.getElementById("agent-detail").classList.remove("hidden");
+  const c=document.getElementById("content");if(c)c.scrollTop=0;
+  loadAgentDetail(AG.key);
+}
+function closeAgentDetail(){
+  AG.key=null;
+  document.getElementById("agent-detail").classList.add("hidden");
+  document.getElementById("agents-registry").classList.remove("hidden");
+}
+
+async function loadAgentDetail(key){
+  let d;
+  try{d=await _bizGet(`/agents/${encodeURIComponent(key)}`);}
+  catch(_){document.getElementById("ag-detail-head").innerHTML=`<div class="empty">Could not load this agent.</div>`;return;}
+  if(AG.key!==key)return;
+  AG.detail=d;
+  const p=d.permissions||{};
+  const head=document.getElementById("ag-detail-head");
+  head.innerHTML=`<div class="card-head"><div class="card-title"><span>${escHtml(d.name)}</span></div>${_agRunBadge(d.last_run?d.last_run.status:"")}</div>
+    <p class="hint">${escHtml(d.description)}</p>
+    <div class="cluster mt-3">
+      <span class="badge badge--glow">${escHtml(d.schedule.effective)}</span>
+      ${(d.events||[]).map(e=>`<span class="badge badge--purple">on ${escHtml(e)}</span>`).join("")}
+      <span class="badge badge--muted">${Number(p.max_llm_calls)?`up to ${Number(p.max_llm_calls)} model calls a run`:"no model calls"}</span>
+      ${_cents(d.cost_usd_month)?`<span class="badge badge--muted">${escHtml(_cents(d.cost_usd_month))} this month</span>`:""}
+      <span class="badge badge--muted">${Number(d.runs_count||0)} run${Number(d.runs_count)===1?"":"s"}</span>
+    </div>
+    <div class="section-label">May write to</div>
+    <div class="chips">${(p.tables_write||[]).map(t=>`<span class="chip">${escHtml(t.replace(/_/g," "))}</span>`).join("")||`<span class="chip is-dim">nothing</span>`}</div>
+    <div class="cluster mt-5">
+      <button class="toggle toggle--sm ${d.enabled?"is-on":"is-off"}" aria-pressed="${d.enabled}" data-key="${escHtml(d.key)}" onclick="agentToggle(this.dataset.key,${!d.enabled},this)">${d.enabled?"On":"Off"}</button>
+      <button class="btn btn--primary btn--sm" data-key="${escHtml(d.key)}" onclick="agentRun(this.dataset.key,this)">Run now</button>
+    </div>`;
+  const runs=d.runs||[];
+  safeUpdate("ag-runs-badge",String(runs.length));
+  document.getElementById("ag-runs").innerHTML=runs.length?runs.map(r=>{
+    const meta=[_ago(r.started_at),r.trigger,r.duration_ms!=null?`${(Number(r.duration_ms)/1000).toFixed(1)} s`:"",_cents(r.cost_usd),r.changes_count?`${Number(r.changes_count)} change${Number(r.changes_count)===1?"":"s"}`:""].filter(Boolean).map(escHtml).join(" · ");
+    const live=(r.changes||[]).filter(c=>!c.undone);
+    return `<div class="row row--wrap">
+      <div class="row-main"><div class="row-title wrap">${escHtml(r.summary||r.status)}</div><div class="row-sub wrap">${meta}${r.error?` · ${escHtml(r.error)}`:""}</div>
+        ${(r.changes||[]).slice(0,3).map(c=>`<div class="row-sub wrap">${c.undone?"<s>":""}${escHtml(c.summary||"")}${c.undone?"</s>":""}</div>`).join("")}</div>
+      ${_agRunBadge(r.status)}
+      ${live.length?`<div class="row-actions"><button class="btn btn--sm" onclick="agentUndoRun(${Number(r.id)},this)">Undo</button></div>`:""}
+    </div>`;}).join(""):`<div class="empty">This agent has not run yet.</div>`;
+
+  const mi=document.getElementById("ag-mi-detail");
+  mi.classList.toggle("hidden",key!=="market_intel");
+  if(key==="market_intel")loadResearch();
+}
+
+async function agentUndoRun(id,btn){
+  if(btn){btn.disabled=true;btn.classList.add("is-loading");}
+  try{
+    const r=await fetch(`${API_BASE}/agents/runs/${Number(id)}/undo`,{method:"POST"});
+    if(!r.ok)throw new Error((await r.json().catch(()=>({}))).detail||("HTTP "+r.status));
+    const d=await r.json().catch(()=>({}));
+    showToast("Run undone"+(d.note?". "+d.note:""),"info");
+    _afterWriteRefresh();
+  }catch(e){showToast("Undo failed: "+e.message,"error");}
+  await renderAgents();
+}
+
+/* ── Market intelligence: objectives, projects, pipeline, lessons ── */
+async function loadResearch(){
+  try{
+    const [pr,pl,mem,obj]=await Promise.all([_bizGet("/research/projects"),_bizGet("/research/pipeline"),_bizGet("/research/memory"),_bizGet("/research/objectives")]);
+    _agData={projects:pr||[],pipeline:pl||[],memory:mem||[]};
+    AG.objectives=obj||[];
+  }catch(_){return;}
+  safeUpdate("ag-mi-runs",String(_agData.projects.length));
+  safeUpdate("ag-mi-findings",String(_agData.projects.reduce((s,p)=>s+(p.finding_count||0),0)));
+  safeUpdate("ag-mi-pipeline",String(_agData.pipeline.length));
+  safeUpdate("ag-mi-lessons",String(_agData.memory.length));
+  safeUpdate("ag-obj-badge",String(AG.objectives.length));
+  const host=document.getElementById("ag-objectives");
+  if(host)host.innerHTML=AG.objectives.length?AG.objectives.map(o=>`<div class="row row--wrap">
+      <div class="row-main"><div class="row-title wrap">${escHtml(o.objective)}</div><div class="row-sub">every ${Number(o.cadence_days)} days · ${o.last_run_at?`last run ${escHtml(_ago(o.last_run_at))}`:"never run"}</div></div>
+      ${o.due?`<span class="badge badge--warn">Due</span>`:""}
+      <div class="row-actions">
+        <button class="toggle toggle--sm ${o.enabled?"is-on":"is-off"}" aria-pressed="${o.enabled}" onclick="objectiveToggle(${Number(o.id)},${!o.enabled},this)">${o.enabled?"On":"Off"}</button>
+        <button class="btn btn--sm" onclick="objectiveRun(${Number(o.id)},this)">Run</button>
+      </div>
+    </div>`).join(""):`<div class="empty">No standing objectives yet.</div>`;
+  renderAgentDetail();
+}
+
+async function objectiveToggle(id,enabled,btn){
+  if(btn)btn.disabled=true;
+  try{
+    const r=await fetch(`${API_BASE}/research/objectives/${Number(id)}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({enabled})});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(d.detail||("HTTP "+r.status));
+    if(d.change)showChanges([d.change]);
+  }catch(e){showToast("Could not change the objective: "+e.message,"error");}
+  await loadResearch();
+}
+
+async function objectiveRun(id,btn){
+  if(btn){btn.disabled=true;btn.classList.add("is-loading");}
+  showToast("Research is running. It takes up to a minute or two.","info");
+  try{
+    const r=await fetch(`${API_BASE}/research/objectives/${Number(id)}/run`,{method:"POST"});
+    const d=await r.json().catch(()=>({}));
+    if(r.status===503)throw new Error("research needs the AI key, which is not set");
+    if(!r.ok)throw new Error(d.detail||("HTTP "+r.status));
+    if(d.error)throw new Error(d.error);
+    const n=(d.opportunities||[]).length, seen=(d.repeated||[]).length;
+    showToast(`${n} new finding${n===1?"":"s"}${seen?`, ${seen} seen before`:""}`,"success");
+    showChanges(d.changes||[]);
+  }catch(e){showToast("Research did not run: "+e.message,"error");}
+  Object.keys(_agProjCache).forEach(k=>delete _agProjCache[k]);
+  await loadResearch();
+}
+
+async function dismissFinding(id,btn){
+  if(btn){btn.disabled=true;btn.classList.add("is-loading");}
+  try{
+    const r=await fetch(`${API_BASE}/research/findings/${Number(id)}/dismiss`,{method:"POST"});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(d.detail||("HTTP "+r.status));
+    if(d.change)showChanges([d.change]);
+    showToast("Finding dismissed","info");
+    const open=[..._agOpen];
+    Object.keys(_agProjCache).forEach(k=>delete _agProjCache[k]);
+    await Promise.all(open.map(async pid=>{try{_agProjCache[pid]=await _bizGet(`/research/projects/${pid}`);}catch(_){}}));
+    await loadResearch();
+    try{loadBriefing();}catch(_){}
+  }catch(e){showToast("Dismiss failed: "+e.message,"error");}
+}
+
+/* ═══════════════════════════════════════════════════
+   APPLICATIONS — deadlines, requirements, gaps
+   Dates here come from Bandile or from text he pasted, never from the model.
+═══════════════════════════════════════════════════ */
+const REQ_TONE={missing:"danger",in_progress:"warn",ready:"blue",submitted:"success",not_required:""};
+const REQ_LABEL={missing:"Missing",in_progress:"In progress",ready:"Ready",submitted:"Submitted",not_required:"Not required"};
+
+function openApplicationsTile(){
+  nav("applications",document.querySelector(`.nav-item[onclick*="nav('applications'"]`));
+}
+
+async function renderApplications(){
+  const host=document.getElementById("apps-body");
+  if(!host)return;
+  let apps;
+  try{
+    const list=await _bizGet("/applications");
+    apps=await Promise.all(list.map(a=>_bizGet(`/applications/${Number(a.id)}`)));
+  }catch(_){
+    if(!host.dataset.ready)host.innerHTML=`<div class="card"><div class="empty">Waiting for the backend…</div></div>`;
+    return;
+  }
+  host.dataset.ready="1";
+  safeUpdate("apps-count",apps.length?`${apps.length} application${apps.length>1?"s":""}`:"None yet");
+  host.innerHTML=apps.length?apps.map(_applicationCard).join(""):`<div class="card"><div class="empty">No applications yet. Tell Founder OS what you are applying for, for example <b>add Wharton, deadline 1 January</b>, then paste its requirements page.</div></div>`;
+}
+
+function _applicationCard(a){
+  const id=Number(a.id), t=a.timeline||{}, c=t.requirements||{};
+  const days=t.days_to_deadline;
+  const source={user:"you gave this date",document:"from the requirements you pasted"}[a.deadline_source]||"";
+  const countdown=a.deadline==null?"Unknown":days<0?`${-days}d overdue`:`${days}<small>day${days===1?"":"s"}</small>`;
+  const total=Number(t.requirements_total||0), done=Number(c.ready||0)+Number(c.submitted||0);
+  const pct=total?Math.round(100*done/total):0;
+  const statusTone={researching:"badge--muted",preparing:"badge--glow",submitted:"badge--success",interview:"badge--purple",accepted:"badge--success",rejected:"badge--danger",withdrawn:"badge--muted"};
+  const reqs=a.requirements||[], gaps=a.gaps||[];
+  const sevTone={high:"badge--danger",medium:"badge--warn",low:"badge--muted"};
+  return `<div class="card" id="app-${id}">
+    <div class="card-head"><div class="card-title"><span>${escHtml(a.name)}</span></div>
+      <div class="cluster">${t.at_risk?`<span class="badge badge--danger">At risk</span>`:""}<span class="badge ${statusTone[a.status]||"badge--muted"}">${escHtml(_cap(a.status))}</span></div></div>
+    ${a.institution||a.programme?`<p class="hint">${escHtml([a.institution,a.programme].filter(Boolean).join(" · "))}</p>`:""}
+    <div class="kpis mt-3">
+      <div class="kpi"><div class="kpi-label">Deadline</div><div class="kpi-value">${a.deadline!=null&&days<0?`<span class="red">${countdown}</span>`:countdown}</div>
+        <div class="kpi-sub wrap">${a.deadline==null?"Tell Founder OS the date, or paste the requirements":escHtml(new Date(a.deadline+"T00:00:00").toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"}))+(source?" · "+escHtml(source):"")}</div></div>
+      <div class="kpi"><div class="kpi-label">Ready</div><div class="kpi-value">${done}<small>of ${total}</small></div>
+        <div class="bar"><div class="bar-fill" style="width:${pct}%"></div></div></div>
+    </div>
+    <div class="section-label mt-5">Requirements${total?` · ${Number(c.missing||0)} missing · ${Number(c.in_progress||0)} in progress`:""}</div>
+    ${reqs.length?`<div class="list">${reqs.map(r=>{
+      const rid=Number(r.id);
+      const sub=[_cap(r.kind),r.details||"",r.due_date?`due ${_day(r.due_date)}`:""].filter(Boolean).map(escHtml).join(" · ");
+      return `<div class="row row--tap row--wrap" role="button" tabindex="0" title="Tap to move to the next state" onclick="_bizTap(null,'POST','/requirements/${rid}/advance',null,renderApplications)" onkeydown="if(event.target===this&&(event.key==='Enter'||event.key===' ')){event.preventDefault();this.click()}">
+        <span class="dot ${REQ_TONE[r.status]||""}"></span>
+        <div class="row-main"><div class="row-title wrap">${escHtml(r.title)}</div>${sub?`<div class="row-sub wrap">${sub}</div>`:""}</div>
+        <span class="row-meta">${escHtml(REQ_LABEL[r.status]||r.status)}</span>
+        <div class="row-actions">${r.todo_id?`<span class="badge badge--muted">Has a task</span>`:(r.status==="missing"||r.status==="in_progress"?`<button class="btn btn--sm" onclick="event.stopPropagation();_bizTap(this,'POST','/requirements/${rid}/todo',null,renderApplications)">Make it a task</button>`:"")}</div>
+      </div>`;}).join("")}</div>`:`<div class="empty">No requirements yet. Paste the requirements page into the talk bar and Founder OS will build the checklist.</div>`}
+    <div class="section-label mt-5">Open gaps · ${gaps.length}</div>
+    ${gaps.length?`<div class="list">${gaps.map(g=>`<div class="row row--wrap">
+        <div class="row-main"><div class="row-title wrap">${escHtml(g.gap)}</div>
+          ${g.evidence?`<div class="row-sub wrap">${escHtml(g.evidence)}</div>`:""}
+          ${g.suggested_action?`<div class="row-sub wrap">Next: ${escHtml(g.suggested_action)}</div>`:""}</div>
+        <span class="badge ${sevTone[g.severity]||"badge--muted"}">${escHtml(g.severity)}</span>
+        <div class="row-actions">
+          <button class="btn btn--sm" onclick="_bizTap(this,'PATCH','/gaps/${Number(g.id)}',{status:'addressed'},renderApplications)">Addressed</button>
+          <button class="btn btn--ghost btn--sm" onclick="_bizTap(this,'PATCH','/gaps/${Number(g.id)}',{status:'accepted_risk'},renderApplications)">Accept risk</button>
+        </div>
+      </div>`).join("")}</div>`:`<div class="empty">${a.gaps_reviewed_at?"No open gaps from the last review.":"Not reviewed yet."}</div>`}
+    <div class="cluster mt-3">
+      <button class="btn btn--sm" onclick="refreshGapReview(${id},this)">Refresh review</button>
+      <span class="hint">${a.gaps_reviewed_at?`Reviewed ${escHtml(_ago(a.gaps_reviewed_at))}. This is Founder OS's reading of your notes and progress.`:"The review reads your requirements, profile, syllabus progress and notes."}</span>
+    </div>
+  </div>`;
+}
+
+async function refreshGapReview(id,btn){
+  if(btn){btn.disabled=true;btn.classList.add("is-loading");}
+  try{
+    const r=await fetch(`${API_BASE}/applications/${Number(id)}/gaps?refresh=1`);
+    const d=await r.json().catch(()=>({}));
+    if(r.status===503)throw new Error("the review needs the AI key, which is not set");
+    if(!r.ok)throw new Error(d.detail||("HTTP "+r.status));
+    const n=(d.gaps||[]).length;
+    showToast(n?`${n} open gap${n>1?"s":""} found`:"No gaps found","success");
+  }catch(e){showToast("Review did not run: "+e.message,"error");}
+  await renderApplications();
+  try{loadBriefing();}catch(_){}
+}
+
 function renderGuide(){
   const cs=getComputedStyle(document.documentElement);
   const v=n=>cs.getPropertyValue(n).trim();
@@ -3695,6 +4790,7 @@ renderHeader();
   const fallback=new Promise(res=>setTimeout(res,1500));
   await Promise.race([syncPromise,fallback]);
   initialRender();
+  handleReturnHash();
   syncPromise.then(()=>{try{renderPage(getActivePageName());}catch(_){}});
   // Entrance animations are scoped to .page.fade-up — drop the flag after boot
   // so the 30s background sync never replays them.

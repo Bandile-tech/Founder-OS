@@ -47,8 +47,8 @@ Read with: `CLAUDE.md` (architecture), `docs/REBUILD_HANDOFF.md` (endpoint shape
 - **Model comes from config, never a literal.** `llm.assistant_model()` (env
   `ASSISTANT_MODEL`, default `gpt-5.4-mini`), `llm.embedding_model()`. Passing
   `model=` explicitly is allowed only for a cheaper or different-class model and must
-  still be an env-driven value. (`market_intel/agent.py` still hardcodes
-  `MODEL = "gpt-4o-mini"` — the Phase 5A spec removes that.)
+  still be an env-driven value (`llm.research_model()`, env `RESEARCH_MODEL`, is the
+  market-intelligence example).
 - **`purpose` is a short snake_case tag** and is how `GET /usage/summary` and the cost
   tables in the specs are read. Existing purposes: `assistant`, `parse`, `chat`,
   `conversation_summary`, `briefing_summary`, `proactive_brief`, `embed_vault`,

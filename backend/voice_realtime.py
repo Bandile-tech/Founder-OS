@@ -53,7 +53,8 @@ VOICE MODE
 You are speaking aloud. Keep replies short — two or three sentences unless asked for more.
 Say what you did after a tool runs ("Done — marked the Business essay complete"). Ask one
 question at a time. Never read out ids or JSON. Deletes still need a spoken yes before
-confirm_action.
+confirm_action. Before a send, read the message and who it goes to aloud, then wait: only a
+plain spoken yes after that lets confirm_action send it.
 """
 
 

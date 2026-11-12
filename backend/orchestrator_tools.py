@@ -13,11 +13,12 @@ These tools reuse the existing, audited application logic (``apply_parse_updates
 
 import os
 import json
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from sqlalchemy import func
 
 import models
+import user_clock
 
 _RULES_PATH = os.path.join(
     os.path.dirname(__file__), "..", "context", "core", "off_track_rules.json"
@@ -37,11 +38,11 @@ def route_brain_dump(db, text: str):
     import assistant_state as st
 
     context = {
-        "today": str(date.today()),
+        "today": str(user_clock.today()),
         "non_negotiables": [(n.key, n.label) for n in st.active_non_negotiables(db)],
     }
     parsed = main.get_parse_response(text, context)
-    updates = main.apply_parse_updates(db, parsed, date.today())
+    updates = main.apply_parse_updates(db, parsed, user_clock.today())
 
     summary = parsed.get("summary") or "Entry logged."
     result = {"summary": summary}
@@ -68,7 +69,7 @@ def get_dashboard_state(db):
     import syllabus
     import assistant_state as st
 
-    today = date.today()
+    today = user_clock.today()
     open_todos = db.query(models.Todo).filter(models.Todo.done == False).all()  # noqa: E712
     overdue = sum(1 for t in open_todos if t.due_date and t.due_date < today)
     due_today = sum(1 for t in open_todos if t.due_date == today)
@@ -118,7 +119,7 @@ def _load_rules() -> list:
 def _check_no_revenue_since(db, params) -> bool:
     """True (fires) when no revenue exists in the trailing window, but only once we are
     past ``after_date`` (so the alert can't fire before the first-revenue phase opens)."""
-    today = date.today()
+    today = user_clock.today()
     after = date.fromisoformat(params.get("after_date", "2026-06-01"))
     if today < after:
         return False
@@ -134,7 +135,7 @@ def _check_non_negotiable_completion_below(db, params) -> bool:
     import assistant_state as st
     threshold = float(params.get("threshold_pct", 60))
     window = int(params.get("window_days", 7))
-    today = date.today()
+    today = user_clock.today()
     floor = today - timedelta(days=window - 1)
     c = st.routine_completion(db, floor, today, only_days_with_data=True)
     if not c["has_data"] or not c["possible"]:
@@ -165,7 +166,7 @@ def _check_syllabus_weak_before_exam(db, params) -> bool:
     import syllabus
     days = int(params.get("days", 60))
     min_topics = int(params.get("min_topics", 1))
-    today = date.today()
+    today = user_clock.today()
     weak = 0
     for p in db.query(models.SyllabusPoint).filter(
             models.SyllabusPoint.status.in_(["not_started", "learned"])).all():
@@ -231,12 +232,12 @@ def synthesize_weekly_review(db, week_start: str | None = None):
     if week_start:
         start = date.fromisoformat(week_start)
     else:
-        today = date.today()
+        today = user_clock.today()
         start = today - timedelta(days=today.weekday())   # Monday of current week
     end = start + timedelta(days=6)
     start_dt = datetime_min(start)
     end_dt = datetime_max(end)
-    last_day = min(end, date.today()) if start <= date.today() else end
+    last_day = min(end, user_clock.today()) if start <= user_clock.today() else end
 
     # SHIPPED — tasks completed, syllabus topics revised, non-negotiables kept this week
     shipped = [f"Completed: {t.text}" for t in db.query(models.Todo).filter(
@@ -350,7 +351,7 @@ def add_todos(db, items: list, category: str = "personal", priority: int = 5):
     Never called for advisory or query responses. Source is always "orchestrator".
     """
     import change_log
-    today = str(date.today())
+    today = str(user_clock.today())
     created = []
     for text in items:
         todo = models.Todo(
@@ -419,10 +420,12 @@ def run_market_research_agent(db, objective: str, max_opportunities: int = 3):
     if result.get("error"):
         return result, result["error"]
     n = len(result.get("opportunities", []))
+    repeated = len(result.get("repeated") or [])
     summary = (
         f"{n} opportunit{'y' if n == 1 else 'ies'} surfaced "
-        f"({result.get('rejected_count', 0)} rejected by verifier) — "
-        f"project #{result.get('project_id')}"
+        f"({result.get('rejected_count', 0)} rejected by verifier"
+        + (f", {repeated} seen before" if repeated else "")
+        + f") — project #{result.get('project_id')}"
     )
     return result, summary
 
@@ -456,10 +459,18 @@ def promote_research_opportunity(db, finding_id: int, notes: str = None):
             "already_promoted": True,
         }, summary
 
-    entry = models.OpportunityPipeline(finding_id=finding.id, stage="discovered", notes=notes)
-    finding.status = "promoted"
-    db.add(entry)
-    db.commit()
+    import change_log
+    with change_log.batch_scope(db, "assistant"):
+        before = change_log.snapshot(finding)
+        entry = models.OpportunityPipeline(finding_id=finding.id, stage="discovered", notes=notes)
+        finding.status = "promoted"
+        finding.reviewed_at = datetime.utcnow()
+        db.add(entry)
+        changes = [
+            change_log.record_update(db, finding, before, f"Promoted: {finding.problem[:70]}"),
+            change_log.record_create(db, entry, f"Added to the pipeline: {finding.problem[:60]}"),
+        ]
+        db.commit()
     db.refresh(entry)
 
     summary = f"finding {finding.id} promoted to pipeline (discovered)"
@@ -469,6 +480,7 @@ def promote_research_opportunity(db, finding_id: int, notes: str = None):
         "stage": entry.stage,
         "problem": finding.problem,
         "already_promoted": False,
+        "changes": [c for c in changes if c],
     }
     return result, summary
 
@@ -503,7 +515,7 @@ def confirm_action(db, pending_id: int):
     result = actions.confirm_action(db, int(pending_id))
     if result.get("executed"):
         return result, f"done: {result['summary']}"
-    return result, f"not executed: {result.get('reason', 'unknown')}"
+    return result, f"not executed: {result.get('reason') or result.get('error') or 'unknown'}"
 
 
 def cancel_action(db, pending_id: int):
@@ -535,7 +547,7 @@ def complete_task(db, query: str | None = None, todo_id: int | None = None):
             return {"id": todo.id, "text": todo.text, "already_done": True}, f"'{todo.text}' was already done"
         before = change_log.snapshot(todo)
         todo.done = True
-        todo.completed_at = date.today()
+        todo.completed_at = user_clock.today()
         change = change_log.record_update(db, todo, before, f"Completed task: {todo.text[:80]}")
         db.commit()
         return {"id": todo.id, "text": todo.text, "completed": True, "change": change}, f"completed '{todo.text}'"
@@ -626,7 +638,7 @@ def deadlines_report(db, days: int = 14):
 def get_deadlines(db, days: int = 14):
     """Overdue and upcoming tasks (by real due date) plus exams within the window."""
     import syllabus
-    today = date.today()
+    today = user_clock.today()
     horizon = today + timedelta(days=int(days))
     open_todos = db.query(models.Todo).filter(models.Todo.done == False).all()
 
@@ -891,7 +903,7 @@ def _readable(name: str, result):
     if name == "update_syllabus":
         if result.get("matched"):
             text = f"{_topic_label(result)} is now {st.STATUS_WORDS.get(result['status'], result['status'])}."
-            if result.get("last_revised") == date.today().isoformat():
+            if result.get("last_revised") == user_clock.today().isoformat():
                 text += " Marked as revised today."
             return {"updated": text}
         if result.get("ambiguous"):
@@ -914,7 +926,13 @@ def _readable(name: str, result):
                 "next step": "Ask Bandile to confirm in plain words. Call confirm_action only after he says yes."}
     if name == "confirm_action":
         if result.get("executed"):
-            return {"done": result["summary"]}
+            shaped = {"done": result["summary"]}
+            if result.get("open_url"):
+                shaped["open link"] = result["open_url"]
+                shaped["next step"] = "Tell Bandile to tap the link to open WhatsApp and send it."
+            if result.get("undoable") is False:
+                shaped["undo"] = "A sent message cannot be undone. Say so; do not offer to undo it."
+            return shaped
         return {"not done": f"{result['summary']} — {result.get('reason', 'not executed')}"}
     if name == "cancel_action":
         return {"cancelled": result["summary"]}
@@ -1189,7 +1207,11 @@ TOOL_SCHEMAS = [
                     "table": {
                         "type": "string",
                         "enum": ["todos", "notes", "revenue", "ai_memory", "books",
-                                 "daily_bible_log", "clients", "lift_logs", "daily_logs"],
+                                 "daily_bible_log", "clients", "lift_logs", "daily_logs",
+                                 "leads", "outreach_messages", "contacts", "deals", "projects",
+                                 "payments", "recurring_revenue", "communications",
+                                 "project_updates", "applications", "application_requirements",
+                                 "content_ideas"],
                         "description": "Which table the record lives in.",
                     },
                     "record_id": {"type": "integer", "description": "The record's id."},
@@ -1412,3 +1434,1591 @@ TOOL_SCHEMAS = [
         },
     },
 ]
+
+
+# ════════════════════════════════════════════════════════════════
+# Phase 5 and 6 tools
+#
+# Registered here, after the rebuild's tools, so the earlier schema list stays
+# byte-stable. Each tool is a thin wrapper over its module's primitives.
+# ════════════════════════════════════════════════════════════════
+
+def _register(name: str, fn, description: str, properties: dict | None = None,
+              required: list | None = None) -> None:
+    """Add a tool to the dispatch table and the schema list in one place."""
+    _TOOL_DISPATCH[name] = fn
+    parameters = {"type": "object", "properties": properties or {}}
+    if required:
+        parameters["required"] = required
+    TOOL_SCHEMAS.append({"type": "function", "function": {
+        "name": name, "description": description, "parameters": parameters}})
+
+
+def _str(description: str, enum: list | None = None) -> dict:
+    out = {"type": "string", "description": description}
+    if enum:
+        out["enum"] = enum
+    return out
+
+
+def _int(description: str) -> dict:
+    return {"type": "integer", "description": description}
+
+
+def _num(description: str) -> dict:
+    return {"type": "number", "description": description}
+
+
+def _candidates(scored, label) -> list:
+    return [{"id": row.id, "name": label(row)} for _score, row in scored[:3]]
+
+
+# ── 5B: prospecting ──────────────────────────────────────────
+
+_LEAD_FIELDS = ("name", "company", "role", "email", "phone", "whatsapp", "linkedin_url",
+                "website", "location", "segment", "notes")
+
+
+def _lead_brief(lead) -> dict:
+    return {"id": lead.id, "name": lead.name, "company": lead.company, "segment": lead.segment,
+            "status": lead.status, "qualification_score": lead.qualification_score,
+            "email": lead.email, "whatsapp": lead.whatsapp or lead.phone,
+            "location": lead.location, "next_follow_up": lead.next_follow_up_at}
+
+
+def add_lead(db, **fields):
+    """Create a lead, or update the one the details already describe."""
+    import change_log
+    import leads
+    with change_log.batch_scope(db, "assistant"):
+        try:
+            lead, deduped, change = leads.create_lead(
+                db, {k: v for k, v in fields.items() if k in _LEAD_FIELDS}, source="conversation")
+        except ValueError as exc:
+            return {"error": str(exc)}, str(exc)
+        db.commit()
+    result = {**_lead_brief(lead), "deduped": deduped, "change": change}
+    return result, (f"updated lead {lead.name}" if deduped else f"added lead {lead.name}")
+
+
+def find_leads(db, query: str | None = None, segment: str | None = None,
+               status: str | None = None, limit: int = 10):
+    """Read-only list of leads for the model."""
+    import leads
+    rows = leads.find_leads(db, query=query, segment=segment, status=status, limit=limit)
+    return ({"leads": [_lead_brief(l) for l in rows], "count": len(rows)},
+            f"{len(rows)} lead(s) found")
+
+
+_register(
+    "add_lead", lambda db, a: add_lead(db, **{k: a.get(k) for k in _LEAD_FIELDS if a.get(k)}),
+    "Add a prospect to the lead database, or update the lead the details already describe. "
+    "ONLY when Bandile names a person or business he intends to approach.",
+    {
+        "name": _str("The person's or business's name."),
+        "company": _str("Business name, if the lead is a person."),
+        "role": _str("Their role, e.g. owner."),
+        "email": _str("Email address."),
+        "phone": _str("Phone number as given."),
+        "whatsapp": _str("WhatsApp number if different from the phone."),
+        "linkedin_url": _str("LinkedIn profile URL."),
+        "website": _str("Website."),
+        "location": _str("Town or area."),
+        "segment": _str("Free-text segment, e.g. 'lusaka pharmacies'."),
+        "notes": _str("Anything else Bandile said about them."),
+    },
+    ["name"],
+)
+
+_register(
+    "find_leads",
+    lambda db, a: find_leads(db, query=a.get("query"), segment=a.get("segment"),
+                             status=a.get("status"), limit=int(a.get("limit", 10))),
+    "List leads from the prospect database. Read-only.",
+    {
+        "query": _str("Part of a name or company."),
+        "segment": _str("Segment to filter by."),
+        "status": _str("Lead status.", ["new", "qualified", "disqualified", "contacted",
+                                         "replied", "converted", "lost"]),
+        "limit": _int("How many to return (default 10)."),
+    },
+)
+
+
+# ── 5C: clients, deals, communications ───────────────────────
+
+def _ambiguous(kind: str, fragment: str, scored, label):
+    return ({"ambiguous": True, "candidates": _candidates(scored, label)},
+            f"{len(scored)} {kind}s could match '{fragment}' — ask which")
+
+
+def _client_label(c) -> str:
+    return f"{c.name} ({c.company})" if c.company and c.company != c.name else c.name
+
+
+def crm_lookup(db, query: str, kind: str = "any"):
+    """Read-only lookup of a client, contact, deal or project by name."""
+    import crm
+    kind = kind if kind in ("client", "contact", "deal", "project", "any") else "any"
+    candidates = []
+    if kind in ("client", "any"):
+        client, scored = crm.find_client(db, query)
+        if client is not None:
+            return {"kind": "client", "client": crm.client_detail(db, client)}, f"client {client.name}"
+        candidates += [{"kind": "client", "id": c.id, "name": _client_label(c)} for _s, c in scored[:3]]
+    if kind in ("deal", "any"):
+        deal, scored = crm.find_deal(db, query)
+        if deal is not None:
+            return {"kind": "deal", "deal": crm.serialize_deal(db, deal)}, f"deal {deal.title}"
+        candidates += [{"kind": "deal", "id": d.id, "name": d.title} for _s, d in scored[:3]]
+    if kind in ("project", "any"):
+        project, scored = crm.find_project(db, query)
+        if project is not None:
+            return {"kind": "project", "project": crm.serialize_project(db, project)}, f"project {project.title}"
+        candidates += [{"kind": "project", "id": p.id, "name": p.title} for _s, p in scored[:3]]
+    if kind in ("contact", "any"):
+        contact, scored = crm.find_contact(db, query)
+        if contact is not None:
+            client = db.query(models.Client).filter(models.Client.id == contact.client_id).first()
+            return ({"kind": "contact", "contact": crm.serialize_contact(contact),
+                     "client_name": client.name if client else None}, f"contact {contact.name}")
+        candidates += [{"kind": "contact", "id": c.id, "name": c.name} for _s, c in scored[:3]]
+    if candidates:
+        return {"ambiguous": True, "candidates": candidates}, f"{len(candidates)} records could match '{query}'"
+    return {"found": False, "query": query}, f"nothing in the CRM matches '{query}'"
+
+
+def log_communication(db, who: str, summary: str, channel: str = "whatsapp",
+                      direction: str = "out", when: str | None = None):
+    """Log a conversation with a client, or with a lead when no client matches."""
+    import business_common
+    import change_log
+    import crm
+    import leads
+    occurred = None
+    if when:
+        day = business_common.parse_day(when, past=True)
+        if day is None:
+            return {"error": f"could not read the date '{when}'"}, f"could not read the date '{when}'"
+        if day != user_clock.today():
+            occurred = datetime(day.year, day.month, day.day, 12, 0, 0)
+    client, client_scored = crm.find_client(db, who)
+    lead = None
+    if client is None:
+        if client_scored:
+            return _ambiguous("client", who, client_scored, _client_label)
+        lead, lead_scored = leads.pick_lead(db, who)
+        if lead is None:
+            if lead_scored:
+                return _ambiguous("lead", who, lead_scored, lambda l: l.name)
+            return {"error": f"no client or lead matches '{who}'"}, f"no client or lead matches '{who}'"
+    with change_log.batch_scope(db, "assistant"):
+        try:
+            result = crm.log_communication(db, client=client, lead=lead, channel=channel,
+                                           direction=direction, summary=summary,
+                                           occurred_at=occurred, source="conversation")
+        except ValueError as exc:
+            return {"error": str(exc)}, str(exc)
+        db.commit()
+    return result, f"logged {result['channel']} with {result['with']}"
+
+
+def update_deal(db, deal: str | None = None, client: str | None = None, stage: str | None = None,
+                amount: float | None = None, currency: str | None = None,
+                expected_close: str | None = None, lost_reason: str | None = None,
+                create: bool = False):
+    """Update a deal, or create it when ``create`` is true and nothing matches."""
+    import business_common
+    import change_log
+    import crm
+    close = None
+    if expected_close:
+        close = business_common.parse_day(expected_close)
+        if close is None:
+            msg = f"could not read the date '{expected_close}'"
+            return {"error": msg}, msg
+    owner = None
+    if client:
+        owner, scored = crm.find_client(db, client)
+        if owner is None:
+            if scored:
+                return _ambiguous("client", client, scored, _client_label)
+            return {"error": f"no client matches '{client}'"}, f"no client matches '{client}'"
+    found, scored = crm.find_deal(db, deal, owner) if deal else (None, [])
+    if found is None and owner is not None and not deal and not create:
+        open_deals = db.query(models.Deal).filter(
+            models.Deal.client_id == owner.id, models.Deal.stage.notin_(("won", "lost"))).all()
+        if len(open_deals) == 1:
+            found = open_deals[0]
+        elif open_deals:
+            scored = [(1.0, d) for d in open_deals]
+    with change_log.batch_scope(db, "assistant"):
+        try:
+            if found is not None:
+                result = crm.update_deal(db, found, stage=stage, amount=amount, currency=currency,
+                                         expected_close=close, lost_reason=lost_reason)
+                verb = "updated"
+            elif scored and not create:
+                return _ambiguous("deal", deal or client or "", scored, lambda d: d.title)
+            elif create:
+                if owner is None:
+                    msg = "a new deal needs a client that is already on file"
+                    return {"error": msg}, msg
+                result = crm.create_deal(db, owner, deal or f"{owner.name} deal", amount, currency,
+                                         stage=stage or "lead", expected_close=close)
+                verb = "created"
+            else:
+                msg = f"no deal matches '{deal or client or ''}'"
+                return {"error": msg}, msg
+        except ValueError as exc:
+            return {"error": str(exc)}, str(exc)
+        db.commit()
+    summary = f"deal '{result['title']}' {verb} — {result['stage']}"
+    if result.get("project"):
+        summary += f"; project '{result['project']['title']}' created"
+    return result, summary
+
+
+def add_contact(db, client: str, name: str, role: str | None = None, email: str | None = None,
+                phone: str | None = None, whatsapp: str | None = None, is_primary: bool = False):
+    import change_log
+    import crm
+    owner, scored = crm.find_client(db, client)
+    if owner is None:
+        if scored:
+            return _ambiguous("client", client, scored, _client_label)
+        return {"error": f"no client matches '{client}'"}, f"no client matches '{client}'"
+    with change_log.batch_scope(db, "assistant"):
+        try:
+            result = crm.add_contact(db, owner, name=name, role=role, email=email, phone=phone,
+                                     whatsapp=whatsapp, is_primary=bool(is_primary))
+        except ValueError as exc:
+            return {"error": str(exc)}, str(exc)
+        db.commit()
+    return result, f"added contact {result['name']} at {owner.name}"
+
+
+_register(
+    "crm_lookup", lambda db, a: crm_lookup(db, query=a.get("query", ""), kind=a.get("kind", "any")),
+    "Look up a client, contact, deal or project by name. Read-only. Returns the full record "
+    "for one clear match and candidates otherwise.",
+    {"query": _str("Name or part of it."),
+     "kind": _str("What to look for (default any).", ["client", "contact", "deal", "project", "any"])},
+    ["query"],
+)
+
+_register(
+    "log_communication",
+    lambda db, a: log_communication(db, who=a.get("who", ""), summary=a.get("summary", ""),
+                                    channel=a.get("channel", "whatsapp"),
+                                    direction=a.get("direction", "out"), when=a.get("when")),
+    "Record a conversation Bandile had with a client (or a lead): a call, meeting, message. "
+    "ONLY when he states that it happened.",
+    {"who": _str("Client or lead name, or part of it."),
+     "summary": _str("One or two lines on what was said."),
+     "channel": _str("How (default whatsapp).", ["whatsapp", "email", "call", "meeting", "linkedin", "other"]),
+     "direction": _str("out when Bandile reached out, in when they did (default out).", ["out", "in"]),
+     "when": _str("When it happened, e.g. 'yesterday', '12 May'. Default now.")},
+    ["who", "summary"],
+)
+
+_register(
+    "update_deal",
+    lambda db, a: update_deal(db, deal=a.get("deal"), client=a.get("client"), stage=a.get("stage"),
+                              amount=a.get("amount"), currency=a.get("currency"),
+                              expected_close=a.get("expected_close"), lost_reason=a.get("lost_reason"),
+                              create=bool(a.get("create", False))),
+    "Change a deal's stage, amount or expected close date. ONLY when Bandile states the "
+    "change; never move a stage on your own assessment. Set create true only when he "
+    "explicitly describes a new deal (the client must already exist).",
+    {"deal": _str("Deal title, part of it, or its id."),
+     "client": _str("The client the deal belongs to."),
+     "stage": _str("New stage.", ["lead", "proposal", "negotiation", "won", "lost"]),
+     "amount": _num("Deal amount."),
+     "currency": _str("ZMW or USD (default ZMW)."),
+     "expected_close": _str("Expected close date as he said it."),
+     "lost_reason": _str("Why it was lost."),
+     "create": {"type": "boolean", "description": "Create the deal when none matches."}},
+)
+
+_register(
+    "add_contact",
+    lambda db, a: add_contact(db, client=a.get("client", ""), name=a.get("name", ""), role=a.get("role"),
+                              email=a.get("email"), phone=a.get("phone"), whatsapp=a.get("whatsapp"),
+                              is_primary=bool(a.get("is_primary", False))),
+    "Add a person at a client. ONLY when Bandile names a new contact for a client on file.",
+    {"client": _str("Client name or part of it."), "name": _str("The contact's name."),
+     "role": _str("Their role."), "email": _str("Email."), "phone": _str("Phone as given."),
+     "whatsapp": _str("WhatsApp number if different."),
+     "is_primary": {"type": "boolean", "description": "True if this is now the main contact."}},
+    ["client", "name"],
+)
+
+
+# ── 5C: payments and the CRM summary ─────────────────────────
+
+def record_payment(db, client: str, amount: float, currency: str = "ZMW", status: str = "paid",
+                   due_date: str | None = None, title: str | None = None):
+    """Record money invoiced to (due) or received from (paid) a client."""
+    import business_common
+    import change_log
+    import crm
+    owner, scored = crm.find_client(db, client)
+    if owner is None:
+        if scored:
+            return _ambiguous("client", client, scored, _client_label)
+        return {"error": f"no client matches '{client}'"}, f"no client matches '{client}'"
+    status = "due" if str(status or "paid").lower() == "due" else "paid"
+    due = None
+    if due_date:
+        due = business_common.parse_day(due_date)
+        if due is None:
+            msg = f"could not read the date '{due_date}'"
+            return {"error": msg}, msg
+    import main
+    cur = main._normalise_currency(currency or "ZMW")
+    with change_log.batch_scope(db, "assistant"):
+        try:
+            existing = crm.find_open_payment(db, owner.id, float(amount or 0), cur) if status == "paid" else None
+            if existing is not None:
+                # He was already invoiced for this: settle that payment, do not add a second.
+                result = crm.mark_paid(db, existing)
+                result["settled_existing"] = True
+            else:
+                result = crm.record_payment(db, owner, amount, cur, status=status, title=title, due_date=due)
+        except (ValueError, TypeError) as exc:
+            return {"error": str(exc)}, str(exc)
+        crm.refresh_statuses(db)
+        db.commit()
+    label = crm.money_label(result["amount"], result["currency"])
+    result["client_name"] = owner.name
+    if status == "paid":
+        return result, f"{label} received from {owner.name}"
+    return result, f"{label} due from {owner.name}" + (f" on {due.isoformat()}" if due else "")
+
+
+def crm_summary(db):
+    import crm
+    crm.housekeeping(db)
+    result = crm.summary(db)
+    p = result["payments"]
+    return result, (f"{result['clients']['active']} active client(s), "
+                    f"${p['overdue_usd']:,.0f} overdue, ${result['mrr']['total_usd']:,.0f} MRR")
+
+
+_register(
+    "record_payment",
+    lambda db, a: record_payment(db, client=a.get("client", ""), amount=a.get("amount"),
+                                 currency=a.get("currency", "ZMW"), status=a.get("status", "paid"),
+                                 due_date=a.get("due_date"), title=a.get("title")),
+    "Record money a client was invoiced (status due) or has paid (status paid, which also "
+    "logs the revenue). ONLY when Bandile states an invoice or a payment for a named client.",
+    {"client": _str("Client name or part of it."), "amount": _num("The amount."),
+     "currency": _str("ZMW or USD (default ZMW)."),
+     "status": _str("paid when the money arrived, due when it was invoiced (default paid).", ["paid", "due"]),
+     "due_date": _str("When it is due, as he said it (for status due)."),
+     "title": _str("What it is for, e.g. 'Deposit'.")},
+    ["client", "amount"],
+)
+
+_register(
+    "crm_summary", lambda db, a: crm_summary(db),
+    "Clients, deals by stage, what is due and overdue, monthly recurring revenue and client "
+    "health, in one picture. Read-only.",
+)
+
+
+def _check_payment_overdue(db, params):
+    """True when any open client payment is more than ``days`` days past its due date."""
+    days = int(params.get("days", 14))
+    cutoff = user_clock.today() - timedelta(days=days)
+    return db.query(models.Payment).filter(
+        models.Payment.status.in_(("due", "overdue")), models.Payment.due_date.isnot(None),
+        models.Payment.due_date < cutoff).first() is not None
+
+
+_RULE_CHECKS["payment_overdue"] = _check_payment_overdue
+
+
+# ── 5B: qualification, drafts, the approval gate, follow-ups ─
+
+def _pick_lead(db, ref):
+    """(lead, error_result). Resolves an id or a name fragment; never guesses."""
+    import leads
+    lead, scored = leads.pick_lead(db, ref)
+    if lead is not None:
+        return lead, None
+    if scored:
+        return None, _ambiguous("lead", str(ref), scored, lambda l: f"{l.name} ({l.company})" if l.company else l.name)
+    return None, ({"error": f"no lead matches '{ref}'"}, f"no lead matches '{ref}'")
+
+
+def qualify_leads(db, lead_ids: list | None = None, segment: str | None = None):
+    """Score leads against the ideal customer profile (at most 20 per call)."""
+    import change_log
+    import leads
+    if lead_ids:
+        ids = [int(i) for i in lead_ids]
+    elif segment:
+        ids = [l.id for l in db.query(models.Lead).filter(
+            models.Lead.segment == leads.normalise_segment(segment), models.Lead.status == "new",
+        ).order_by(models.Lead.id).limit(leads.QUALIFY_MAX).all()]
+    else:
+        return {"error": "give lead_ids or a segment"}, "give lead_ids or a segment"
+    with change_log.batch_scope(db, "assistant"):
+        try:
+            results = leads.qualify(db, ids)
+        except ValueError as exc:
+            return {"error": str(exc)}, str(exc)
+        db.commit()
+    qualified = sum(1 for r in results if r.get("outcome") == "qualified")
+    disqualified = sum(1 for r in results if r.get("outcome") == "disqualified")
+    shaped = [{"lead_id": r["lead_id"], "name": r.get("name"), "qualification_score": r.get("score"),
+               "status": r.get("status"), "fit": r.get("fit"), "reasons": r.get("reasons"),
+               "disqualifiers": r.get("disqualifiers"), "suggested_angle": r.get("suggested_angle"),
+               "error": r.get("error"), "skipped_llm": r.get("skipped_llm")} for r in results]
+    result = {"results": shaped, "qualified": qualified, "disqualified": disqualified,
+              "changes": [r["change"] for r in results if r.get("change")]}
+    if results and all(r.get("skipped_llm") for r in results):
+        result["note"] = "No AI key is configured, so only the basic score was computed and nothing changed."
+        return result, f"scored {len(results)} lead(s) without AI — nothing changed"
+    return result, f"qualified {qualified} of {len(results)} ({disqualified} disqualified)"
+
+
+def draft_outreach(db, lead, channel: str, brief: str | None = None, message_id: int | None = None):
+    """Draft (or revise) a message to a lead. Never sends."""
+    import change_log
+    import llm as _llm
+    import outreach
+    target, problem = _pick_lead(db, lead)
+    if target is None:
+        return problem
+    with change_log.batch_scope(db, "assistant"):
+        try:
+            result = outreach.draft(db, target, channel, brief,
+                                    message_id=int(message_id) if message_id else None)
+        except _llm.AIUnavailable:
+            msg = "drafting needs the AI key, which is not configured"
+            return {"error": msg}, msg
+        except ValueError as exc:
+            return {"error": str(exc)}, str(exc)
+        db.commit()
+    out = {"message_id": result["id"], "lead": target.name, "channel": result["channel"],
+           "subject": result["subject"], "body": result["body"], "version": result["version"],
+           "status": "draft — not sent", "changes": result["changes"],
+           "next_step": "Show Bandile the draft. It is sent only when he taps Approve & send or says to send it."}
+    return out, f"drafted {result['channel']} to {target.name} (v{result['version']})"
+
+
+def request_send(db, message_id: int):
+    """Ask for approval to send a draft. Sends nothing: it registers a pending action."""
+    import outreach
+    message = db.query(models.OutreachMessage).filter(
+        models.OutreachMessage.id == int(message_id or 0)).first()
+    if message is None:
+        return {"error": f"message {message_id} not found"}, f"message {message_id} not found"
+    try:
+        pending = outreach.request_send(db, message)
+    except ValueError as exc:
+        return {"error": str(exc)}, str(exc)
+    pending["next_step"] = ("Nothing has been sent. Ask Bandile for a plain yes. Call confirm_action "
+                            "only after he answers, in a later turn — never in this one.")
+    return pending, f"awaiting your yes: {pending['summary']}"
+
+
+def set_follow_up(db, lead, date_text: str, reason: str | None = None):
+    """Create or move the follow-up task for a lead."""
+    import business_common
+    import change_log
+    import leads
+    target, problem = _pick_lead(db, lead)
+    if target is None:
+        return problem
+    due = business_common.parse_day(date_text)
+    if due is None:
+        msg = f"could not read the date '{date_text}'"
+        return {"error": msg}, msg
+    with change_log.batch_scope(db, "assistant"):
+        todo, change = leads.set_follow_up(db, target, due, reason)
+        db.commit()
+    return ({"lead": target.name, "todo_id": todo.id, "follow_up_on": due, "change": change},
+            f"follow-up with {target.name} on {due.isoformat()}")
+
+
+_register(
+    "qualify_leads",
+    lambda db, a: qualify_leads(db, lead_ids=a.get("lead_ids"), segment=a.get("segment")),
+    "Score leads against the ideal customer profile (at most 20 per call). ONLY when Bandile "
+    "asks to qualify leads or asks which leads are worth pursuing.",
+    {"lead_ids": {"type": "array", "items": {"type": "integer"}, "description": "Lead ids (at most 20)."},
+     "segment": _str("Or a segment: its first 20 unqualified leads.")},
+)
+
+_register(
+    "draft_outreach",
+    lambda db, a: draft_outreach(db, lead=a.get("lead", ""), channel=a.get("channel", "whatsapp"),
+                                 brief=a.get("brief"), message_id=a.get("message_id")),
+    "Draft a message to a lead, or revise a draft when given its message_id. It only ever "
+    "creates a draft; it never sends.",
+    {"lead": _str("Lead name, part of it, or the lead id."),
+     "channel": _str("Where it will be sent.", ["whatsapp", "email", "linkedin", "call", "other"]),
+     "brief": _str("What Bandile asked for, e.g. 'intro, mention the bakery site' or 'shorter'."),
+     "message_id": _int("The draft to revise. Omit for a new draft.")},
+    ["lead", "channel"],
+)
+
+_register(
+    "request_send",
+    lambda db, a: request_send(db, message_id=a.get("message_id")),
+    "Register a request to send a drafted message. This sends NOTHING: it creates a pending "
+    "action. Ask Bandile for a plain yes and call confirm_action only after he gives it, in "
+    "a later turn.",
+    {"message_id": _int("The draft's message id.")},
+    ["message_id"],
+)
+
+_register(
+    "set_follow_up",
+    lambda db, a: set_follow_up(db, lead=a.get("lead", ""), date_text=a.get("date", ""), reason=a.get("reason")),
+    "Set or move the follow-up reminder for a lead. ONLY when Bandile says when to chase them.",
+    {"lead": _str("Lead name, part of it, or the lead id."),
+     "date": _str("When, as he said it: 'Friday', '12 May', 'in 3 days'."),
+     "reason": _str("What the follow-up is about. Optional.")},
+    ["lead", "date"],
+)
+
+
+# ── 5B: replies, conversion, the stalled-outreach alert ──────
+
+def log_lead_reply(db, lead, summary: str, channel: str | None = None):
+    """Record that a lead answered."""
+    import change_log
+    import leads
+    target, problem = _pick_lead(db, lead)
+    if target is None:
+        return problem
+    with change_log.batch_scope(db, "assistant"):
+        result = leads.log_reply(db, target, summary, channel)
+        db.commit()
+    return ({"lead": target.name, "status": result["status"], "reply": (summary or "").strip(),
+             "changes": result["changes"]}, f"{target.name} replied — follow-up closed")
+
+
+def convert_lead(db, lead):
+    """Turn a lead into a client."""
+    import change_log
+    import leads
+    target, problem = _pick_lead(db, lead)
+    if target is None:
+        return problem
+    with change_log.batch_scope(db, "assistant"):
+        result = leads.convert(db, target)
+        db.commit()
+    out = {"lead": target.name, "client_id": result["client"]["id"], "client": result["client"]["name"],
+           "already_converted": bool(result.get("already_converted")), "changes": result["changes"]}
+    if out["already_converted"]:
+        return out, f"{target.name} is already a client"
+    return out, f"{target.name} is now a client"
+
+
+_register(
+    "log_lead_reply",
+    lambda db, a: log_lead_reply(db, lead=a.get("lead", ""), summary=a.get("summary", ""), channel=a.get("channel")),
+    "Record that a lead replied. ONLY when Bandile reports the reply.",
+    {"lead": _str("Lead name, part of it, or the lead id."),
+     "summary": _str("What they said, in a line."),
+     "channel": _str("Where they replied.", ["whatsapp", "email", "linkedin", "call", "other"])},
+    ["lead", "summary"],
+)
+
+_register(
+    "convert_lead",
+    lambda db, a: convert_lead(db, lead=a.get("lead", "")),
+    "Turn a lead into a client. ONLY on an explicit statement that they are now a client, "
+    "have signed or have paid.",
+    {"lead": _str("Lead name, part of it, or the lead id.")},
+    ["lead"],
+)
+
+
+def _check_no_outreach_sent(db, params):
+    """True when at least ``min_qualified`` leads are qualified and nothing has been sent
+    in the last ``window_days`` days."""
+    window = int(params.get("window_days", 7))
+    minimum = int(params.get("min_qualified", 3))
+    qualified = db.query(models.Lead).filter(models.Lead.status == "qualified").count()
+    if qualified < minimum:
+        return False
+    since = datetime.utcnow() - timedelta(days=window)
+    return db.query(models.OutreachMessage).filter(
+        models.OutreachMessage.direction == "out", models.OutreachMessage.status == "sent",
+        models.OutreachMessage.sent_at >= since).first() is None
+
+
+_RULE_CHECKS["no_outreach_sent"] = _check_no_outreach_sent
+
+
+# ── 5E: project portfolio ────────────────────────────────────
+
+def _pick_project(db, ref):
+    import crm
+    project, scored = crm.find_project(db, ref)
+    if project is not None:
+        return project, None
+    if scored:
+        return None, _ambiguous("project", str(ref), scored, lambda p: p.title)
+    return None, ({"error": f"no project matches '{ref}'"}, f"no project matches '{ref}'")
+
+
+def portfolio_review(db, include_paused: bool = True):
+    """The ranked portfolio. Read-only, except that it files pause suggestions."""
+    import change_log
+    import portfolio
+    with change_log.batch_scope(db, "assistant"):
+        result = portfolio.full_review(db, include_paused=bool(include_paused))
+
+    def line(e):
+        p = e["project"]
+        return {"project_id": p["id"], "title": p["title"], "client": p["client_name"],
+                "status": p["status"], "rank": e["rank"], "recommendation": e["recommendation"],
+                "attention_score": e["attention"]["score"], "bottleneck": e["bottleneck"],
+                "due_date": p["due_date"], "next_action": p["next_action"]}
+
+    shaped = {
+        "ranked": [line(e) for e in result["ranked"]],
+        "paused": [line(e) for e in result["paused"]],
+        "pause_suggestions_waiting": [s["payload"].get("title") for s in result["pause_suggestions"]],
+        "totals": result["totals"],
+        "note": "Recommendations are advice. Nothing is paused until Bandile taps or says so.",
+    }
+    focus_n = sum(1 for e in result["ranked"] if e["recommendation"] == "focus")
+    return shaped, (f"{focus_n} focus, {result['totals']['blocked']} blocked, "
+                    f"{len(result['pause_suggestions'])} pause suggestion(s) waiting")
+
+
+def update_project(db, project=None, create: bool = False, title: str | None = None,
+                   kind: str | None = None, client: str | None = None, status: str | None = None,
+                   priority: int | None = None, expected_value: float | None = None,
+                   currency: str | None = None, due_date: str | None = None,
+                   effort_hours_week: float | None = None, next_action: str | None = None,
+                   blocked_reason: str | None = None, explicit: bool = False):
+    """Create or change a project. Pausing needs ``explicit`` (Bandile literally said pause)."""
+    import business_common
+    import change_log
+    import crm
+    import portfolio
+    if status == "paused" and not explicit:
+        msg = "pausing needs a tap or an explicit 'pause X'"
+        return {"error": msg}, msg
+    due = None
+    if due_date:
+        due = business_common.parse_day(due_date)
+        if due is None:
+            msg = f"could not read the date '{due_date}'"
+            return {"error": msg}, msg
+    owner = None
+    if client:
+        owner, scored = crm.find_client(db, client)
+        if owner is None:
+            if scored:
+                return _ambiguous("client", client, scored, _client_label)
+            return {"error": f"no client matches '{client}'"}, f"no client matches '{client}'"
+    fields = dict(kind=kind, priority=priority, expected_value=expected_value, currency=currency,
+                  due_date=due, effort_hours_week=effort_hours_week, next_action=next_action)
+    with change_log.batch_scope(db, "assistant"):
+        try:
+            if create:
+                name = (title or (project if isinstance(project, str) else "") or "").strip()
+                result = portfolio.create_project(
+                    db, title=name, client=owner, status=status or "active",
+                    **{**fields, "kind": kind or ("client" if owner else "internal")})
+                verb = "created"
+            else:
+                target, problem = _pick_project(db, project or "")
+                if target is None:
+                    return problem
+                result = portfolio.update_project(db, target, title=title, client=owner, status=status,
+                                                  blocked_reason=blocked_reason, **fields)
+                verb = "updated"
+        except ValueError as exc:
+            return {"error": str(exc)}, str(exc)
+        db.commit()
+    return result, f"project '{result['title']}' {verb} — {result['status']}"
+
+
+def log_project_update(db, project, text: str, kind: str = "note"):
+    import change_log
+    import portfolio
+    target, problem = _pick_project(db, project)
+    if target is None:
+        return problem
+    with change_log.batch_scope(db, "assistant"):
+        try:
+            result = portfolio.log_update(db, target, text, kind or "note")
+        except ValueError as exc:
+            return {"error": str(exc)}, str(exc)
+        db.commit()
+    return result, f"logged {result['kind']} on {target.title}"
+
+
+_register(
+    "portfolio_review",
+    lambda db, a: portfolio_review(db, include_paused=bool(a.get("include_paused", True))),
+    "Rank every live project by how much attention it deserves, with the bottleneck on each "
+    "and which to focus on, maintain, pause or close. Use it for 'what should I work on this "
+    "week' and 'what should I pause'.",
+    {"include_paused": {"type": "boolean", "description": "Also list paused projects (default true)."}},
+)
+
+_register(
+    "update_project",
+    lambda db, a: update_project(
+        db, project=a.get("project"), create=bool(a.get("create", False)), title=a.get("title"),
+        kind=a.get("kind"), client=a.get("client"), status=a.get("status"), priority=a.get("priority"),
+        expected_value=a.get("expected_value"), currency=a.get("currency"), due_date=a.get("due_date"),
+        effort_hours_week=a.get("effort_hours_week"), next_action=a.get("next_action"),
+        blocked_reason=a.get("blocked_reason"), explicit=bool(a.get("explicit", False))),
+    "Change a project, or create one when create is true. ONLY when Bandile states the "
+    "change or announces a new project. Status 'paused' is refused unless explicit is true, "
+    "and explicit may be true only when he literally said to pause that project.",
+    {"project": _str("Project title, part of it, or its id."),
+     "create": {"type": "boolean", "description": "Create a new project (give title)."},
+     "title": _str("Title (for a new project, or to rename)."),
+     "kind": _str("client or internal.", ["client", "internal"]),
+     "client": _str("Client the project is for."),
+     "status": _str("New status.", ["planned", "active", "paused", "delivered", "closed", "cancelled"]),
+     "priority": _int("1 (highest) to 5."),
+     "expected_value": _num("What it is worth."),
+     "currency": _str("ZMW or USD (default ZMW)."),
+     "due_date": _str("Due date as he said it."),
+     "effort_hours_week": _num("Hours a week it takes."),
+     "next_action": _str("The next concrete step."),
+     "blocked_reason": _str("What it is blocked on. An empty string clears the block."),
+     "explicit": {"type": "boolean", "description": "True only if he literally said to pause it."}},
+)
+
+_register(
+    "log_project_update",
+    lambda db, a: log_project_update(db, project=a.get("project", ""), text=a.get("text", ""), kind=a.get("kind", "note")),
+    "Log progress on a project: what shipped, a milestone, a blocker or that it is unblocked. "
+    "ONLY when Bandile reports it.",
+    {"project": _str("Project title, part of it, or its id."),
+     "text": _str("What happened, in a line."),
+     "kind": _str("note (default), milestone, blocker or unblocked.", ["note", "milestone", "blocker", "unblocked"])},
+    ["project", "text"],
+)
+
+
+def _check_projects_blocked(db, params):
+    """True when at least ``min`` active projects have a blocked reason."""
+    minimum = int(params.get("min", 2))
+    rows = db.query(models.Project).filter(models.Project.status == "active").all()
+    return sum(1 for p in rows if (p.blocked_reason or "").strip()) >= minimum
+
+
+_RULE_CHECKS["projects_blocked"] = _check_projects_blocked
+
+
+# ── 5A: standing research objectives and dismissing findings ─
+
+def schedule_research(db, objective: str, cadence_days: int = 14, max_opportunities: int = 3):
+    """Make research on an objective recur (or change how often it does)."""
+    import change_log
+    from market_intel import objectives
+    with change_log.batch_scope(db, "assistant"):
+        try:
+            result = objectives.schedule(db, objective, cadence_days, max_opportunities)
+        except ValueError as exc:
+            return {"error": str(exc)}, str(exc)
+        db.commit()
+    return result, f"research scheduled every {result['cadence_days']} days"
+
+
+def dismiss_research_finding(db, finding_id: int, reason: str | None = None):
+    """Mark a surfaced finding as not worth pursuing."""
+    import change_log
+    from market_intel.agent import dismiss_finding
+    with change_log.batch_scope(db, "assistant"):
+        result = dismiss_finding(db, int(finding_id or 0), reason)
+        if result.get("error"):
+            return result, result["error"]
+        db.commit()
+    out = {"finding_id": result["id"], "problem": result["problem"], "status": result["status"],
+           "reason": result.get("dismissed_reason"), "change": result.get("change")}
+    if result.get("already_dismissed"):
+        return out, f"finding {result['id']} was already dismissed"
+    return out, f"finding {result['id']} dismissed"
+
+
+_register(
+    "schedule_research",
+    lambda db, a: schedule_research(db, objective=a.get("objective", ""),
+                                    cadence_days=int(a.get("cadence_days", 14) or 14),
+                                    max_opportunities=int(a.get("max_opportunities", 3) or 3)),
+    "Make research on an objective recur every cadence_days. ONLY when Bandile explicitly "
+    "asks for research to repeat (e.g. 'keep researching X every two weeks'). NEVER on your "
+    "own initiative and never as a side effect of a one-off research run.",
+    {"objective": _str("The research objective, as a full question."),
+     "cadence_days": _int("How often, in days (default 14)."),
+     "max_opportunities": _int("How many opportunities to surface per run (default 3).")},
+    ["objective"],
+)
+
+_register(
+    "dismiss_research_finding",
+    lambda db, a: dismiss_research_finding(db, finding_id=a.get("finding_id"), reason=a.get("reason")),
+    "Mark a surfaced research finding as not worth pursuing. ONLY when Bandile explicitly "
+    "says a specific finding is not worth it (e.g. 'drop finding 12', 'that one is not for "
+    "me'). NEVER on your own judgement of the finding.",
+    {"finding_id": _int("The id of the finding to dismiss."),
+     "reason": _str("Why, in his words. Optional.")},
+    ["finding_id"],
+)
+
+
+# ── 6B: agents ───────────────────────────────────────────────
+
+def _agent_spec(key: str):
+    import agents
+    agents.load_all()
+    key = (key or "").strip().lower().replace(" ", "_").replace("-", "_")
+    if key in agents.REGISTRY:
+        return agents.REGISTRY[key], None
+    names = {s.name.lower(): s for s in agents.REGISTRY.values()}
+    if key.replace("_", " ") in names:
+        return names[key.replace("_", " ")], None
+    known = ", ".join(sorted(agents.REGISTRY))
+    return None, ({"error": f"no agent called '{key}'", "agents": sorted(agents.REGISTRY)},
+                  f"no agent called '{key}' (known: {known})")
+
+
+def _agent_line(a: dict) -> dict:
+    last = a.get("last_run") or {}
+    return {"key": a["key"], "name": a["name"], "enabled": a["enabled"],
+            "schedule": a["schedule"]["effective"], "last_run_at": last.get("at"),
+            "last_status": last.get("status"), "last_summary": last.get("summary"),
+            "runs": a["runs_count"], "cost_usd_this_month": a["cost_usd_month"]}
+
+
+def agent_status(db, key: str | None = None):
+    """What the agents are and what they last did. Read-only."""
+    import agents
+    from agents import api
+    agents.load_all()
+    if key:
+        spec, problem = _agent_spec(key)
+        if spec is None:
+            return problem
+        detail = api.serialize_agent(db, spec)
+        runs = [{"started_at": r["started_at"], "status": r["status"], "summary": r["summary"],
+                 "changes": r["changes_count"], "error": r["error"]} for r in api._runs(db, key=spec.key, limit=5)]
+        return {**_agent_line(detail), "description": detail["description"], "recent_runs": runs}, \
+            f"{spec.name}: {detail['last_run']['status'] if detail['last_run'] else 'never run'}"
+    listed = [_agent_line(a) for a in api.list_agents(db)]
+    last_tick = db.query(models.JobTick).order_by(models.JobTick.id.desc()).first()
+    return ({"agents": listed, "last_tick_at": last_tick.started_at if last_tick else None},
+            f"{len(listed)} agent(s), {sum(1 for a in listed if a['enabled'])} enabled")
+
+
+def run_agent(db, key: str):
+    """Run one agent now."""
+    from agents import runner
+    spec, problem = _agent_spec(key)
+    if spec is None:
+        return problem
+    db.commit()                      # the agent works in its own session: let it see this turn's writes
+    outcome = runner.run_agent(spec, "manual")
+    result = {"agent": spec.name, "status": outcome.get("status"), "summary": outcome.get("summary"),
+              "changes_made": outcome.get("changes_count"), "error": outcome.get("error")}
+    return result, f"{spec.name}: {outcome.get('summary') or outcome.get('status')}"
+
+
+def set_agent_schedule(db, key: str, enabled: bool | None = None, interval_minutes: int | None = None,
+                       at_time: str | None = None, weekdays: list | None = None):
+    """Enable or disable an agent, or change when it runs."""
+    import change_log
+    from agents import api, runner
+    spec, problem = _agent_spec(key)
+    if spec is None:
+        return problem
+    fields = {k: v for k, v in {"enabled": enabled, "interval_minutes": interval_minutes,
+                                "at_time": at_time, "weekdays": weekdays}.items() if v is not None}
+    if not fields:
+        return {"error": "nothing to change"}, "nothing to change"
+    with change_log.batch_scope(db, "assistant"):
+        try:
+            out = runner.update_agent(db, spec, **fields)
+        except (ValueError, TypeError) as exc:
+            return {"error": str(exc)}, str(exc)
+        db.commit()
+    detail = api.serialize_agent(db, spec, out["row"])
+    return ({**_agent_line(detail), "change": out["change"]},
+            f"{spec.name}: {'on' if detail['enabled'] else 'off'}, {detail['schedule']['effective']}")
+
+
+_register(
+    "agent_status", lambda db, a: agent_status(db, key=a.get("key")),
+    "What the agents are, when they run and what each last did. Read-only. Use it to answer "
+    "'did the research run?' or 'what did the agents do overnight?'.",
+    {"key": _str("One agent's key, e.g. market_intel. Omit for all of them.")},
+)
+
+_register(
+    "run_agent", lambda db, a: run_agent(db, key=a.get("key", "")),
+    "Run one agent now. ONLY when Bandile explicitly asks for that agent to run. NEVER on "
+    "your own initiative.",
+    {"key": _str("The agent's key, e.g. portfolio_reviewer.")},
+    ["key"],
+)
+
+_register(
+    "set_agent_schedule",
+    lambda db, a: set_agent_schedule(db, key=a.get("key", ""), enabled=a.get("enabled"),
+                                     interval_minutes=a.get("interval_minutes"), at_time=a.get("at_time"),
+                                     weekdays=a.get("weekdays")),
+    "Enable or disable an agent, or change when it runs. ONLY on Bandile's explicit "
+    "instruction. NEVER enable, disable or reschedule an agent on your own judgement.",
+    {"key": _str("The agent's key."),
+     "enabled": {"type": "boolean", "description": "Turn the agent on or off."},
+     "interval_minutes": _int("Run every this many minutes (0 clears the override)."),
+     "at_time": _str("Run once a day at this local time, HH:MM (empty clears the override)."),
+     "weekdays": {"type": "array", "items": {"type": "integer"},
+                  "description": "Days it may run: 0 Monday … 6 Sunday (empty list clears)."}},
+    ["key"],
+)
+
+
+# ── 6A: applications ─────────────────────────────────────────
+
+def _pick_application(db, ref):
+    import applications
+    app, scored = applications.find_application(db, ref)
+    if app is not None:
+        return app, None
+    if scored:
+        return None, _ambiguous("application", str(ref), scored, lambda a: a.name)
+    return None, ({"error": f"no application matches '{ref}'"}, f"no application matches '{ref}'")
+
+
+def _deadline_note(app) -> str:
+    if app.deadline is None:
+        return ("unknown — neither Bandile nor a pasted document has given one. Do not state a "
+                "date from general knowledge; ask him for it.")
+    source = {"user": "Bandile stated it", "document": "read from text he pasted"}.get(app.deadline_source, "source unknown")
+    return f"{app.deadline.isoformat()} ({source})"
+
+
+def add_application(db, name: str, institution: str | None = None, programme: str | None = None,
+                    kind: str | None = None, deadline: str | None = None, priority: int | None = None,
+                    portal_url: str | None = None):
+    """Start tracking an application, or update the one the name already describes."""
+    import applications
+    import business_common
+    import change_log
+    due = None
+    if deadline:
+        due = business_common.parse_day(deadline)
+        if due is None:
+            msg = f"could not read the date '{deadline}'"
+            return {"error": msg}, msg
+    existing, _scored = applications.find_application(db, name or "")
+    with change_log.batch_scope(db, "assistant"):
+        try:
+            if existing is not None:
+                before = change_log.snapshot(existing)
+                if institution:
+                    existing.institution = institution.strip()
+                if programme:
+                    existing.programme = programme.strip()
+                if kind in applications.KINDS:
+                    existing.kind = kind
+                if due is not None:
+                    existing.deadline, existing.deadline_source = due, "user"
+                if priority is not None:
+                    existing.priority = max(1, min(3, int(priority)))
+                if portal_url:
+                    existing.portal_url = portal_url.strip()
+                existing.updated_at = datetime.utcnow()
+                change = change_log.record_update(db, existing, before, f"Updated application: {existing.name[:60]}")
+                app, verb = existing, "updated"
+            else:
+                made = applications.create(db, name, institution=institution, programme=programme,
+                                           kind=kind or "university", deadline=due,
+                                           priority=priority or 2, portal_url=portal_url)
+                app = db.query(models.Application).filter(models.Application.id == made["id"]).first()
+                change, verb = made["change"], "added"
+        except ValueError as exc:
+            return {"error": str(exc)}, str(exc)
+        db.commit()
+    result = {"application_id": app.id, "name": app.name, "status": app.status, "deadline": app.deadline,
+              "deadline_source": app.deadline_source or "unknown", "deadline_note": _deadline_note(app),
+              "change": change}
+    return result, f"application '{app.name}' {verb}" + (f", deadline {app.deadline.isoformat()}" if app.deadline else "")
+
+
+def import_requirements(db, application, text: str):
+    """Turn pasted requirements text into the application's checklist."""
+    import applications
+    import change_log
+    import llm as _llm
+    app, problem = _pick_application(db, application)
+    if app is None:
+        return problem
+    with change_log.batch_scope(db, "assistant"):
+        try:
+            result = applications.import_requirements(db, app, text)
+        except _llm.AIUnavailable:
+            db.rollback()
+            msg = "reading requirements needs the AI key, which is not configured"
+            return {"error": msg}, msg
+        except ValueError as exc:
+            db.rollback()
+            return {"error": str(exc)}, str(exc)
+        db.commit()
+    result["deadline_note"] = _deadline_note(app)
+    summary = f"{result['created']} requirement(s) added"
+    if result["updated"]:
+        summary += f", {result['updated']} updated"
+    if result["deadline_set"]:
+        summary += f", deadline {app.deadline.strftime('%d %b %Y')} from the text"
+    if result["dates_dropped"]:
+        summary += f", {result['dates_dropped']} date(s) left out (not found in the text)"
+    return result, summary
+
+
+def update_requirement(db, application, requirement: str, status: str | None = None,
+                       due_date: str | None = None, details: str | None = None, make_todo: bool = False):
+    """Change one requirement of an application, optionally turning it into a task."""
+    import applications
+    import business_common
+    import change_log
+    app, problem = _pick_application(db, application)
+    if app is None:
+        return problem
+    reqs = applications.requirements_of(db, app)
+    target, scored = business_common.fuzzy_pick(reqs, lambda r: r.title, requirement or "")
+    if target is None:
+        if scored:
+            return _ambiguous("requirement", requirement, scored, lambda r: r.title)
+        msg = f"no requirement of {app.name} matches '{requirement}'"
+        return {"error": msg, "requirements": [r.title for r in reqs]}, msg
+    due = None
+    if due_date:
+        due = business_common.parse_day(due_date)
+        if due is None:
+            msg = f"could not read the date '{due_date}'"
+            return {"error": msg}, msg
+    with change_log.batch_scope(db, "assistant"):
+        try:
+            result = applications.update_requirement(db, target, status=status, due_date=due, details=details)
+        except ValueError as exc:
+            return {"error": str(exc)}, str(exc)
+        changes = [result["change"]] if result.get("change") else []
+        if make_todo:
+            todo = applications.make_todo(db, target)
+            result["todo"] = todo["todo"]
+            changes += todo.get("changes") or []
+        db.commit()
+    result["application"] = app.name
+    result["changes"] = changes
+    return result, f"{app.name}: {target.title} — {target.status.replace('_', ' ')}" + (" (task added)" if make_todo else "")
+
+
+def _application_view(db, app) -> dict:
+    import applications
+    t = applications.timeline(db, app)
+    reqs = applications.requirements_of(db, app)
+    return {
+        "application_id": app.id, "name": app.name, "status": app.status,
+        "deadline": app.deadline, "deadline_source": app.deadline_source or "unknown",
+        "deadline_note": _deadline_note(app), "days_to_deadline": t["days_to_deadline"],
+        "at_risk": t["at_risk"], "requirement_counts": t["requirements"],
+        "missing": [r.title for r in reqs if r.status == "missing"],
+        "in_progress": [r.title for r in reqs if r.status == "in_progress"],
+        "next_due": t["next_due"],
+        "open_gaps": [{"gap": g.gap, "severity": g.severity} for g in applications.open_gaps(db, app)],
+        "gaps_reviewed_at": app.gaps_reviewed_at,
+    }
+
+
+def application_status(db, application: str | None = None):
+    """Where an application stands (or all of them). Read-only."""
+    if application:
+        app, problem = _pick_application(db, application)
+        if app is None:
+            return problem
+        view = _application_view(db, app)
+        missing = len(view["missing"])
+        when = f"{view['days_to_deadline']} days to the deadline" if app.deadline else "deadline unknown"
+        return view, f"{app.name}: {missing} missing, {when}"
+    rows = db.query(models.Application).all()
+    rows.sort(key=lambda a: (a.deadline is None, a.deadline or date.max, a.id))
+    return ({"applications": [_application_view(db, a) for a in rows]},
+            f"{len(rows)} application(s)")
+
+
+_register(
+    "add_application",
+    lambda db, a: add_application(db, name=a.get("name", ""), institution=a.get("institution"),
+                                  programme=a.get("programme"), kind=a.get("kind"), deadline=a.get("deadline"),
+                                  priority=a.get("priority"), portal_url=a.get("portal_url")),
+    "Start tracking an application (a university, scholarship, competition, programme or "
+    "job), or update the one the name already describes. Pass a deadline ONLY when Bandile "
+    "stated it; never supply one from your own knowledge.",
+    {"name": _str("What to call it, e.g. 'Wharton'."),
+     "institution": _str("The institution."), "programme": _str("The programme."),
+     "kind": _str("What kind of application.", ["university", "scholarship", "competition", "programme", "job", "other"]),
+     "deadline": _str("The deadline exactly as Bandile said it, e.g. '1 January'."),
+     "priority": _int("1 (high) to 3 (low)."), "portal_url": _str("The application portal.")},
+    ["name"],
+)
+
+_register(
+    "import_requirements",
+    lambda db, a: import_requirements(db, application=a.get("application", ""), text=a.get("text", "")),
+    "Turn requirements text into an application's checklist. ONLY when Bandile pastes or "
+    "dictates the requirements; pass his text unchanged. Never write requirements or dates "
+    "from your own knowledge.",
+    {"application": _str("Application name, part of it, or its id."),
+     "text": _str("The pasted requirements text, verbatim.")},
+    ["application", "text"],
+)
+
+_register(
+    "update_requirement",
+    lambda db, a: update_requirement(db, application=a.get("application", ""), requirement=a.get("requirement", ""),
+                                     status=a.get("status"), due_date=a.get("due_date"), details=a.get("details"),
+                                     make_todo=bool(a.get("make_todo", False))),
+    "Change one requirement of an application when Bandile reports progress on it, gives "
+    "it a date or asks for it to become a task.",
+    {"application": _str("Application name, part of it, or its id."),
+     "requirement": _str("The requirement's title or part of it."),
+     "status": _str("New status.", ["missing", "in_progress", "ready", "submitted", "not_required"]),
+     "due_date": _str("Its due date as Bandile said it."),
+     "details": _str("Details to store (word limit, prompt, who writes it)."),
+     "make_todo": {"type": "boolean", "description": "Also create a dated task for it."}},
+    ["application", "requirement"],
+)
+
+_register(
+    "application_status",
+    lambda db, a: application_status(db, application=a.get("application")),
+    "Where an application stands: deadline and where it came from, what is missing, the "
+    "next thing due and open gaps. Read-only. Omit application for all of them.",
+    {"application": _str("Application name, part of it, or its id.")},
+)
+
+
+def application_gaps(db, application, refresh: bool = False):
+    """Where the profile is weak relative to an application (a cached review)."""
+    import applications
+    import change_log
+    import llm as _llm
+    app, problem = _pick_application(db, application)
+    if app is None:
+        return problem
+    with change_log.batch_scope(db, "assistant"):
+        try:
+            result = applications.review_gaps(db, app, refresh=bool(refresh))
+        except _llm.AIUnavailable:
+            db.rollback()
+            msg = "the gap review needs the AI key, which is not configured"
+            return {"error": msg}, msg
+        except ValueError as exc:
+            db.rollback()
+            return {"error": str(exc)}, str(exc)
+        db.commit()
+    reviewed = app.gaps_reviewed_at
+    shaped = {
+        "application": app.name,
+        "review_last_run": reviewed.strftime("%d %b %Y %H:%M UTC") if reviewed else "never",
+        "from_cache": result["cached"],
+        "gaps": [{"gap": g["gap"], "severity": g["severity"], "evidence": g["evidence"],
+                  "suggested_action": g["suggested_action"]} for g in result["gaps"]],
+        "note": "This is the system's review, not a fact about the institution. Say when it was last run.",
+    }
+    if result.get("stale"):
+        shaped["note"] += " The requirements have changed since; the review is out of date."
+    high = sum(1 for g in result["gaps"] if g["severity"] == "high")
+    return shaped, f"{app.name}: {len(result['gaps'])} open gap(s), {high} high"
+
+
+_register(
+    "application_gaps",
+    lambda db, a: application_gaps(db, application=a.get("application", ""), refresh=bool(a.get("refresh", False))),
+    "Where Bandile's profile is weak relative to an application, from the system's cached "
+    "review. Relay it as the system's view and say when the review was last run. Set refresh "
+    "true only when he asks for a fresh review.",
+    {"application": _str("Application name, part of it, or its id."),
+     "refresh": {"type": "boolean", "description": "Run the review again now."}},
+    ["application"],
+)
+
+
+def _check_application_at_risk(db, params):
+    """True when an application still being prepared has its deadline inside ``days`` days
+    and requirements that are not ready."""
+    days = int(params.get("days", 14))
+    today = user_clock.today()
+    for app in db.query(models.Application).filter(
+            models.Application.status.in_(("researching", "preparing")),
+            models.Application.deadline.isnot(None)).all():
+        left = (app.deadline - today).days
+        if left > days:
+            continue
+        outstanding = db.query(models.ApplicationRequirement).filter(
+            models.ApplicationRequirement.application_id == app.id,
+            models.ApplicationRequirement.status.in_(("missing", "in_progress"))).count()
+        if outstanding:
+            return True
+    return False
+
+
+_RULE_CHECKS["application_at_risk"] = _check_application_at_risk
+
+
+# ── 5D: personal brand ───────────────────────────────────────
+
+def brand_performance(db, platform: str | None = None, days: int = 90):
+    """What the connected platforms report. Read-only; never an estimate."""
+    from brand import analytics
+    data = analytics.performance(db, (platform or "").strip().lower() or None, days)
+    if not data["connected"]:
+        msg = "No social account is connected" + (f" for {platform}" if platform else "") + ", so there are no numbers."
+        return ({"connected": False, "message": msg,
+                 "note": "Say that nothing is connected. Do not estimate reach, followers or engagement."},
+                "no social account connected")
+    row = analytics.cached_insight(db, data["platform"])
+    result = {
+        "connected": True, "window_days": data["days"],
+        "accounts": [{"platform": a["platform"], "handle": a["handle"], "followers": a["followers"],
+                      "followers_change_30_days": a["followers_delta_30d"], "last_synced_at": a["last_synced_at"],
+                      "status": a["status"], "problem": a["last_error"]} for a in data["accounts"]],
+        "top_posts": [{"title": t["post"]["title"], "platform": t["post"]["platform"], "format": t["post"]["kind"],
+                       "views": t["views"], "impressions": t["impressions"], "engagement": t["engagement"],
+                       "engagement_rate": t["engagement_rate"], "posted_at": t["posted_at"]} for t in data["top_posts"]],
+        "by_format": data["by_format"], "cadence": data["cadence"],
+        "posts_last_30_days": analytics.posts_last_30d(db), "target_posts_30_days": analytics.TARGET_POSTS_30D,
+        "weekly_insight": row.text if row else None,
+        "note": "Every number here was reported by the platform. A value that is absent was not measured: "
+                "say so, never estimate it.",
+    }
+    return result, f"{len(data['accounts'])} account(s), {data['cadence']['posts_in_window']} post(s) in {data['days']} days"
+
+
+def add_content_idea(db, title: str | None = None, angle: str | None = None, platform: str | None = None,
+                     format: str | None = None, scheduled_for: str | None = None, idea_id: int | None = None):
+    """Add a content idea, or update one (idea_id). A date schedules it."""
+    import brand
+    import business_common
+    import change_log
+    when = None
+    if scheduled_for:
+        when = business_common.parse_day(scheduled_for)
+        if when is None:
+            msg = f"could not read the date '{scheduled_for}'"
+            return {"error": msg}, msg
+    with change_log.batch_scope(db, "assistant"):
+        try:
+            if idea_id:
+                idea = db.query(models.ContentIdea).filter(models.ContentIdea.id == int(idea_id)).first()
+                if idea is None:
+                    return {"error": f"idea {idea_id} not found"}, f"idea {idea_id} not found"
+                result = brand.update_idea(db, idea, title=title, angle=angle, platform=platform, format=format,
+                                           scheduled_for=when)
+                verb = "updated"
+            else:
+                result = brand.create_idea(db, title or "", angle=angle, platform=platform, format=format,
+                                           scheduled_for=when, source="conversation")
+                verb = "added"
+        except ValueError as exc:
+            return {"error": str(exc)}, str(exc)
+        db.commit()
+    out = {"idea_id": result["id"], "title": result["title"], "status": result["status"],
+           "scheduled_for": result["scheduled_for"], "platform": result["platform"], "format": result["format"],
+           "change": result.get("change")}
+    return out, f"idea '{result['title']}' {verb}" + (f", scheduled for {when.isoformat()}" if when else "")
+
+
+def mark_posted(db, idea, url: str | None = None):
+    """An idea was published."""
+    import brand
+    import change_log
+    target, scored = brand.find_idea(db, idea)
+    if target is None:
+        if scored:
+            return _ambiguous("idea", str(idea), scored, lambda i: i.title)
+        return {"error": f"no open idea matches '{idea}'"}, f"no open idea matches '{idea}'"
+    with change_log.batch_scope(db, "assistant"):
+        result = brand.mark_posted(db, target, url)
+        db.commit()
+    out = {"idea_id": result["id"], "title": result["title"], "status": result["status"],
+           "linked_to_a_stored_post": result["linked_post_id"] is not None, "changes": result["changes"]}
+    return out, f"'{result['title']}' marked posted" + (" and linked to its post" if result["linked_post_id"] else "")
+
+
+_register(
+    "brand_performance",
+    lambda db, a: brand_performance(db, platform=a.get("platform"), days=int(a.get("days", 90) or 90)),
+    "What the connected social platforms report: followers, top posts, formats, posting "
+    "cadence. Read-only. The only source of content numbers: when nothing is connected it "
+    "says so, and you must never estimate reach, followers or engagement.",
+    {"platform": _str("One platform, e.g. youtube or linkedin. Omit for all."),
+     "days": _int("How far back to look (default 90).")},
+)
+
+_register(
+    "add_content_idea",
+    lambda db, a: add_content_idea(db, title=a.get("title"), angle=a.get("angle"), platform=a.get("platform"),
+                                   format=a.get("format"), scheduled_for=a.get("scheduled_for"),
+                                   idea_id=a.get("idea_id")),
+    "Add a content idea, or update or reschedule one (pass idea_id). ONLY when Bandile "
+    "labels something an idea for content, or asks to schedule a post.",
+    {"title": _str("The idea in a line."), "angle": _str("The angle or hook."),
+     "platform": _str("Where it would go, e.g. youtube, linkedin."),
+     "format": _str("What it is.", ["short", "video", "post", "article", "thread"]),
+     "scheduled_for": _str("The day to post it, as he said it."),
+     "idea_id": _int("An existing idea to update or reschedule.")},
+)
+
+_register(
+    "mark_posted",
+    lambda db, a: mark_posted(db, idea=a.get("idea", ""), url=a.get("url")),
+    "Mark a content idea as posted. ONLY when Bandile says he has posted it.",
+    {"idea": _str("The idea's title, part of it, or its id."),
+     "url": _str("The post's URL, if he gave it.")},
+    ["idea"],
+)
+
+
+# ── 6D: reminders and notification settings ──────────────────
+
+def _when_label(send_at, now_local) -> str:
+    """'17:00', 'tomorrow 09:00' or 'Fri 14 Nov 09:00' in local time."""
+    from agents import schedule
+    local = schedule.to_local(send_at)
+    clock = local.strftime("%H:%M")
+    gap = (local.date() - now_local.date()).days
+    if gap == 0:
+        return clock
+    if gap == 1:
+        return f"tomorrow {clock}"
+    return f"{local.strftime('%a')} {local.day} {local.strftime('%b')} {clock}"
+
+
+def set_reminder(db, text: str, when: str):
+    """Queue a reminder for a moment. Sent to Telegram by the reminder courier."""
+    import business_common
+    import change_log
+    import notify
+    from agents import schedule
+    text = (text or "").strip()
+    if not text:
+        return {"error": "a reminder needs something to say"}, "a reminder needs something to say"
+    now_local = schedule.to_local(datetime.utcnow())
+    send_at = business_common.parse_when(when, now_local)
+    if send_at is None:
+        msg = f"could not read '{when}' as a time that is still to come"
+        return {"error": msg}, msg
+    label = _when_label(send_at, now_local)
+    with change_log.batch_scope(db, "assistant"):
+        queued = notify.queue(db, kind="reminder", title="Reminder", body=text, send_at=send_at, source="assistant")
+        if queued.get("error"):
+            return {"error": queued["error"]}, queued["error"]
+        row = db.query(models.Notification).filter(models.Notification.id == queued["id"]).first()
+        change = change_log.record_create(db, row, f"Reminder set for {label}: {text}")
+        db.commit()
+    paired = notify.integrations_telegram.is_paired(db)
+    out = {"reminder_id": queued["id"], "text": text, "when": label, "change": change}
+    if not paired:
+        out["note"] = "Telegram is not paired yet, so this reminder cannot be delivered until it is."
+    return out, f"reminder set for {label}"
+
+
+def notification_settings(db, **fields):
+    """Read the notification settings, or change the ones given."""
+    import change_log
+    import notify
+    changes = {k: v for k, v in fields.items() if v is not None}
+    with change_log.batch_scope(db, "assistant"):
+        try:
+            result = notify.update_settings(db, changes)
+        except ValueError as exc:
+            db.rollback()
+            return {"error": str(exc)}, str(exc)
+        db.commit()
+    s = result["settings"]
+    out = {"enabled": s["enabled"], "morning_time": s["morning_time"],
+           "evening_time": s["evening_time"] or "off", "quiet_hours": f"{s['quiet_start']} to {s['quiet_end']}",
+           "alert_min_severity": s["alert_min_severity"], "daily_cap": s["daily_cap"],
+           "telegram_paired": s["paired"], "change": result["change"]}
+    return out, result["summary"]
+
+
+_register(
+    "set_reminder",
+    lambda db, a: set_reminder(db, text=a.get("text", ""), when=a.get("when", "")),
+    "Set a reminder for a moment; it is sent to Bandile's Telegram then. ONLY when he asks to "
+    "be reminded at a time. Something to do on a day, with no time, is a task, not a reminder.",
+    {"text": _str("What to remind him of, in his words."),
+     "when": _str("The moment as he said it: '17:00', 'at 5', 'in 2 hours', 'tomorrow 17:00'.")},
+    ["text", "when"],
+)
+
+_register(
+    "notification_settings",
+    lambda db, a: notification_settings(
+        db, morning_time=a.get("morning_time"), evening_time=a.get("evening_time"),
+        quiet_start=a.get("quiet_start"), quiet_end=a.get("quiet_end"),
+        alert_min_severity=a.get("alert_min_severity"), daily_cap=a.get("daily_cap"), enabled=a.get("enabled")),
+    "Read the notification settings, or change them when Bandile says to (\"send the briefing "
+    "at 5:45\", \"no messages after 9pm\"). With no arguments it only reads.",
+    {"morning_time": _str("When the morning briefing goes out, HH:MM."),
+     "evening_time": _str("When the evening review goes out, HH:MM, or 'off'."),
+     "quiet_start": _str("Start of quiet hours, HH:MM."), "quiet_end": _str("End of quiet hours, HH:MM."),
+     "alert_min_severity": _str("The least serious alert worth a message.", ["info", "warn", "critical"]),
+     "daily_cap": _int("The most messages in a day."),
+     "enabled": {"type": "boolean", "description": "Turn notifications on or off."}},
+)
+
+
+# ── 6C: calendar ─────────────────────────────────────────────
+
+def _check_integration_error(db, params):
+    """True when any integration is in the error state."""
+    return db.query(models.Integration).filter(models.Integration.status == "error").first() is not None
+
+
+_RULE_CHECKS["integration_error"] = _check_integration_error
+
+
+def calendar_today(db, date: str | None = None):
+    """The day's events from the calendar cache. Read-only."""
+    import business_common
+    import integrations_google
+    from agents import schedule
+    if not integrations_google.connected(db):
+        return {"connected": False, "message": integrations_google.NOT_CONNECTED}, integrations_google.NOT_CONNECTED
+    today = schedule.to_local(datetime.utcnow()).date()
+    day = today
+    if date:
+        day = business_common.parse_day(date, today)
+        if day is None:
+            msg = f"could not read the date '{date}'"
+            return {"error": msg}, msg
+    events = [{"title": e["title"], "starts": e["start_local"], "ends": e["end_local"], "location": e["location"]}
+              for e in integrations_google.today(db, day)]
+    label = "today" if day == today else day.isoformat()
+    return ({"connected": True, "date": day.isoformat(), "events": events},
+            f"{len(events)} event(s) {label}" if events else f"nothing in the calendar {label}")
+
+
+def calendar_add_event(db, title: str, when: str, duration_minutes: int | None = None,
+                       location: str | None = None, notes: str | None = None):
+    """Create a calendar event on Google. Needs a date and a clock time."""
+    import business_common
+    import change_log
+    import integrations_google
+    from agents import schedule
+    if not (title or "").strip():
+        return {"error": "an event needs a title"}, "an event needs a title"
+    if not integrations_google.connected(db):
+        return {"error": integrations_google.NOT_CONNECTED}, integrations_google.NOT_CONNECTED
+    now_local = schedule.to_local(datetime.utcnow())
+    start = business_common.parse_when(when, now_local, default_hour=None)
+    if start is None:
+        if business_common.parse_day(when, now_local.date()) is not None:
+            return {"error": "need a time"}, "need a time"
+        msg = f"could not read '{when}' as a date and time that is still to come"
+        return {"error": msg}, msg
+    start_local = schedule.to_local(start)
+    with change_log.batch_scope(db, "assistant"):
+        try:
+            result = integrations_google.create_event(db, title, start_local, duration_minutes or 60, location, notes)
+        except (ValueError, integrations_google.GoogleError) as exc:
+            db.rollback()
+            return {"error": str(exc)}, str(exc)
+        db.commit()
+    event = result["event"]
+    when_label = _when_label(start, now_local)
+    out = {"event_id": event["id"], "title": event["title"], "when": when_label, "ends": event["end_local"],
+           "location": event["location"], "change": result["change"]}
+    return out, f"'{event['title']}' added to the calendar for {when_label}"
+
+
+_register(
+    "calendar_today", lambda db, a: calendar_today(db, date=a.get("date")),
+    "What is in the calendar for a day (today when no date is given). Read-only. When the "
+    "calendar is not connected it says so; never guess what is in it.",
+    {"date": _str("The day as he said it, e.g. 'tomorrow', 'friday', '12 May'. Omit for today.")},
+)
+
+_register(
+    "calendar_add_event",
+    lambda db, a: calendar_add_event(db, title=a.get("title", ""), when=a.get("when", ""),
+                                     duration_minutes=a.get("duration_minutes"), location=a.get("location"),
+                                     notes=a.get("notes")),
+    "Put an event in Bandile's Google Calendar. ONLY when he schedules something at a time "
+    "(\"clinic demo Friday at 2\"). It needs a clock time: if he gave only a day, ask for the time.",
+    {"title": _str("What the event is."),
+     "when": _str("The date and time as he said it, e.g. 'friday 14:00', 'tomorrow at 9am'."),
+     "duration_minutes": _int("How long it lasts (default 60)."),
+     "location": _str("Where, if he said."), "notes": _str("Anything to put in the description.")},
+    ["title", "when"],
+)
+
+
+# ── 6C: email ────────────────────────────────────────────────
+
+def email_lookup(db, who: str):
+    """The last five stored email snippets from or to a lead, a client or a contact. Read-only."""
+    import business_common
+    import crm
+    import integrations_email
+    import leads
+    who = (who or "").strip()
+    if not who:
+        return {"error": "say whose email to look up"}, "say whose email to look up"
+    if not integrations_email.configured():
+        return {"connected": False, "message": "Email is not connected"}, "Email is not connected"
+    lead, lead_scored = leads.pick_lead(db, who)
+    client, client_scored = crm.find_client(db, who)
+    contact, contact_scored = business_common.fuzzy_pick(db.query(models.Contact).all(), lambda c: c.name, who)
+    if lead is None and client is None and contact is None:
+        candidates = ([{"kind": "lead", "id": l.id, "name": l.name} for _s, l in lead_scored[:3]]
+                      + [{"kind": "client", "id": c.id, "name": _client_label(c)} for _s, c in client_scored[:3]]
+                      + [{"kind": "contact", "id": c.id, "name": c.name} for _s, c in contact_scored[:3]])
+        if candidates:
+            return ({"needs_clarification": True, "candidates": candidates},
+                    f"more than one person matches '{who}'")
+        return {"error": f"nobody on file matches '{who}'"}, f"nobody on file matches '{who}'"
+    from sqlalchemy import or_
+    conditions = []
+    if lead is not None:
+        conditions.append(models.EmailMessage.lead_id == lead.id)
+    if client is not None:
+        conditions.append(models.EmailMessage.client_id == client.id)
+    if contact is not None:
+        conditions.append(models.EmailMessage.contact_id == contact.id)
+    rows = db.query(models.EmailMessage).filter(or_(*conditions)).order_by(
+        models.EmailMessage.received_at.desc(), models.EmailMessage.id.desc()).limit(5).all()
+    name = lead.name if lead is not None else (_client_label(client) if client is not None else contact.name)
+    messages = [{"direction": "from them" if m.direction == "in" else "to them", "subject": m.subject or "(no subject)",
+                 "snippet": m.snippet or "", "when": m.received_at.date().isoformat() if m.received_at else "unknown",
+                 **({"warning": "the sender of this message could not be verified"}
+                    if m.direction == "in" and m.auth_result in ("fail", "none") else {})}
+                for m in rows]
+    if not messages:
+        return ({"connected": True, "who": name, "messages": [],
+                 "message": f"No email from or to {name} has been stored."}, f"no stored email for {name}")
+    return {"connected": True, "who": name, "messages": messages}, f"{len(messages)} email(s) with {name}"
+
+
+_register(
+    "email_lookup", lambda db, a: email_lookup(db, who=a.get("who", "")),
+    "The last few emails stored from or to a lead, a client or a contact (subject and the "
+    "first lines only). Read-only. Use it when Bandile asks what someone wrote. Only mail "
+    "from people already on file is ever stored.",
+    {"who": _str("The person's or company's name, or part of it.")},
+    ["who"],
+)

@@ -22,6 +22,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 import models
+import user_clock
 from database import get_db
 
 DEFAULT_THREAD_ID = "default"
@@ -291,7 +292,7 @@ def history(db, *, q: str | None = None, before_id: int | None = None, limit: in
     # tz_offset_minutes follows JavaScript's getTimezoneOffset(): minutes to ADD to local
     # time to get UTC (Lusaka, UTC+2, is -120).
     shift = timedelta(minutes=-int(tz_offset_minutes or 0))
-    today = ((now or datetime.utcnow()) + shift).date()
+    today = ((now or user_clock.utcnow()) + shift).date()
     days: dict = {}
     for r in rows:
         local = (r.created_at or datetime.utcnow()) + shift

@@ -33,6 +33,17 @@ else:
     atexit.register(_remove_app_db)
     APP_TEST_DATABASE_URL = "sqlite:///" + Path(_app_db_dir, "app.db").as_posix()
 os.environ["DATABASE_URL"] = APP_TEST_DATABASE_URL
+
+# ── The user's zone: this machine's ──────────────────────────────────────────
+# The app takes "today" from FOUNDER_OS_TZ (default Africa/Lusaka); the tests build their
+# fixtures from date.today(), which is this machine's day. On a UTC machine the two differ
+# for two hours a night, so the suite runs with the app in the machine's own zone. A test
+# about zones sets FOUNDER_OS_TZ itself.
+try:
+    import tzlocal
+    os.environ["FOUNDER_OS_TZ"] = tzlocal.get_localzone_name() or "UTC"
+except Exception:   # noqa: BLE001 — no zone name to be had: leave whatever is set
+    os.environ.setdefault("FOUNDER_OS_TZ", "UTC")
 if "database" in sys.modules or "main" in sys.modules:
     raise RuntimeError("tests/conftest.py must run before the app is imported")
 
@@ -95,7 +106,11 @@ except Exception:
 
 def _clear_stale_pg_connections():
     """On Postgres a session a test forgot to close keeps a lock that makes drop_all() wait
-    forever. Terminate every other connection to the test database first."""
+    forever. Terminate every other connection of ours to the test database first.
+
+    Only this role's own client connections: the database also holds backends that belong
+    to the server (an autovacuum worker, say), and a role that is not a superuser may not
+    terminate those, so asking for them fails the whole test."""
     if not _TEST_URL:
         return
     from sqlalchemy import text
@@ -103,7 +118,8 @@ def _clear_stale_pg_connections():
     with engine.connect() as conn:
         conn.execute(text(
             "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-            "WHERE datname = current_database() AND pid <> pg_backend_pid()"
+            "WHERE datname = current_database() AND pid <> pg_backend_pid() "
+            "AND usename = current_user AND backend_type = 'client backend'"
         ))
         conn.commit()
 
@@ -122,3 +138,41 @@ def fresh_db():
     except Exception:
         pass
     yield
+
+
+# ── No network, ever ─────────────────────────────────────────────────────────
+# Tests must not reach OpenAI or any other host. A test that forgets to patch an HTTP
+# seam fails here, loudly, instead of quietly making a request. Loopback stays open
+# (the in-process test client does not use sockets; a local Postgres does).
+_LOOPBACK = {"127.0.0.1", "::1", "localhost", "0.0.0.0", ""}
+
+
+class NetworkAccessInTest(RuntimeError):
+    pass
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _no_network():
+    import socket
+
+    real_connect = socket.socket.connect
+    real_getaddrinfo = socket.getaddrinfo
+
+    def guarded_connect(self, address):
+        host = address[0] if isinstance(address, tuple) else None
+        if isinstance(host, str) and host not in _LOOPBACK:
+            raise NetworkAccessInTest(f"a test tried to connect to {host}")
+        return real_connect(self, address)
+
+    def guarded_getaddrinfo(host, *args, **kwargs):
+        if isinstance(host, bytes):
+            host = host.decode("ascii", "ignore")
+        if isinstance(host, str) and host not in _LOOPBACK:
+            raise NetworkAccessInTest(f"a test tried to resolve {host}")
+        return real_getaddrinfo(host, *args, **kwargs)
+
+    socket.socket.connect = guarded_connect
+    socket.getaddrinfo = guarded_getaddrinfo
+    yield
+    socket.socket.connect = real_connect
+    socket.getaddrinfo = real_getaddrinfo

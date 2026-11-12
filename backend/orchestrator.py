@@ -8,10 +8,15 @@ Routing lives entirely in the model (see context/core/orchestrator_prompt.md) �
 no keyword router here. This module marshals conversation state (one server-side default
 thread, history budget, long-term memory), persists every message of the turn including
 tool calls and tool results, and serializes events to ``data:`` lines.
+
+A turn has one implementation, ``_turn_events``. ``orchestrator_stream`` serialises its
+events for the dock; ``run_turn`` consumes them to completion for callers with no stream
+(Telegram).
 """
 
 import json
 from datetime import date
+from types import SimpleNamespace
 
 import models
 import orchestrator_tools
@@ -19,6 +24,7 @@ import conversation
 import memory_service
 import change_log
 from openai_client import get_orchestrator_response, AI_FAILED_REPLY
+import user_clock
 
 MEMORY_RECALL_LIMIT = 5
 
@@ -36,7 +42,7 @@ def _enrich_user_text(request, db) -> str:
     text = request.text.strip()
     context_parts: list[str] = []
     today_logs = db.query(models.DailyLog).filter(
-        models.DailyLog.date == date.today()
+        models.DailyLog.date == user_clock.today()
     ).order_by(models.DailyLog.id.asc()).all()
     if today_logs:
         log_lines = "\n".join(f"- {l.entry}" for l in today_logs if l.entry)
@@ -62,8 +68,10 @@ def _build_messages(request, db) -> tuple[list, dict | None]:
     return messages, ctx
 
 
-def orchestrator_stream(request, db):
-    """Generator of SSE frames for ``POST /orchestrator``."""
+def _turn_events(request, db, outcome: dict | None = None):
+    """One assistant turn as a generator of event dicts: history, memory, the change batch
+    and the persistence of every message. ``outcome`` (when given) receives ``final``,
+    ``changes`` and ``batch_id`` once the turn is over."""
     thread_id = conversation.DEFAULT_THREAD_ID
     session_id = getattr(request, "session_id", None)
     text = request.text.strip()
@@ -90,9 +98,10 @@ def orchestrator_stream(request, db):
             if msg.get("tool_call_id") in open_calls:
                 open_calls.remove(msg["tool_call_id"])
 
-    change_log.begin_batch(db, "assistant")
+    batch_id = change_log.begin_batch(db, "assistant")
     final_text = ""
     changes: list = []
+    pending_before = _max_id(db, models.PendingAction)
     try:
         try:
             for event in get_orchestrator_response(
@@ -100,9 +109,14 @@ def orchestrator_stream(request, db):
                 context={"message": ctx} if ctx else None,
             ):
                 if event.get("type") == "final":
+                    # A send asked for in this turn is shown in full by the code itself
+                    # (who it goes to, the whole text), whatever the model chose to say.
+                    shown = _approval_blocks(db, pending_before)
+                    if shown:
+                        event = {**event, "content": ((event.get("content") or "").rstrip() + "\n\n" + shown).strip()}
                     final_text = event.get("content", "")
                     changes = event.get("changes") or []
-                yield _sse(event)
+                yield event
         except Exception as exc:  # noqa: BLE001 — never let a raw error reach the screen
             print(f"[orchestrator] turn failed: {type(exc).__name__}: {exc}")
             final_text = AI_FAILED_REPLY
@@ -111,8 +125,8 @@ def orchestrator_stream(request, db):
                 changes = change_log.current_batch_changes(db)
             except Exception:  # noqa: BLE001
                 changes = []
-            yield _sse({"type": "error", "content": AI_FAILED_REPLY})
-            yield _sse({"type": "final", "content": AI_FAILED_REPLY, "changes": changes})
+            yield {"type": "error", "content": AI_FAILED_REPLY}
+            yield {"type": "final", "content": AI_FAILED_REPLY, "changes": changes}
     finally:
         # A turn that failed or was cancelled (dropped connection, restart) may have saved
         # tool calls with no results. Close them before saving so the thread stays valid.
@@ -130,6 +144,73 @@ def orchestrator_stream(request, db):
             )
         except Exception as exc:  # noqa: BLE001
             print(f"[orchestrator] could not save turn: {type(exc).__name__}: {exc}")
+        if outcome is not None:
+            outcome.update(final=final_text, changes=changes, batch_id=batch_id)
+
+
+def orchestrator_stream(request, db):
+    """Generator of SSE frames for ``POST /orchestrator``."""
+    events = _turn_events(request, db)
+    try:
+        for event in events:
+            yield _sse(event)
+    finally:
+        events.close()      # a dropped connection must still close the turn (open tool calls, the batch)
+
+
+def _approval_blocks(db, pending_before: int) -> str:
+    """The sends this turn asked approval for, each spelled out. Empty when there are none."""
+    try:
+        import outreach
+        rows = db.query(models.PendingAction).filter(
+            models.PendingAction.id > pending_before, models.PendingAction.status == "pending",
+            models.PendingAction.kind == "send_outreach").order_by(models.PendingAction.id).all()
+        blocks = []
+        for p in rows:
+            message = db.query(models.OutreachMessage).filter(models.OutreachMessage.id == p.record_id).first()
+            if message is not None:
+                blocks.append(outreach.approval_text(db, message))
+        return "\n\n".join(blocks)
+    except Exception as exc:  # noqa: BLE001 — never lose a reply over its footer
+        print(f"[orchestrator] could not describe a pending send: {type(exc).__name__}")
+        return ""
+
+
+def _max_id(db, model) -> int:
+    row = db.query(model.id).order_by(model.id.desc()).first()
+    return row[0] if row else 0
+
+
+def run_turn(text: str, db, *, source: str = "dock", session_id: str | None = None, context=None) -> dict:
+    """Run one turn to completion, for a caller with no stream.
+
+    Same history, memory recall, change batch and persistence as the dock. ``session_id``
+    is saved on every row of the turn (Telegram passes ``telegram:<chat_id>``); ``source``
+    stands in for it when none is given. ``context`` is accepted and ignored, as it is on
+    ``POST /orchestrator``. Returns ``{final, changes, pending, suggestions, tool_calls,
+    batch_id}``, where pending and suggestions are the ones this turn created."""
+    import actions
+    request = SimpleNamespace(text=str(text or ""),
+                              session_id=session_id or (source if source and source != "dock" else None))
+    pending_before = _max_id(db, models.PendingAction)
+    suggestions_before = _max_id(db, models.Suggestion)
+    outcome: dict = {}
+    tool_calls: list[str] = []
+    for event in _turn_events(request, db, outcome):
+        if event.get("type") == "tool_call":
+            tool_calls.append(event.get("tool"))
+    pending = db.query(models.PendingAction).filter(
+        models.PendingAction.id > pending_before, models.PendingAction.status == "pending"
+    ).order_by(models.PendingAction.id).all()
+    suggestions = db.query(models.Suggestion).filter(
+        models.Suggestion.id > suggestions_before, models.Suggestion.status == "pending"
+    ).order_by(models.Suggestion.id).all()
+    return {
+        "final": outcome.get("final") or "", "changes": outcome.get("changes") or [],
+        "pending": [actions._pending_dict(p) for p in pending],
+        "suggestions": [actions._suggestion_dict(s) for s in suggestions],
+        "tool_calls": tool_calls, "batch_id": outcome.get("batch_id"),
+    }
 
 
 def run_off_track(db) -> list:

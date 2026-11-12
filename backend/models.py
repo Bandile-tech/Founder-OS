@@ -1,6 +1,7 @@
-from sqlalchemy import Column, Integer, String, Date, Float, Text, DateTime, ForeignKey, Boolean
+from sqlalchemy import Column, Integer, String, Date, Float, Text, DateTime, ForeignKey, Boolean, Index
 from sqlalchemy.orm import relationship
 from datetime import datetime
+import os
 from database import Base
 
 
@@ -143,6 +144,8 @@ class Todo(Base):
     source = Column(String)
     roadmap_id = Column(String, nullable=True)
     completed_at = Column(Date, nullable=True)
+    lead_id = Column(Integer, nullable=True)     # follow-up for a lead (category 'outreach')
+    client_id = Column(Integer, nullable=True)   # task tied to a client
 
 
 class ChatMessage(Base):
@@ -188,6 +191,7 @@ class LLMUsage(Base):
     output_tokens = Column(Integer, default=0)
     estimated_cost_usd = Column(Float, default=0.0)
     duration_ms = Column(Integer, nullable=True)
+    agent_run_id = Column(Integer, nullable=True, index=True)   # the agent run that made the call
 
 
 class BibleEntry(Base):
@@ -239,6 +243,13 @@ class SocialScore(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+def default_currency() -> str:
+    """The currency a client is in when none is given: DEFAULT_CURRENCY (ZMW or USD),
+    Kwacha when the variable is unset or names anything else."""
+    cur = (os.getenv("DEFAULT_CURRENCY") or "ZMW").strip().upper()
+    return cur if cur in ("ZMW", "USD") else "ZMW"
+
+
 class Client(Base):
     """Aether business pipeline — prospect → active → closed."""
     __tablename__ = "clients"
@@ -252,6 +263,10 @@ class Client(Base):
     notes = Column(Text, default="")
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    lead_id = Column(Integer, nullable=True)          # the lead this client was converted from
+    currency = Column(String, default=default_currency)   # USD | ZMW (DEFAULT_CURRENCY, else ZMW)
+    tags = Column(String, nullable=True)              # comma-separated
+    health = Column(String, default="green")          # green|amber|red, computed by crm.client_health
 
 
 class Revenue(Base):
@@ -554,6 +569,9 @@ class ResearchProject(Base):
     error        = Column(Text, nullable=True)
     created_at   = Column(DateTime, default=datetime.utcnow)
     completed_at = Column(DateTime, nullable=True)
+    cost_usd     = Column(Float, nullable=True)      # summed from llm_usage after the run
+    llm_calls    = Column(Integer, nullable=True)
+    objective_id = Column(Integer, nullable=True)    # research_objectives.id when a standing objective ran it
 
     findings = relationship("ResearchFinding", back_populates="project",
                             cascade="all, delete-orphan")
@@ -586,6 +604,10 @@ class ResearchFinding(Base):
     status              = Column(String, nullable=False, default="surfaced", index=True)
     notes               = Column(Text, nullable=True)
     created_at          = Column(DateTime, default=datetime.utcnow)
+    recommendation      = Column(String, nullable=True)   # pursue|watch|park
+    times_seen          = Column(Integer, default=1)
+    dismissed_reason    = Column(Text, nullable=True)
+    reviewed_at         = Column(DateTime, nullable=True)  # set on promote or dismiss
 
     project  = relationship("ResearchProject", back_populates="findings")
     pipeline = relationship("OpportunityPipeline", back_populates="finding", uselist=False,
@@ -604,8 +626,25 @@ class OpportunityPipeline(Base):
     notes       = Column(Text, nullable=True)
     promoted_at = Column(DateTime, default=datetime.utcnow)
     updated_at  = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    next_action = Column(Text, nullable=True)
+    due_date    = Column(Date, nullable=True)
 
     finding = relationship("ResearchFinding", back_populates="pipeline")
+
+
+class ResearchObjective(Base):
+    """A standing research objective that recurs every ``cadence_days``."""
+    __tablename__ = "research_objectives"
+
+    id                = Column(Integer, primary_key=True, index=True)
+    objective         = Column(Text, nullable=False)
+    cadence_days      = Column(Integer, nullable=False, default=14)
+    enabled           = Column(Boolean, default=True)
+    max_opportunities = Column(Integer, default=3)
+    last_run_at       = Column(DateTime, nullable=True)
+    last_project_id   = Column(Integer, nullable=True)
+    created_at        = Column(DateTime, default=datetime.utcnow)
+    updated_at        = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 class ResearchMemoryNote(Base):
@@ -644,6 +683,7 @@ class ChangeLog(Base):
     after_json  = Column(Text, nullable=True)
     summary     = Column(String, nullable=True)
     undone_at   = Column(DateTime, nullable=True)
+    undoable    = Column(Boolean, default=True, nullable=True)   # False: records something that has left (a sent message)
 
 
 class PendingAction(Base):
@@ -755,3 +795,593 @@ class BriefingSummary(Base):
     greeting_line = Column(String, nullable=True)
     model         = Column(String, nullable=True)
     created_at    = Column(DateTime, default=datetime.utcnow)
+
+
+# ── PHASE 5B: PROSPECTING AND OUTREACH ───────────────────────
+
+class Lead(Base):
+    """A prospect: a person or business Bandile intends to approach.
+
+    status: new → qualified | disqualified → contacted → replied → converted | lost."""
+    __tablename__ = "leads"
+
+    id                  = Column(Integer, primary_key=True, index=True)
+    name                = Column(String, nullable=False)
+    company             = Column(String, nullable=True)
+    role                = Column(String, nullable=True)
+    email               = Column(String, nullable=True)     # lower-cased on write
+    phone               = Column(String, nullable=True)     # digits and a leading '+' only
+    whatsapp            = Column(String, nullable=True)     # same; defaults to phone
+    linkedin_url        = Column(String, nullable=True)
+    website             = Column(String, nullable=True)
+    location            = Column(String, nullable=True)
+    segment             = Column(String, nullable=True)     # free text, lower-cased
+    source              = Column(String, nullable=False, default="manual")
+    status              = Column(String, nullable=False, default="new")
+    qualification_score = Column(Integer, nullable=True)    # 0-100
+    qualification_json  = Column(Text, nullable=True)
+    opportunity_id      = Column(Integer, nullable=True)    # research_findings.id
+    client_id           = Column(Integer, nullable=True)    # clients.id, set on convert
+    notes               = Column(Text, nullable=True)
+    last_contact_at     = Column(DateTime, nullable=True)
+    next_follow_up_at   = Column(Date, nullable=True)       # mirrors the open follow-up todo
+    created_at          = Column(DateTime, default=datetime.utcnow)
+    updated_at          = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class LeadImport(Base):
+    """One row per CSV import of leads, with its counts and column mapping."""
+    __tablename__ = "lead_imports"
+
+    id           = Column(Integer, primary_key=True, index=True)
+    filename     = Column(String, nullable=True)
+    created      = Column(Integer, default=0)
+    updated      = Column(Integer, default=0)
+    skipped      = Column(Integer, default=0)
+    total_rows   = Column(Integer, default=0)
+    mapping_json = Column(Text, nullable=True)
+    segment      = Column(String, nullable=True)
+    created_at   = Column(DateTime, default=datetime.utcnow)
+
+
+class OutreachMessage(Base):
+    """A drafted, sent or received message for a lead. Nothing reaches `sent` without a
+    human approval (a tap, or a confirmed pending action).
+
+    status: draft → approved → sent | failed; cancelled; inbound rows are `received`."""
+    __tablename__ = "outreach_messages"
+
+    id                = Column(Integer, primary_key=True, index=True)
+    lead_id           = Column(Integer, nullable=False)
+    channel           = Column(String, nullable=False)       # whatsapp|email|linkedin|call|other
+    direction         = Column(String, nullable=False, default="out")
+    subject           = Column(String, nullable=True)        # email only
+    body              = Column(Text, nullable=False)
+    status            = Column(String, nullable=False, default="draft")
+    version           = Column(Integer, default=1)
+    supersedes_id     = Column(Integer, nullable=True)
+    brief             = Column(Text, nullable=True)
+    pending_action_id = Column(Integer, nullable=True)
+    approved_at       = Column(DateTime, nullable=True)
+    sent_at           = Column(DateTime, nullable=True)
+    external_id       = Column(String, nullable=True)        # SMTP message-id
+    error             = Column(Text, nullable=True)
+    created_by        = Column(String, nullable=False, default="assistant")
+    created_at        = Column(DateTime, default=datetime.utcnow)
+    updated_at        = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    replied_at        = Column(DateTime, nullable=True)      # a reply to this message arrived by email
+
+
+# ── PHASE 5C: CRM ────────────────────────────────────────────
+
+class Contact(Base):
+    """A person at a client."""
+    __tablename__ = "contacts"
+
+    id         = Column(Integer, primary_key=True, index=True)
+    client_id  = Column(Integer, nullable=False)
+    name       = Column(String, nullable=False)
+    role       = Column(String, nullable=True)
+    email      = Column(String, nullable=True)
+    phone      = Column(String, nullable=True)
+    whatsapp   = Column(String, nullable=True)
+    is_primary = Column(Boolean, default=False)
+    notes      = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class Deal(Base):
+    """Something being sold to a client. stage: lead → proposal → negotiation → won | lost."""
+    __tablename__ = "deals"
+
+    id             = Column(Integer, primary_key=True, index=True)
+    client_id      = Column(Integer, nullable=False)
+    title          = Column(String, nullable=False)
+    stage          = Column(String, nullable=False, default="lead")
+    amount         = Column(Float, nullable=True)
+    currency       = Column(String, default="ZMW")
+    probability    = Column(Integer, nullable=True)     # percent; defaults by stage
+    expected_close = Column(Date, nullable=True)
+    won_at         = Column(DateTime, nullable=True)
+    lost_reason    = Column(Text, nullable=True)
+    notes          = Column(Text, nullable=True)
+    project_id     = Column(Integer, nullable=True)     # set when a won deal becomes a project
+    created_at     = Column(DateTime, default=datetime.utcnow)
+    updated_at     = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class Project(Base):
+    """Something being delivered: client work or an internal project (shared with the
+    portfolio). status: planned | active | paused | delivered | closed | cancelled."""
+    __tablename__ = "projects"
+
+    id                = Column(Integer, primary_key=True, index=True)
+    title             = Column(String, nullable=False)
+    kind              = Column(String, nullable=False, default="client")   # client | internal
+    client_id         = Column(Integer, nullable=True)
+    deal_id           = Column(Integer, nullable=True)
+    status            = Column(String, nullable=False, default="active")
+    priority          = Column(Integer, default=3)       # 1 high … 5 low
+    expected_value    = Column(Float, nullable=True)
+    currency          = Column(String, default="ZMW")
+    effort_hours_week = Column(Float, nullable=True)
+    start_date        = Column(Date, nullable=True)
+    due_date          = Column(Date, nullable=True)
+    delivered_at      = Column(DateTime, nullable=True)
+    next_action       = Column(Text, nullable=True)
+    blocked_reason    = Column(Text, nullable=True)
+    last_activity_at  = Column(DateTime, nullable=True)  # bumped by updates, communications, payments
+    health            = Column(String, default="green")
+    notes             = Column(Text, nullable=True)
+    created_at        = Column(DateTime, default=datetime.utcnow)
+    updated_at        = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class Payment(Base):
+    """Money a client owes or has paid. A paid payment always has one linked revenue row.
+    status: due | paid | overdue | cancelled."""
+    __tablename__ = "payments"
+
+    id           = Column(Integer, primary_key=True, index=True)
+    client_id    = Column(Integer, nullable=False)
+    deal_id      = Column(Integer, nullable=True)
+    project_id   = Column(Integer, nullable=True)
+    title        = Column(String, nullable=True)
+    amount       = Column(Float, nullable=False)
+    currency     = Column(String, nullable=False, default="ZMW")
+    status       = Column(String, nullable=False, default="due")
+    due_date     = Column(Date, nullable=True)
+    paid_at      = Column(Date, nullable=True)
+    revenue_id   = Column(Integer, nullable=True)        # revenue.id, set when paid
+    recurring_id = Column(Integer, nullable=True)        # set for generated instalments
+    period_start = Column(Date, nullable=True)
+    notes        = Column(Text, nullable=True)
+    created_at   = Column(DateTime, default=datetime.utcnow)
+    updated_at   = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class RecurringRevenue(Base):
+    """A retainer or subscription that generates a due payment each period."""
+    __tablename__ = "recurring_revenue"
+
+    id           = Column(Integer, primary_key=True, index=True)
+    client_id    = Column(Integer, nullable=False)
+    title        = Column(String, nullable=False)
+    amount       = Column(Float, nullable=False)
+    currency     = Column(String, nullable=False, default="ZMW")
+    interval     = Column(String, nullable=False, default="monthly")   # monthly|quarterly|annual
+    day_of_month = Column(Integer, default=1)
+    next_due     = Column(Date, nullable=False)
+    active       = Column(Boolean, default=True)
+    ended_at     = Column(Date, nullable=True)
+    created_at   = Column(DateTime, default=datetime.utcnow)
+    updated_at   = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class Communication(Base):
+    """One conversation with a client, contact or lead, as a line or two."""
+    __tablename__ = "communications"
+
+    id                  = Column(Integer, primary_key=True, index=True)
+    client_id           = Column(Integer, nullable=True)
+    contact_id          = Column(Integer, nullable=True)
+    lead_id             = Column(Integer, nullable=True)
+    channel             = Column(String, nullable=False)     # whatsapp|email|call|meeting|linkedin|other
+    direction           = Column(String, nullable=False)     # out | in
+    summary             = Column(Text, nullable=False)
+    occurred_at         = Column(DateTime, nullable=False, default=datetime.utcnow)
+    outreach_message_id = Column(Integer, nullable=True)
+    source              = Column(String, default="conversation")
+    created_at          = Column(DateTime, default=datetime.utcnow)
+
+
+# ── PHASE 5E: PROJECT PORTFOLIO ──────────────────────────────
+
+class ProjectUpdate(Base):
+    """A dated line on a project: a note, a milestone, a blocker, an unblock or a status change."""
+    __tablename__ = "project_updates"
+
+    id          = Column(Integer, primary_key=True, index=True)
+    project_id  = Column(Integer, nullable=False)
+    kind        = Column(String, nullable=False, default="note")   # note|milestone|blocker|unblocked|status
+    text        = Column(Text, nullable=False)
+    occurred_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    source      = Column(String, default="conversation")
+    created_at  = Column(DateTime, default=datetime.utcnow)
+
+
+# ── PHASE 6B: AGENTS ─────────────────────────────────────────
+
+class Agent(Base):
+    """One row per registered agent. The registry in code is the source of truth; this
+    table holds the toggle, schedule overrides and last-run facts."""
+    __tablename__ = "agents"
+
+    id               = Column(Integer, primary_key=True, index=True)
+    key              = Column(String, nullable=False, unique=True)
+    enabled          = Column(Boolean, nullable=False, default=True)
+    interval_minutes = Column(Integer, nullable=True)      # overrides, nullable
+    at_time          = Column(String, nullable=True)
+    weekdays_json    = Column(Text, nullable=True)
+    config_json      = Column(Text, nullable=True)
+    last_run_at      = Column(DateTime, nullable=True)
+    last_status      = Column(String, nullable=True)
+    last_summary     = Column(String, nullable=True)
+    runs_count       = Column(Integer, default=0)
+    cost_usd_total   = Column(Float, default=0.0)
+    created_at       = Column(DateTime, default=datetime.utcnow)
+    updated_at       = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    # Set while a run holds the agent (runner._claim): one run at a time, across processes.
+    claimed_at       = Column(DateTime, nullable=True)
+
+
+class AgentRun(Base):
+    """The activity log: one row per run. status: running|completed|skipped|failed|violation."""
+    __tablename__ = "agent_runs"
+
+    id            = Column(Integer, primary_key=True, index=True)
+    agent_key     = Column(String, nullable=False)
+    trigger       = Column(String, nullable=False)          # schedule|event|manual|in_process
+    tick_id       = Column(Integer, nullable=True)
+    started_at    = Column(DateTime, nullable=False, default=datetime.utcnow)
+    finished_at   = Column(DateTime, nullable=True)
+    status        = Column(String, nullable=False, default="running")
+    summary       = Column(String, nullable=True)
+    result_json   = Column(Text, nullable=True)
+    error         = Column(Text, nullable=True)
+    log_text      = Column(Text, nullable=True)
+    llm_calls     = Column(Integer, default=0)
+    cost_usd      = Column(Float, default=0.0)
+    changes_count = Column(Integer, default=0)
+    batch_id      = Column(String, nullable=True)
+    over_time     = Column(Boolean, default=False)
+
+
+class AgentEvent(Base):
+    """Something happened that an agent may react to on the next tick."""
+    __tablename__ = "agent_events"
+
+    id           = Column(Integer, primary_key=True, index=True)
+    kind         = Column(String, nullable=False)
+    payload_json = Column(Text, nullable=True)
+    created_at   = Column(DateTime, nullable=False, default=datetime.utcnow)
+    consumed_at  = Column(DateTime, nullable=True)
+    dropped      = Column(Boolean, default=False)
+    source       = Column(String, nullable=True)
+
+
+class AgentEventDelivery(Base):
+    """An event handed to one subscriber. An event is consumed once every enabled
+    subscriber has a row here, so an agent the tick deferred still gets it next time."""
+    __tablename__ = "agent_event_deliveries"
+    __table_args__ = (Index("ux_agent_event_deliveries", "event_id", "agent_key", unique=True),)
+
+    id           = Column(Integer, primary_key=True, index=True)
+    event_id     = Column(Integer, nullable=False)
+    agent_key    = Column(String, nullable=False)
+    delivered_at = Column(DateTime, nullable=True)
+
+
+class MigrationMark(Base):
+    """A data migration that must run once, not on every startup, leaves its key here
+    (``migrations._helpers.claim_once``)."""
+    __tablename__ = "migration_marks"
+
+    key        = Column(String, primary_key=True)
+    applied_at = Column(DateTime, nullable=True)
+
+
+class JobTick(Base):
+    """One row per tick. trigger: github|manual|in_process."""
+    __tablename__ = "job_ticks"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    trigger         = Column(String, nullable=False)
+    started_at      = Column(DateTime, nullable=True)
+    finished_at     = Column(DateTime, nullable=True)
+    agents_run      = Column(Integer, nullable=True)
+    agents_skipped  = Column(Integer, nullable=True)
+    events_consumed = Column(Integer, nullable=True)
+    errors          = Column(Integer, nullable=True)
+    duration_ms     = Column(Integer, nullable=True)
+    summary_json    = Column(Text, nullable=True)
+
+
+# ── PHASE 6A: APPLICATIONS ───────────────────────────────────
+
+class Application(Base):
+    """A long-horizon application. ``deadline_source`` says where the deadline came from:
+    user (Bandile stated it), document (read from text he pasted) or unknown (no deadline)."""
+    __tablename__ = "applications"
+
+    id                      = Column(Integer, primary_key=True, index=True)
+    name                    = Column(String, nullable=False)
+    institution             = Column(String, nullable=True)
+    programme               = Column(String, nullable=True)
+    kind                    = Column(String, nullable=False, default="university")
+    deadline                = Column(Date, nullable=True)
+    deadline_source         = Column(String, nullable=True)     # user | document | unknown
+    decision_date           = Column(Date, nullable=True)
+    status                  = Column(String, nullable=False, default="researching")
+    priority                = Column(Integer, default=2)        # 1 high … 3 low
+    portal_url              = Column(String, nullable=True)
+    notes                   = Column(Text, nullable=True)
+    requirements_updated_at = Column(DateTime, nullable=True)   # cache control for the gap review
+    gaps_reviewed_at        = Column(DateTime, nullable=True)
+    created_at              = Column(DateTime, default=datetime.utcnow)
+    updated_at              = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ApplicationRequirement(Base):
+    """One item of an application's checklist: missing → in_progress → ready → submitted,
+    or not_required."""
+    __tablename__ = "application_requirements"
+
+    id             = Column(Integer, primary_key=True, index=True)
+    application_id = Column(Integer, nullable=False)
+    title          = Column(String, nullable=False)
+    kind           = Column(String, nullable=False, default="other")
+    status         = Column(String, nullable=False, default="missing")
+    due_date       = Column(Date, nullable=True)
+    due_source     = Column(String, nullable=True)             # user | document
+    details        = Column(Text, nullable=True)
+    todo_id        = Column(Integer, nullable=True)
+    note_id        = Column(Integer, nullable=True)
+    sort_order     = Column(Integer, default=0)
+    created_at     = Column(DateTime, default=datetime.utcnow)
+    updated_at     = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ApplicationGap(Base):
+    """Something weak in the profile relative to an application, from a review.
+    status: open | addressed | accepted_risk | superseded (replaced by a newer review)."""
+    __tablename__ = "application_gaps"
+
+    id               = Column(Integer, primary_key=True, index=True)
+    application_id   = Column(Integer, nullable=False)
+    gap              = Column(String, nullable=False)
+    severity         = Column(String, nullable=False)          # high | medium | low
+    evidence         = Column(Text, nullable=True)
+    suggested_action = Column(Text, nullable=True)
+    status           = Column(String, nullable=False, default="open")
+    review_batch     = Column(String, nullable=True)
+    created_at       = Column(DateTime, default=datetime.utcnow)
+    updated_at       = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+# ── PHASE 5D: PERSONAL-BRAND ANALYTICS ───────────────────────
+# Real platform data only: a metric the platform does not give is NULL, never 0.
+
+class SocialAccount(Base):
+    """A connected platform account. access: api_key | export | oauth."""
+    __tablename__ = "social_accounts"
+
+    id             = Column(Integer, primary_key=True, index=True)
+    platform       = Column(String, nullable=False)        # youtube|linkedin|x|instagram|tiktok
+    handle         = Column(String, nullable=True)
+    external_id    = Column(String, nullable=True)         # e.g. the YouTube channel id
+    access         = Column(String, nullable=False, default="api_key")
+    config_json    = Column(Text, nullable=True)           # adapter config; never a secret
+    status         = Column(String, nullable=False, default="connected")   # connected|error|disconnected
+    last_synced_at = Column(DateTime, nullable=True)
+    last_error     = Column(Text, nullable=True)
+    created_at     = Column(DateTime, default=datetime.utcnow)
+    updated_at     = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ContentPost(Base):
+    """A post or video on a platform. kind: video|short|post|article|thread."""
+    __tablename__ = "content_posts"
+    __table_args__ = (Index("ux_content_posts_account_external", "account_id", "external_id", unique=True),)
+
+    id          = Column(Integer, primary_key=True, index=True)
+    account_id  = Column(Integer, nullable=False)
+    external_id = Column(String, nullable=False)
+    url         = Column(String, nullable=True)
+    title       = Column(String, nullable=True)
+    kind        = Column(String, nullable=True)
+    posted_at   = Column(DateTime, nullable=True)
+    topic_tags  = Column(String, nullable=True)            # comma list
+    idea_id     = Column(Integer, nullable=True)           # content_ideas.id
+    created_at  = Column(DateTime, default=datetime.utcnow)
+    updated_at  = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ContentMetric(Base):
+    """An append-only snapshot of a post's numbers. source: api | export."""
+    __tablename__ = "content_metrics"
+    __table_args__ = (Index("ix_content_metrics_post_captured", "post_id", "captured_at"),)
+
+    id           = Column(Integer, primary_key=True, index=True)
+    post_id      = Column(Integer, nullable=False)
+    captured_at  = Column(DateTime, nullable=False, default=datetime.utcnow)
+    views        = Column(Integer, nullable=True)
+    likes        = Column(Integer, nullable=True)
+    comments     = Column(Integer, nullable=True)
+    shares       = Column(Integer, nullable=True)
+    saves        = Column(Integer, nullable=True)
+    impressions  = Column(Integer, nullable=True)
+    watch_time_s = Column(Integer, nullable=True)
+    source       = Column(String, nullable=True)
+    raw_json     = Column(Text, nullable=True)
+
+
+class AccountMetric(Base):
+    """An append-only snapshot of an account's numbers."""
+    __tablename__ = "account_metrics"
+
+    id          = Column(Integer, primary_key=True, index=True)
+    account_id  = Column(Integer, nullable=False)
+    captured_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    followers   = Column(Integer, nullable=True)
+    following   = Column(Integer, nullable=True)
+    posts_count = Column(Integer, nullable=True)
+    total_views = Column(Integer, nullable=True)
+    source      = Column(String, nullable=True)
+    raw_json    = Column(Text, nullable=True)
+
+
+class ContentIdea(Base):
+    """The idea backlog and the content calendar. status: idea → drafted → scheduled →
+    posted | dropped."""
+    __tablename__ = "content_ideas"
+    __table_args__ = (Index("ix_content_ideas_status_scheduled", "status", "scheduled_for"),)
+
+    id             = Column(Integer, primary_key=True, index=True)
+    title          = Column(String, nullable=False)
+    angle          = Column(Text, nullable=True)
+    platform       = Column(String, nullable=True)         # null = any
+    format         = Column(String, nullable=True)         # short|video|post|article|thread
+    status         = Column(String, nullable=False, default="idea")
+    scheduled_for  = Column(Date, nullable=True)
+    posted_post_id = Column(Integer, nullable=True)        # content_posts.id when linked
+    source         = Column(String, default="conversation")
+    score          = Column(Integer, nullable=True)        # optional 1-5
+    created_at     = Column(DateTime, default=datetime.utcnow)
+    updated_at     = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class BrandInsight(Base):
+    """Cached weekly insight text: one row per platform per ISO week."""
+    __tablename__ = "brand_insights"
+    __table_args__ = (Index("ux_brand_insights_week_platform", "week_start", "platform", unique=True),)
+
+    id         = Column(Integer, primary_key=True, index=True)
+    week_start = Column(Date, nullable=False)
+    platform   = Column(String, nullable=False)
+    text       = Column(Text, nullable=False)
+    model      = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+# ── PHASE 6C: INTEGRATIONS ───────────────────────────────────
+
+class Integration(Base):
+    """One row per external provider. ``secret_json`` holds tokens the provider issued at
+    runtime; it is never serialised by any endpoint."""
+    __tablename__ = "integrations"
+
+    id            = Column(Integer, primary_key=True, index=True)
+    provider      = Column(String, nullable=False, unique=True)   # google_calendar|email|telegram|youtube
+    status        = Column(String, nullable=False, default="disconnected")   # disconnected|connected|error|pending
+    account_label = Column(String, nullable=True)
+    config_json   = Column(Text, nullable=True)            # non-secret settings
+    secret_json   = Column(Text, nullable=True)            # tokens — never returned
+    scopes        = Column(String, nullable=True)
+    connected_at  = Column(DateTime, nullable=True)
+    last_sync_at  = Column(DateTime, nullable=True)
+    last_error    = Column(Text, nullable=True)
+    created_at    = Column(DateTime, default=datetime.utcnow)
+    updated_at    = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class CalendarEvent(Base):
+    """A cached calendar event. Times are naive UTC; ``start_date`` is the local date."""
+    __tablename__ = "calendar_events"
+    __table_args__ = (Index("ux_calendar_events_provider_external", "provider", "external_id", unique=True),)
+
+    id                = Column(Integer, primary_key=True, index=True)
+    provider          = Column(String, default="google")
+    calendar_id       = Column(String, nullable=True)
+    external_id       = Column(String, nullable=False)
+    title             = Column(String, nullable=True)
+    description       = Column(Text, nullable=True)        # at most 1,000 characters
+    location          = Column(String, nullable=True)
+    start_at          = Column(DateTime, nullable=True)
+    end_at            = Column(DateTime, nullable=True)
+    all_day           = Column(Boolean, default=False)
+    start_date        = Column(Date, nullable=True, index=True)
+    status            = Column(String, default="confirmed")
+    html_link         = Column(String, nullable=True)
+    created_by_us     = Column(Boolean, default=False)     # events Founder OS created
+    remote_updated_at = Column(DateTime, nullable=True)
+    synced_at         = Column(DateTime, nullable=True)
+    deleted_at        = Column(DateTime, nullable=True)    # soft delete when gone upstream
+
+
+class EmailMessage(Base):
+    """An email from or to a known lead, contact or client: headers and a snippet of at
+    most 500 characters. Bodies are never stored; mail from unknown senders is never stored."""
+    __tablename__ = "email_messages"
+
+    id                  = Column(Integer, primary_key=True, index=True)
+    message_id          = Column(String, nullable=False, unique=True)
+    thread_key          = Column(String, nullable=True)
+    direction           = Column(String, nullable=False)   # in | out
+    from_addr           = Column(String, nullable=True)
+    to_addr             = Column(String, nullable=True)
+    subject             = Column(String, nullable=True)
+    snippet             = Column(Text, nullable=True)
+    received_at         = Column(DateTime, nullable=True, index=True)
+    lead_id             = Column(Integer, nullable=True)
+    client_id           = Column(Integer, nullable=True)
+    contact_id          = Column(Integer, nullable=True)
+    outreach_message_id = Column(Integer, nullable=True)
+    processed_at        = Column(DateTime, nullable=True)
+    created_at          = Column(DateTime, default=datetime.utcnow)
+    # pass | fail | none (no trusted header) | confirmed (Bandile accepted it); NULL on rows
+    # from before the check and on sent mail
+    auth_result         = Column(String, nullable=True)
+
+
+# ── PHASE 6D: NOTIFICATIONS ──────────────────────────────────
+
+class Notification(Base):
+    """One message to Bandile: the outbox row and its outcome. Nothing sends directly;
+    ``notify.dispatch`` decides each queued row."""
+    __tablename__ = "notifications"
+
+    id                = Column(Integer, primary_key=True, index=True)
+    created_at        = Column(DateTime, default=datetime.utcnow)
+    channel           = Column(String, nullable=False, default="telegram")
+    kind              = Column(String, nullable=False)     # briefing|evening|alert|deadline|reminder|reply|test
+    title             = Column(String, nullable=True)
+    body              = Column(Text, nullable=False)       # plain text
+    dedupe_key        = Column(String, nullable=True, unique=True)
+    send_at           = Column(DateTime, nullable=True)    # naive UTC; null = now
+    status            = Column(String, nullable=False, default="queued")   # queued|sent|failed|suppressed|cancelled
+    sent_at           = Column(DateTime, nullable=True)
+    error             = Column(Text, nullable=True)
+    external_id       = Column(String, nullable=True)
+    agent_run_id      = Column(Integer, nullable=True)
+    source            = Column(String, nullable=True)
+    suppressed_reason = Column(String, nullable=True)      # quiet_hours|daily_cap|channel_disabled|not_paired
+
+
+class NotificationSettings(Base):
+    """Exactly one row (id=1). Times are local, "HH:MM"."""
+    __tablename__ = "notification_settings"
+
+    id                 = Column(Integer, primary_key=True)
+    enabled            = Column(Boolean, default=True)
+    morning_time       = Column(String, default="06:00")
+    evening_time       = Column(String, nullable=True)     # null = no evening review
+    quiet_start        = Column(String, default="22:00")
+    quiet_end          = Column(String, default="05:00")
+    alert_min_severity = Column(String, default="warn")    # info|warn|critical
+    daily_cap          = Column(Integer, default=12)
+    channels_json      = Column(Text, nullable=True)       # {"telegram": true}
+    deadline_days_json = Column(Text, nullable=True)       # [30, 14, 7, 3, 1]
+    muted_until        = Column(DateTime, nullable=True)   # naive UTC; /mute sets it
+    updated_at         = Column(DateTime, default=datetime.utcnow)

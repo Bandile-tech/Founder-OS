@@ -87,6 +87,7 @@ def _seed_legacy_and_current():
     db.add(models.Revenue(amount=500, currency="ZMW", source="Wamu's Bakes", date=TODAY))
     db.add(models.Revenue(amount=20, currency="USD", source="Consulting", date=TODAY))
     db.add(models.Todo(text="Send the proposal", priority=1, done=False, due_date=TODAY))
+    db.add(models.Client(name="Bel Baby", status="active"))
     db.commit()
     db.close()
 
@@ -121,7 +122,9 @@ def _run_every_tool(db) -> dict:
     """Call every registered tool once with plausible arguments. Returns name → model text."""
     out = {}
     fake_research = {"opportunities": [], "project_id": 1, "rejected_count": 0}
+    import agents.runner
     with patch("main.get_parse_response", return_value=_parsed(habits_done=["ironing"])), \
+         patch.object(agents.runner, "SessionLocal", TestSessionLocal), \
          patch("market_intel.agent.run_market_research", return_value=fake_research):
         calls = [
             ("route_brain_dump", {"text": "ironed my clothes"}),
@@ -145,6 +148,41 @@ def _run_every_tool(db) -> dict:
             ("update_syllabus", {"topic": "Coordinate geometry", "status": "revised"}),
             ("set_exam_date", {"subject": "Maths", "date": (TODAY + timedelta(days=30)).isoformat(), "paper": "P1"}),
             ("show_view", {"view": "history", "params": {"q": "probability"}}),
+            ("add_lead", {"name": "Mercy Banda", "company": "Sunrise Pharmacy", "segment": "lusaka pharmacies"}),
+            ("find_leads", {"segment": "lusaka pharmacies"}),
+            ("crm_lookup", {"query": "Bel Baby"}),
+            ("log_communication", {"who": "Bel Baby", "summary": "Called about the delivery date"}),
+            ("update_deal", {"deal": "Website build", "client": "Bel Baby", "amount": 4000, "create": True}),
+            ("add_contact", {"client": "Bel Baby", "name": "Mrs Banda", "phone": "0977 000 222"}),
+            ("record_payment", {"client": "Bel Baby", "amount": 1500, "status": "due", "due_date": "tomorrow"}),
+            ("crm_summary", {}),
+            ("qualify_leads", {"segment": "lusaka pharmacies"}),
+            ("draft_outreach", {"lead": "Mercy Banda", "channel": "whatsapp", "brief": "intro"}),
+            ("request_send", {"message_id": 1}),
+            ("set_follow_up", {"lead": "Mercy Banda", "date": "in 3 days"}),
+            ("log_lead_reply", {"lead": "Mercy Banda", "summary": "Wants a demo on Friday"}),
+            ("convert_lead", {"lead": "Mercy Banda"}),
+            ("update_project", {"create": True, "title": "Founder OS Phase 5", "priority": 1, "due_date": "in 3 weeks"}),
+            ("log_project_update", {"project": "Founder OS Phase 5", "text": "Shipped the leads importer", "kind": "milestone"}),
+            ("portfolio_review", {}),
+            ("schedule_research", {"objective": "painful admin problems in Lusaka pharmacies", "cadence_days": 14}),
+            ("dismiss_research_finding", {"finding_id": 999}),
+            ("agent_status", {}),
+            ("run_agent", {"key": "portfolio_reviewer"}),
+            ("set_agent_schedule", {"key": "lead_qualifier", "interval_minutes": 240}),
+            ("add_application", {"name": "Wharton", "institution": "University of Pennsylvania", "deadline": "1 January"}),
+            ("import_requirements", {"application": "Wharton", "text": "Two essays of 500 words each are required."}),
+            ("update_requirement", {"application": "Wharton", "requirement": "essays", "status": "in_progress"}),
+            ("application_status", {"application": "Wharton"}),
+            ("application_gaps", {"application": "Wharton"}),
+            ("brand_performance", {}),
+            ("add_content_idea", {"title": "A short on how I built the bakery site", "format": "short", "scheduled_for": "friday"}),
+            ("mark_posted", {"idea": "bakery site"}),
+            ("set_reminder", {"text": "call the clinic", "when": "in 2 hours"}),
+            ("notification_settings", {"morning_time": "05:45"}),
+            ("calendar_today", {}),
+            ("calendar_add_event", {"title": "Clinic demo", "when": "friday 14:00"}),
+            ("email_lookup", {"who": "Wamu"}),
         ]
         for name, args in calls:
             result, _summary = ot.run_tool(name, args, db)
@@ -386,9 +424,17 @@ def _msg(db, role, text, when, **kw):
 
 class TestConversationHistory:
 
+    @pytest.fixture(autouse=True)
+    def _two_minutes_past_midnight(self, monkeypatch):
+        """A fixed clock at 00:02 UTC, the minute this class once failed in: "five minutes
+        ago" was yesterday, so "Today" came back empty."""
+        import user_clock
+        monkeypatch.setattr(user_clock, "utcnow", lambda: datetime(2026, 11, 12, 0, 2))
+
     def _seed(self):
+        import user_clock
         db = _db()
-        now = datetime.utcnow()
+        now = user_clock.utcnow()
         yesterday = now - timedelta(days=1)
         _msg(db, "user", "Revised S1 probability", yesterday.replace(hour=9, minute=0))
         _msg(db, "assistant", "", yesterday.replace(hour=9, minute=1),
@@ -396,9 +442,10 @@ class TestConversationHistory:
         _msg(db, "tool", '{"updated": "x"}', yesterday.replace(hour=9, minute=1), tool_call_id="c1")
         _msg(db, "assistant", "Marked S1 probability as revised.", yesterday.replace(hour=9, minute=2),
              changes=[{"id": 1}])
-        _msg(db, "user", "What is due today?", now - timedelta(minutes=5))
-        _msg(db, "assistant", "Two things are due.", now - timedelta(minutes=4))
-        _msg(db, "user", "Ironed my clothes", now - timedelta(minutes=3), session_id="voice:abc")
+        # Today's messages are seconds old, so they are today's even two minutes after midnight.
+        _msg(db, "user", "What is due today?", now - timedelta(seconds=90))
+        _msg(db, "assistant", "Two things are due.", now - timedelta(seconds=60))
+        _msg(db, "user", "Ironed my clothes", now - timedelta(seconds=30), session_id="voice:abc")
         db.close()
 
     def test_grouped_by_day_newest_first_text_only(self):

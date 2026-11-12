@@ -17,7 +17,7 @@
  * Needs: Python env with the backend requirements (PYTHON env var, default `python`) and the
  * `playwright` npm package with Chromium installed. Env: PORT (default 8766), SHEET=path, PW_CHANNEL=msedge to use an installed browser.
  */
-const { spawn } = require("child_process");
+const { spawn, spawnSync } = require("child_process");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -34,7 +34,9 @@ const VIEWPORTS = [
   { name: "1920x1080", width: 1920, height: 1080 },
   { name: "390x844", width: 390, height: 844, mobile: true },
 ];
-const PAGES = ["home", "timetable", "health", "syllabus", "history", "agents", "warroom", "annual", "guide", "settings"];
+// "page:state" opens a page and then one of its sub-views (see show()).
+const PAGES = ["home", "timetable", "health", "syllabus", "history", "agents", "agents:detail", "business", "business:clients", "business:client",
+  "business:portfolio", "business:brand", "warroom", "annual", "applications", "guide", "settings"];
 // Extra states worth seeing on the sheet (not part of the per-page consistency checks).
 const EXTRAS = ["stage", "menu"];
 
@@ -69,8 +71,15 @@ async function waitForServer(ms = 60000) {
   throw new Error("backend did not start");
 }
 
+// A date n days from today in local time, as the backend sees it (toISOString() alone is
+// UTC, which is still yesterday for the first hours after local midnight).
+function localDay(n) {
+  const d = new Date(Date.now() + n * 86400000);
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+}
+
 async function seed() {
-  const due = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+  const due = localDay(1);
   await api("POST", "/todos", { text: "Finalise Bel Baby delivery", priority: 1, category: "business", due, source: "manual" });
   await api("POST", "/todos", { text: "Economics P1 prep", priority: 2, category: "academics", due, source: "manual" });
   await api("POST", "/annual-targets", { name: "AI services revenue", target_value: 2000, current_value: 520 });
@@ -87,6 +96,121 @@ async function seed() {
   // A short conversation for the Conversations page (saved like live-voice transcript lines).
   await api("POST", "/voice/realtime/transcript", { role: "user", text: "Revised S1 probability, still shaky on conditional probability." });
   await api("POST", "/voice/realtime/transcript", { role: "assistant", text: "Marked S1 Probability as revised and saved the note about conditional probability." });
+  await seedBusiness();
+}
+
+// Leads, a draft, a client with a contact, a deal, payments and a conversation (all synthetic).
+async function seedBusiness() {
+  const day = localDay;
+  const leads = [
+    { name: "Mercy Banda", company: "Sunrise Pharmacy", segment: "Lusaka pharmacies", location: "Lusaka", whatsapp: "+260 977 123 456" },
+    { name: "Joseph Phiri", company: "Golden Crust Bakery", segment: "Kitwe bakeries", location: "Kitwe", email: "joseph@goldencrust.example" },
+    { name: "Chanda Mwila", company: "Mwila Salon", segment: "Lusaka pharmacies", location: "Ndola", phone: "0977 555 010" },
+    { name: "Ruth Zulu", company: "Hope Academy", segment: "Schools", location: "Lusaka", email: "ruth@hopeacademy.example" },
+  ];
+  const ids = [];
+  for (const l of leads) ids.push((await api("POST", "/leads", l)).json.id);
+  await api("PATCH", `/leads/${ids[1]}`, { status: "contacted" });
+  await api("PATCH", `/leads/${ids[2]}`, { status: "qualified" });
+  await api("POST", `/leads/${ids[3]}/replied`, { summary: "Wants a demo on Friday" });
+  const c = (await api("POST", "/clients", { name: "Wamu's Bakes & Cakes", company: "Wamu's Bakes", status: "active", service: "Website" })).json;
+  await api("POST", `/clients/${c.id}/contacts`, { name: "Wamu Tembo", role: "Owner", phone: "+260 966 100 200", is_primary: true });
+  await api("POST", "/deals", { client_id: c.id, title: "Online ordering", amount: 8000, currency: "ZMW", stage: "proposal", expected_close: day(20) });
+  await api("POST", "/payments", { client_id: c.id, amount: 2000, currency: "ZMW", title: "Website deposit", due_date: day(-3) });
+  await api("POST", "/payments", { client_id: c.id, amount: 1500, currency: "ZMW", title: "Final invoice", due_date: day(10) });
+  await api("POST", "/recurring", { client_id: c.id, title: "Hosting retainer", amount: 600, currency: "ZMW", interval: "monthly", start: day(12) });
+  await api("POST", "/communications", { client_id: c.id, channel: "call", direction: "out", summary: "Agreed the gallery page and the order form" });
+  await api("POST", "/clients", { name: "Hope Clinic", status: "prospect" });
+  // Projects: one for the client (blocked), one in focus, a stale one and a paused one.
+  const ordering = (await api("POST", "/projects", { title: "Online ordering", client_id: c.id, expected_value: 8000, currency: "ZMW", due_date: day(5), priority: 2 })).json;
+  await api("PATCH", `/projects/${ordering.id}`, { blocked_reason: "waiting on the product photos" });
+  await api("POST", "/projects", { title: "Founder OS Phase 5", priority: 1, due_date: day(21), next_action: "Ship the leads importer" });
+  await api("POST", "/projects", { title: "Newsletter", priority: 4, expected_value: 1500, currency: "ZMW" });
+  const side = (await api("POST", "/projects", { title: "Study planner app", priority: 3 })).json;
+  await api("POST", `/projects/${side.id}/status`, { status: "paused" });
+  // Agents: a standing research objective and a couple of runs for the activity log.
+  await api("POST", "/research/objectives", { objective: "Painful admin problems in Lusaka pharmacies", cadence_days: 14 });
+  await api("POST", "/agents/portfolio_reviewer/run");
+  await api("POST", "/agents/crm_housekeeper/run");
+  await api("POST", "/agents/market_intel/run");
+  // Applications: one with a deadline, requirements in every state and gaps; one with nothing yet.
+  const wharton = (await api("POST", "/applications", { name: "Wharton", institution: "University of Pennsylvania", programme: "Huntsman Program", deadline: day(12) })).json;
+  const reqs = [
+    { title: "Personal essay", kind: "essay", details: "650 words", due_date: day(5) },
+    { title: "Huntsman essay", kind: "essay", details: "A global issue, 500 words" },
+    { title: "SAT or ACT scores", kind: "test" },
+    { title: "School transcript", kind: "transcript", details: "From your counsellor" },
+  ];
+  const rids = [];
+  for (const r of reqs) rids.push((await api("POST", `/applications/${wharton.id}/requirements`, r)).json.id);
+  await api("POST", `/requirements/${rids[1]}/advance`);
+  await api("PATCH", `/requirements/${rids[2]}`, { status: "ready" });
+  await api("PATCH", `/requirements/${rids[3]}`, { status: "submitted" });
+  await api("POST", `/requirements/${rids[0]}/todo`);
+  await api("POST", "/applications", { name: "Mastercard Foundation Scholarship", kind: "scholarship" });
+  // Brand: a LinkedIn export, ideas on the calendar and in the backlog.
+  const li = fs.readFileSync(path.join(ROOT, "backend", "tests", "fixtures", "linkedin_content_sample.csv"));
+  const bf = new FormData();
+  bf.set("file", new Blob([li], { type: "text/csv" }), "content.csv");
+  bf.set("platform", "linkedin");
+  await api("POST", "/brand/import", bf);
+  await api("POST", "/brand/ideas", { title: "A short on how I built the bakery site", format: "short", platform: "youtube", scheduled_for: day(0) });
+  await api("POST", "/brand/ideas", { title: "Three pricing mistakes", format: "post", platform: "linkedin", scheduled_for: day(3) });
+  const loose = (await api("POST", "/brand/ideas", { title: "Why WhatsApp is the only system most shops need", format: "post" })).json;
+  await api("POST", `/brand/ideas/${loose.id}/advance`);
+  return { leadId: ids[0], clientId: c.id };
+}
+
+// A draft needs the model, which the checks never call: write one straight into the database.
+function seedDraft(env) {
+  const code = [
+    "import models",
+    "from database import SessionLocal",
+    "db = SessionLocal()",
+    "lead = db.query(models.Lead).filter(models.Lead.name == 'Mercy Banda').first()",
+    "db.add(models.OutreachMessage(lead_id=lead.id, channel='whatsapp', status='draft', brief='intro', " +
+      "body='Hi Mercy, I am Bandile. I build small stock-alert tools for pharmacies in Lusaka.\\n\\nCould I show you a two-minute demo this week?'))",
+    "import json",
+    "project = models.ResearchProject(title='Lusaka pharmacy pain scan', objective='Painful admin problems in Lusaka pharmacies', status='completed')",
+    "db.add(project)",
+    "db.flush()",
+    "scores = {'pain_severity': 8, 'frequency': 8, 'financial_value': 7, 'market_size': 6, 'competition_gap': 7, 'founder_fit': 9, 'speed_to_mvp': 8, 'overall': 7.8}",
+    "db.add(models.ResearchFinding(project_id=project.id, problem='Independent pharmacies in Lusaka lose sales to manual stock tracking', " +
+      "industry='retail pharmacy', customer_segment='independent pharmacies, Lusaka', scores=json.dumps(scores), overall_score=7.8, " +
+      "recommendation='pursue', status='surfaced', first_customer_path='Walk into five pharmacies with a demo', " +
+      "evidence=json.dumps([{'source_type': 'web', 'title': 'Pharmacy stockouts in Lusaka', 'ref': 'https://example.com/stockouts'}])))",
+    "db.add(models.SocialAccount(platform='youtube', handle='@bandile', external_id='UCsynthetic', access='api_key', status='error', last_error='YOUTUBE_API_KEY not set'))",
+    "db.add(models.BrandInsight(week_start=__import__('datetime').date.today() - __import__('datetime').timedelta(days=__import__('datetime').date.today().weekday()), platform='all', " +
+      "text='The build-log posts earned the most reactions for their reach. The pricing post was seen least. Try one more build log this week.'))",
+    "wharton = db.query(models.Application).filter(models.Application.name == 'Wharton').first()",
+    "db.add(models.ApplicationGap(application_id=wharton.id, gap='No evidence of leadership outside school', severity='high', " +
+      "evidence='The profile lists projects but no team or community role', suggested_action='Write up the client work as a leadership example', status='open'))",
+    "db.add(models.ApplicationGap(application_id=wharton.id, gap='Maths syllabus is half revised', severity='medium', " +
+      "evidence='Syllabus progress', suggested_action='Finish P1 revision before the test date', status='open'))",
+    "from datetime import datetime, timedelta",
+    "wharton.gaps_reviewed_at = datetime.utcnow() - timedelta(days=2)",
+    "stale = db.query(models.Project).filter(models.Project.title == 'Newsletter').first()",
+    "stale.last_activity_at = datetime.utcnow() - timedelta(days=20)",
+    // Phase 6C/6D: a paired phone, a connected calendar with two events today, and a few notifications.
+    "import integrations, integrations_telegram",
+    "from agents import schedule",
+    "integrations_telegram.pair(db, 4455667788, 'bandile')",
+    "google = integrations.get_or_create(db, 'google_calendar')",
+    "google.status, google.account_label, google.last_sync_at = 'connected', 'primary', datetime.utcnow() - timedelta(minutes=12)",
+    "google.secret_json = json.dumps({'access_token': 'synthetic-access', 'refresh_token': 'synthetic-refresh', 'expiry': '2099-01-01T00:00:00'})",
+    "today_local = schedule.to_local(datetime.utcnow()).date()",
+    "def at(hour, minute=0):",
+    "    return schedule.to_utc(datetime(today_local.year, today_local.month, today_local.day, hour, minute, tzinfo=schedule.tz()))",
+    "db.add(models.CalendarEvent(provider='google', external_id='evt-a', title='Further Maths P1 past paper', start_at=at(9), end_at=at(10, 30), start_date=today_local, location='Library'))",
+    "db.add(models.CalendarEvent(provider='google', external_id='evt-b', title='Clinic demo', start_at=at(23), end_at=at(23, 45), start_date=today_local, created_by_us=True))",
+    "db.add(models.CalendarEvent(provider='google', external_id='evt-c', title='Mock exams', start_at=at(0), end_at=at(23, 59), start_date=today_local, all_day=True))",
+    "db.add(models.Notification(kind='briefing', body='Good morning. Three things need you today.', status='sent', sent_at=datetime.utcnow() - timedelta(hours=1), dedupe_key='briefing:seed', source='agent:briefing_courier'))",
+    "db.add(models.Notification(kind='alert', title='CRITICAL', body='No revenue logged in the last 30 days.', status='suppressed', suppressed_reason='daily_cap', dedupe_key='alert:seed'))",
+    "db.add(models.Notification(kind='reminder', title='Reminder', body='Call the clinic', status='queued', send_at=datetime.utcnow() + timedelta(hours=3), source='assistant'))",
+    "db.commit()",
+  ].join("\n");
+  const r = spawnSync(PYTHON, ["-c", code], { cwd: path.join(ROOT, "backend"), env, encoding: "utf8" });
+  if (r.status !== 0) console.log("  (draft seed failed: " + String(r.stderr).slice(-300) + ")");
 }
 
 // Runs in the page: shell measurements, overflow and dock coverage for the active page.
@@ -133,19 +257,37 @@ function measure() {
 }
 
 async function show(page, name) {
-  await page.evaluate(async (name) => {
+  const [base, state] = name.split(":");
+  await page.evaluate(async ([base, state]) => {
     if (typeof closeStage === "function" && STAGE.open) closeStage();
     closeSidebar();
-    const el = document.querySelector(`.nav-item[onclick*="nav('${name}'"]`);
-    nav(name, el);
-  }, name);
-  await page.waitForTimeout(name === "home" ? 1200 : 900);
+    if (base === "agents") closeAgentDetail();
+    if (base === "business") {
+      BIZ.clientId = null;
+      BIZ.tab = state === "clients" || state === "client" ? "clients" : (state || "pipeline");
+      BIZ.showPaused = true;
+    }
+    const el = document.querySelector(`.nav-item[onclick*="nav('${base}'"]`);
+    nav(base, el);
+  }, [base, state || ""]);
+  await page.waitForTimeout(base === "home" ? 1200 : 900);
+  if (base === "agents" && state === "detail") {
+    await page.evaluate(() => openAgentDetail("market_intel"));
+    await page.waitForTimeout(900);
+    await page.locator("#ag-projects .row--tap").first().click();
+    await page.waitForTimeout(500);
+  }
+  if (state === "client") {
+    await page.locator("#biz-body .row--tap", { hasText: "Wamu" }).first().click();
+    await page.waitForTimeout(700);
+  }
 }
 
 async function main() {
   fs.mkdirSync(OUT, { recursive: true });
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "fos-screens-"));
-  const env = { ...process.env, DATABASE_URL: `sqlite:///${path.join(tmp, "screens.db")}`, VAULT_REPO_URL: "https://127.0.0.1/none.git" };
+  const env = { ...process.env, DATABASE_URL: `sqlite:///${path.join(tmp, "screens.db")}`, VAULT_REPO_URL: "https://127.0.0.1/none.git",
+    FOUNDER_OS_TZ: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC" };   // the server's "today" = this machine's
   delete env.FOUNDER_OS_PASSWORD;
   delete env.OPENAI_API_KEY;
   const server = spawn(PYTHON, ["-m", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", String(PORT)], { cwd: path.join(ROOT, "backend"), env });
@@ -160,6 +302,7 @@ async function main() {
   try {
     await waitForServer();
     await seed();
+    seedDraft(env);
     browser = await chromium.launch(process.env.PW_CHANNEL ? { channel: process.env.PW_CHANNEL } : {});
     for (const vp of VIEWPORTS) {
       console.log(`${vp.name}`);
@@ -174,7 +317,7 @@ async function main() {
       table[vp.name] = {};
       for (const name of PAGES) {
         await show(page, name);
-        const file = path.join(OUT, vp.name, `${name}.png`);
+        const file = path.join(OUT, vp.name, `${name.replace(":", "-")}.png`);
         await page.screenshot({ path: file });
         shots.push({ vp: vp.name, page: name, file });
         const m = await page.evaluate(measure);

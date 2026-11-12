@@ -1,9 +1,11 @@
 # CLAUDE.md
 
 Guidance for Claude Code (claude.ai/code) when working in this repository. It describes the
-system as it is after the intelligence-layer rebuild (branch `claude/rebuild-spec-review-vfrg4o`).
-`docs/REBUILD_SPEC.md` is the spec that produced it; `docs/REBUILD_HANDOFF.md` has every endpoint
-shape; `ROADMAP.md` has the phases.
+system as it is after the intelligence-layer rebuild and Phases 5 and 6 (branch `phase-5-6`).
+`docs/REBUILD_SPEC.md` is the spec that produced the rebuild; `docs/phases/` holds the Phase 5
+and 6 specs, the build order and `PROGRESS.md` (what was built and every decision);
+`docs/REBUILD_HANDOFF.md` has every endpoint shape; `docs/CONVENTIONS.md` has the patterns new
+code follows; `ROADMAP.md` has the phases.
 
 ## Product principles (these govern every decision)
 
@@ -39,9 +41,27 @@ Environment (`backend/.env` locally, Render env vars in production):
 | `ASSISTANT_MODEL` | `gpt-5.4-mini` | Assistant, parser, summaries, briefing |
 | `EMBEDDING_MODEL` | `text-embedding-3-small` | Vault / notes / memory retrieval |
 | `ZMW_PER_USD` | `27` | Kwacha → dollar for the revenue scoreboard |
+| `DEFAULT_CURRENCY` | `ZMW` | The currency of a client when none is given (`ZMW` or `USD`); also what m016 gives clients that predate the column |
+| `DEFAULT_COUNTRY_CODE` | `260` | Country code put on a local phone number (leading `0`, or no code at all) when a WhatsApp link is built |
 | `REALTIME_MODEL` | `gpt-realtime-2.1-mini` | Live voice (current mini realtime model, checked 2026-11-05) |
 | `ASSISTANT_HISTORY_TURNS` / `ASSISTANT_SUMMARY_BATCH` | `20` / `10` | History budget |
 | `INTENT_CONFIDENCE_MIN` | `0.7` | Below this an extracted item becomes a suggestion |
+| `RESEARCH_MODEL` | the assistant model | Model for the market-intelligence roles |
+| `JOBS_TOKEN` | unset | Secret for `POST /jobs/tick` (the scheduler). Unset, or shorter than 16 characters: the endpoint answers 503. Use 32+ random characters |
+| `FOUNDER_OS_TZ` | `Africa/Lusaka` | The user's zone: "today" everywhere (briefing, tasks, habits, payments), agent schedules and notification times. Never the server's clock |
+| `JOBS_TICK_BUDGET` | `80` | Seconds a tick may spend starting agents; the rest run on the next tick |
+| `JOBS_IN_PROCESS` | `1` | `0` turns off the in-process 15-minute tick (the external tick still works) |
+| `YOUTUBE_API_KEY` | unset | YouTube Data API v3 key for the Brand tab. Unset: the YouTube account shows an error and nothing is estimated |
+| `FOUNDER_OS_API_URL` | unset | The backend's public base URL (no trailing slash). Needed for the Telegram webhook and the Google sign-in redirect |
+| `TELEGRAM_BOT_TOKEN` | unset | The bot's token from @BotFather. Unset: notifications are recorded as not sent |
+| `TELEGRAM_BOT_USERNAME` | unset | The bot's username, for the pairing link in Settings |
+| `TELEGRAM_WEBHOOK_SECRET` | unset | Random string Telegram must send back with each update. 32+ characters; under 16 the webhook refuses every update |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | unset | The Google OAuth client for the calendar. Unset: the calendar shows "not connected" |
+| `GOOGLE_CALENDAR_ID` | `primary` | Which calendar to read and write |
+| `EMAIL_ADDRESS` / `EMAIL_APP_PASSWORD` | unset | The Gmail address and its App Password. Unset: email shows "not connected" and outreach email cannot send |
+| `EMAIL_IMAP_HOST` / `EMAIL_SMTP_HOST` / `EMAIL_SMTP_PORT` | `imap.gmail.com` / `smtp.gmail.com` / `465` | Mail servers |
+| `EMAIL_FROM_NAME` | `Bandile Masocha` | The name on sent mail |
+| `EMAIL_AUTHSERV_ID` | `mx.google.com` for Gmail, else unset | The name the mail server signs `Authentication-Results` with. Only a message that header vouches for can move a lead; unset on a non-Gmail host means every reply becomes a suggestion |
 
 Tests (OpenAI is always mocked; the suite must pass with no key set):
 ```
@@ -67,8 +87,12 @@ One self-contained file, `frontend/index.html` (inline CSS and vanilla JS, no bu
 apple-touch-icon; `icon.svg` is the source) and `frontend/manifest.json` (standalone web app).
 Pages: Command Centre (home, built on `GET /briefing/today`), Timetable, Health, Syllabus,
 Conversations (the server-side thread from `GET /conversation/history`, grouped by local day,
-newest day first, searchable), Agents, War Room, Annual Targets, Design Guide, Settings. (Dashboard and Academic Roadmap were
-removed from the frontend; their backend tables and endpoints remain.)
+newest day first, searchable), Agents (scheduler strip, registry, one agent's run log with
+Undo), Business (tabs: Pipeline, Clients, Portfolio, Brand), War Room, Annual Targets,
+Applications, Design Guide, Settings (Integrations and Notifications cards first). The home
+screen's six tiles open Business, Academics, Projects, Content, Applications and Agents.
+(Dashboard and Academic Roadmap were removed from the frontend; their backend tables and
+endpoints remain.)
 
 **Design system.** All tokens live in one `:root` block: a fluid `clamp()` type scale
 (`--fs-2xs` … `--fs-display`; body is `--fs-base`), a 4px spacing scale (`--sp-1` … `--sp-10`),
@@ -119,11 +143,11 @@ before markdown runs.
 | `llm.py` | The only OpenAI gateway: lazy client, model config, usage logging, cost estimates |
 | `openai_client.py` | Prompts: parser schema, orchestrator loop (`get_orchestrator_response`) |
 | `orchestrator.py` | `POST /orchestrator` SSE bridge: history budget, memory, persistence of tool calls |
-| `orchestrator_tools.py` | The tool registry (23 tools, incl. `show_view` UI directives), `run_tool` (never raises) and `for_model` (plain-language tool output) |
+| `orchestrator_tools.py` | The tool registry (58 tools, incl. `show_view` UI directives; newer ones are added with `_register`), `run_tool` (never raises) and `for_model` (plain-language tool output) |
 | `conversation.py` | One default thread, verbatim window + rolling summary, replay of tool results, `GET /conversation/history` |
 | `assistant_state.py` | Everything the assistant knows about Bandile's state, from the current sources only (see below) |
 | `memory_service.py` | Long-term memory (`remember` tool, recall) |
-| `change_log.py` | Every write recorded with before/after snapshots; undo; batches live on `db.info` |
+| `change_log.py` | Every write recorded with before/after snapshots; undo; batches live on `db.info`. Changes written inside `irreversible(db)` (a sent email or WhatsApp message) are logged but never undone. Undo gives back only the columns a change set, and only where its value is still there, so undoing an old batch never overwrites later edits |
 | `actions.py` | Pending deletes needing confirmation; suggestions accepted with one tap |
 | `notes.py` | Notes (book / bible / journal / inbox / general), search, endpoints |
 | `retrieval.py` | Shared `embeddings` table, cosine in Python, keyword fallback |
@@ -133,9 +157,21 @@ before markdown runs.
 | `voice_realtime.py` | Client secret for WebRTC voice, server-side tool bridge, transcript save |
 | `usage.py` | `GET /usage/summary` from `llm_usage` |
 | `vault_sync.py` | Obsidian vault clone/index; semantic search when embedded |
+| `user_clock.py` | The user's clock: `today()` and `now()` in `FOUNDER_OS_TZ`. No app code calls `date.today()` or `datetime.now()` |
 | `models.py` / `schemas.py` / `database.py` | ORM, Pydantic, engine (SQLite locally, Postgres on Supabase) |
-| `migrations/` | Hand-written, re-runnable, wired into startup (`m010`–`m013` are the rebuild) |
-| `market_intel/` | Research agent (out of scope for the rebuild; still uses the lazy client) |
+| `migrations/` | Hand-written, re-runnable, wired into startup (`m010`–`m013` are the rebuild, `m014`–`m022` Phases 5 and 6, `m023` the review round). A data backfill that must run once uses `_helpers.claim_once` (`migration_marks`) |
+| `market_intel/` | Research agent: roles, weighted scoring (`scoring.py`), standing objectives (`objectives.py`) |
+| `business_common.py` | Shared helpers: fuzzy matching, money, `parse_day`, `parse_when` |
+| `leads.py` / `outreach.py` / `outreach_channels.py` | Leads, qualification, drafted messages, the approval gate, the channels (WhatsApp link, email, manual) |
+| `crm.py` | Clients, contacts, deals, payments, recurring revenue, communications, client health |
+| `portfolio.py` | Projects: recommendations, blockers, updates, the weekly review |
+| `brand/` | Personal-brand analytics: adapters (YouTube API, LinkedIn export), sync, performance, ideas, calendar |
+| `applications.py` | Applications, requirements import, gap review |
+| `agents/` | The registry, schedule, runner (tick, permission audit, cost attribution), the API, and one module per agent |
+| `integrations.py` | The `integrations` table, `redact()`, `GET /integrations` |
+| `integrations_telegram.py` / `integrations_google.py` / `integrations_email.py` | Telegram pairing and webhook registration; Google Calendar OAuth, sync and events; IMAP fetch and SMTP send |
+| `notify.py` | The notification queue, dispatch (quiet hours, daily cap, retries), the Telegram channel, the briefing as text |
+| `telegram_inbound.py` | The Telegram webhook: pairing, commands, and a full assistant turn per message |
 
 ### How a message flows
 `POST /orchestrator` → `orchestrator.orchestrator_stream` builds history (last N turns verbatim +
@@ -143,6 +179,10 @@ summary) and recalls memories → `get_orchestrator_response` streams the model,
 calls through `run_tool` inside one change-log batch → every message of the turn (user,
 assistant tool calls, tool results, final) is saved to the default thread → the final SSE
 event carries `changes`, which the UI shows with Undo.
+
+A message sent to the Telegram bot takes the same path without a stream:
+`telegram_inbound` → `orchestrator.run_turn` (the same `_turn_events` the SSE stream uses) →
+the reply is queued as a notification and dispatched.
 
 `route_brain_dump` → parser (`get_parse_response`, told the active non-negotiables) →
 `apply_parse_updates` (atomic, one commit, everything logged). Commitments become tasks, ideas go to the Inbox note, discussion
@@ -175,7 +215,15 @@ on new tables. No destructive migrations.
   system message.
 - `briefing.build_briefing` ranking and `syllabus.weakest_topics` scoring — the home screen and
   the assistant's study advice depend on them.
-- `auth.AuthMiddleware` exemptions.
+- `auth.AuthMiddleware` exemptions. Three routes take no session and check something else:
+  `/jobs/tick` (the `X-Jobs-Token` header), `/integrations/telegram/webhook` (Telegram's secret
+  header) and `/integrations/google/callback` (the signed, single-use OAuth state).
+- `agents/runner.py` (the permission audit that undoes a batch touching a table outside an
+  agent's `tables_write`) and `notify.dispatch` (nothing sends except through it).
+- `integrations.redact` — every stored error and log line from an integration goes through it;
+  `secret_json` is never serialised.
+- The outreach approval gate (`outreach.execute_send`, `actions._NEEDS_LATER_MESSAGE`): a
+  message leaves only after a tap or a later message from Bandile.
 
 ## Key domain concepts
 - **Syllabus states**: `not_started` (red) → `learned` (yellow) → `revised` (blue) →
@@ -189,5 +237,18 @@ on new tables. No destructive migrations.
   target named "revenue" or measured in ZMW/USD), or empty when there is none.
 - **KPI keys** (`maths_syllabus` …) and `roadmap_tasks` are legacy: the parser no longer emits
   them and the assistant never reads them.
+- **Agents**: plain modules in `backend/agents/`, registered at import, run one after another
+  on a tick (in-process every 15 minutes, or `POST /jobs/tick`). Each declares its schedule, the
+  tools and tables it may touch, whether it may notify, and a cap on model calls. Couriers run
+  last. Times are read in `FOUNDER_OS_TZ`; stored times are naive UTC.
+- **Notifications**: a row in `notifications` first (`notify.queue`), then `notify.dispatch`
+  decides: suppressed when Telegram is not paired, held through quiet hours, suppressed past
+  the daily cap, else sent. Replies, test messages and reminders are not held.
+- **Integrations**: one row per provider (`google_calendar`, `email`, `telegram`, `youtube`).
+  Calendar events and email snippets are caches and are not change-logged; an event Founder OS
+  creates is, and undoing it deletes it on Google. Only mail from a known lead or contact is
+  ever stored.
+- **Dates the assistant may state**: application deadlines only from Bandile or text he pasted;
+  content numbers only from what a platform reported.
 - **Trading** tables and `/trading/*` endpoints still exist but nothing in the UI or the
   assistant reads them.

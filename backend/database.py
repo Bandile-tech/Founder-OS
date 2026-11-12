@@ -19,18 +19,22 @@ DATABASE_URL = _raw_url
 _is_postgres = DATABASE_URL.startswith("postgresql")
 
 # ── Engine ────────────────────────────────────────────────────
+# hide_parameters: a statement error must not carry its bound values. They can be a whole
+# secret_json (OAuth tokens), and error text ends up in logs and in agent_runs.error.
 if _is_postgres:
     engine = create_engine(
         DATABASE_URL,
         pool_size=5,
         max_overflow=10,
         pool_pre_ping=True,  # discard stale connections
+        hide_parameters=True,
     )
 else:
     # SQLite: no pool config, thread check disabled for FastAPI
     engine = create_engine(
         DATABASE_URL,
         connect_args={"check_same_thread": False},
+        hide_parameters=True,
     )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

@@ -44,5 +44,5 @@ zero and nothing may require business verification or a platform review.
 - Bot API: `sendMessage` 4096-character limit and splitting; `setWebhook` with
   `secret_token` and the `X-Telegram-Bot-Api-Secret-Token` request header; how long the
   webhook may take to respond before Telegram retries (dedupe by `update_id` if needed).
-- Netlify/Render: the webhook URL must be the Render backend (HTTPS, public), not the
-  Netlify frontend.
+- Hosting: the webhook URL is the Render service (HTTPS, public), which serves both the app
+  (at `/app/`) and the API. There is no separate frontend host.

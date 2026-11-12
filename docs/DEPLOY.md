@@ -25,7 +25,7 @@ configured.
 |---|---|---|---|
 | 1 | `DATABASE_URL` | Supabase Postgres URL (already set) | migrations run at boot |
 | 2 | `FOUNDER_OS_PASSWORD` | a long passphrase | without it the API boots open |
-| 3 | `FOUNDER_OS_SECRET` | 32+ random chars (`openssl rand -hex 32`) | keeps sessions valid if the password changes |
+| 3 | `FOUNDER_OS_SECRET` | 32+ random chars (`openssl rand -hex 32`) | keeps sessions valid if the password changes, and means nothing signed is derived from the password |
 | 4 | `FOUNDER_OS_ORIGINS` | leave unset — the app and the API share one origin. Set it only if some other origin must call the API | CORS |
 | 5 | `OPENAI_API_KEY` | the key | assistant, parser, embeddings, voice |
 | 6 | `ASSISTANT_MODEL` | `gpt-5.4-mini` (default) | cost |
@@ -111,3 +111,10 @@ node tests/e2e/screens.js
 
 Both need the `playwright` npm package; set `PW_CHANNEL=msedge` (or `chrome`) to use an
 installed browser instead of Playwright's Chromium.
+
+## Checking an upgrade on PostgreSQL before a merge
+
+`backend/tests/postgres/README.md` has the steps: build a database from main's schema with
+production-like rows, run the branch's startup chain on it, and check the backfills, the
+unchanged rows and row-level security. The same folder says how to run the whole suite on
+Postgres.

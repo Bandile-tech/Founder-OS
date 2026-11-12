@@ -28,6 +28,42 @@ class AIUnavailable(RuntimeError):
     """Raised when an AI feature is requested but no OPENAI_API_KEY is configured."""
 
 
+class BudgetExceeded(RuntimeError):
+    """Raised when an agent run tries to make more model calls than its cap allows."""
+
+
+# ── Agent run context ────────────────────────────────────────
+# While an agent runs, every model call is counted against its cap and attributed to its
+# run. The context is process-wide: runs are sequential, so an assistant turn served during
+# an agent run would be attributed to it (a cost-only inaccuracy, accepted in ADR-0003).
+_RUN_CONTEXT: dict | None = None
+
+
+def set_run_context(run_id: int, max_calls: int | None = None) -> None:
+    global _RUN_CONTEXT
+    _RUN_CONTEXT = {"run_id": run_id, "max_calls": max_calls, "calls": 0}
+
+
+def clear_run_context() -> None:
+    global _RUN_CONTEXT
+    _RUN_CONTEXT = None
+
+
+def current_run_id() -> int | None:
+    return _RUN_CONTEXT["run_id"] if _RUN_CONTEXT else None
+
+
+def _count_call() -> None:
+    """Count one model call against the active agent run; refuse it past the cap."""
+    ctx = _RUN_CONTEXT
+    if ctx is None:
+        return
+    cap = ctx.get("max_calls")
+    if cap is not None and ctx["calls"] >= cap:
+        raise BudgetExceeded(f"this run may make at most {cap} model call(s)")
+    ctx["calls"] += 1
+
+
 _client = None
 
 
@@ -64,6 +100,12 @@ def assistant_model() -> str:
         or os.getenv("ORCHESTRATOR_MODEL")   # legacy name, honoured as a fallback
         or DEFAULT_ASSISTANT_MODEL
     )
+
+
+def research_model() -> str:
+    """The model for the market intelligence roles (``RESEARCH_MODEL``); the assistant
+    model when unset."""
+    return os.getenv("RESEARCH_MODEL") or assistant_model()
 
 
 def embedding_model() -> str:
@@ -112,12 +154,18 @@ def estimate_cost(model: str, input_tokens: int, cached_input_tokens: int, outpu
 
 def log_usage(db, *, model: str, purpose: str, input_tokens: int = 0,
               cached_input_tokens: int = 0, output_tokens: int = 0,
-              duration_ms: int | None = None) -> None:
+              duration_ms: int | None = None, agent_run_id: int | None = None) -> None:
     """Record one OpenAI call. Never raises — a logging failure must not break a reply.
 
-    ``db`` may be None, in which case a short-lived session is opened."""
+    ``db`` may be None, in which case a short-lived session is opened. The call is
+    attributed to an agent run from ``agent_run_id``, else the session's
+    ``db.info["agent_run_id"]``, else the active run context."""
     import models
 
+    if agent_run_id is None and db is not None:
+        agent_run_id = db.info.get("agent_run_id")
+    if agent_run_id is None:
+        agent_run_id = current_run_id()
     own = db is None
     if own:
         from database import SessionLocal
@@ -132,6 +180,7 @@ def log_usage(db, *, model: str, purpose: str, input_tokens: int = 0,
             output_tokens=int(output_tokens or 0),
             estimated_cost_usd=estimate_cost(model, input_tokens, cached_input_tokens, output_tokens),
             duration_ms=duration_ms,
+            agent_run_id=agent_run_id,
         )
         db.add(row)
         db.commit()
@@ -164,6 +213,7 @@ def usage_from_response(usage) -> tuple[int, int, int]:
 def chat_completion(messages: list, *, db=None, purpose: str = "assistant",
                     model: str | None = None, **kwargs):
     """Non-streaming chat completion. Returns the SDK response. Logs usage."""
+    _count_call()
     client = get_client()
     model = model or assistant_model()
     started = time.monotonic()
@@ -186,6 +236,7 @@ def embed_texts(texts: list[str], *, db=None, purpose: str = "embedding") -> lis
     """Embed a batch of texts. Returns one vector per input, in order. Logs usage."""
     if not texts:
         return []
+    _count_call()
     client = get_client()
     model = embedding_model()
     started = time.monotonic()
