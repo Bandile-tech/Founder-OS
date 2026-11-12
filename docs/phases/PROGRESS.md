@@ -5,12 +5,11 @@ current-data fix and the tool-call history sanitiser). One commit per session, p
 lands. Nothing here is merged into `main`.
 
 **State on 12 November 2026:** every session in the order below is built, committed and
-pushed. The last full run was green: 721 backend tests, the startup chain, the browser smoke
-tests and the layout checks. Not done: the suite and the startup chain on PostgreSQL (this
-machine has no PostgreSQL server and no Docker, only the `pg_dump` client), any check against
-the live Telegram, Google, Gmail or YouTube services, and an independent review of the branch.
-What is left is under "Follow-ups noticed", the "Limits to know" of each session, and
-`ROADMAP.md`.
+pushed. After that a review round ran on the branch (the section "Review round" below):
+fourteen fixes, the suite and the startup chain on PostgreSQL 16, and an independent review
+of the whole diff. Still not done: any check against the live Telegram, Google, Gmail or
+YouTube services. What is left is under "Review round", "Follow-ups noticed", the "Limits to
+know" of each session, and `ROADMAP.md`.
 
 ## Order
 
@@ -1041,6 +1040,57 @@ checks pass at all four sizes.
 
 Limits to know:
 - Nothing in the UI was exercised against the real Telegram, Google or Gmail services.
+
+## Review round (12 November 2026)
+
+One commit per fix, each with a test written first. Items 5 to 14 came from a same-session
+review and were unverified: each was reproduced by a failing test (or by an existing test
+that asserted the faulty behaviour) before it was changed. All ten reproduced.
+
+### Part 1 — fixes
+
+| # | What was wrong | What changed |
+|---|---|---|
+| 1 | m016 set every client that predates `clients.currency` to USD | Old clients get `DEFAULT_CURRENCY` (ZMW unless the variable says USD), as new ones do. Payments backfilled from revenue keep each revenue row's own currency |
+| 2 | A local number (`0977…`) gave `wa.me/0977…`, which WhatsApp rejects | `outreach_channels.whatsapp_digits`: `0977…`, `977…`, `+260977…`, `260977…` all give `260977…`. `DEFAULT_COUNTRY_CODE` (260). The stored number is not changed |
+| 3 | "Today" was the server's day (UTC on Render): from 00:00 to 02:00 in Lusaka everything was yesterday's | `user_clock.py` (`today()`, `now()` in `FOUNDER_OS_TZ`) replaces every `date.today()` / `datetime.now()` in app code; a guard test fails if one comes back. Tested at 00:30 Lusaka time |
+| 4 | The conversation-history test failed in the first five minutes after 00:00 UTC | The fixture seeded "today's" messages five minutes back. The class runs on a fixed clock at 00:02 UTC and seeds seconds back |
+| 5 | A timeout or 5xx from Google put the calendar in error; the sync agent skips an integration in error, so syncing stopped until a manual Sync | Only `invalid_grant`, a missing refresh token or a 401 mean error. Anything else leaves status and tokens alone and is retried on the next sync |
+| 6 | A multi-day event was only listed on the day it starts | The day view takes every event that overlaps the local day ("until HH:MM" on its last day, "all day" in between) |
+| 7 | The m016 payment backfill ran on every startup, claimed revenue rows logged later, and `crm.reconcile` then left the invoice open | The backfill claims a key in `migration_marks` (`_helpers.claim_once`) and runs once per database |
+| 8 | `/yes` on a WhatsApp send answered "Done" with no link, so the message was marked sent and never left | The reply carries the `wa.me` link to tap |
+| 9 | Undo turned a sent message back into a draft | Changes recorded for an email or WhatsApp send have `change_log.undoable = FALSE` (m023). Undoing one is 409; undoing a batch reverses the rest and reports the send as kept. Telegram, the assistant and the change strip say so |
+| 10 | Email sync always read the last three days, newest 200 messages | It reads from the last successful sync less a day, 200 messages a call, oldest first, and remembers the UID it reached |
+| 11 | A message was tied to a lead by its From line alone and moved the lead to replied | The mail server's own `Authentication-Results` must show DMARC, or an aligned DKIM or SPF, passing. Otherwise the message is stored (`auth_result`), nothing changes, and a "Mark replied" suggestion is filed |
+| 12 | Overlapping ticks and Run now could start the same agent several times (four in the test) | A run claims its agent with one atomic UPDATE on `agents.claimed_at` and releases it at the end; a tick looks again once it holds the claim |
+| 13 | An event with two subscribers was consumed when the first ran | `agent_event_deliveries`: each subscriber is handed an event once, and the event is consumed when every enabled subscriber has had it |
+| 14 | `notify.queue` rolled back the caller's whole session on a duplicate key | The insert runs in a savepoint. Same change in `integrations.get_or_create`, `notify.settings` and `runner.agent_row` |
+
+Decisions made in this round:
+- `DEFAULT_CURRENCY` accepts `ZMW` or `USD`; anything else reads as `ZMW`.
+- WhatsApp: a number with no `+`, no leading zero and ten digits or fewer is taken as local.
+  An eleven-digit number with no `+` is assumed to carry its country code already.
+- The test suite and both e2e scripts run the app in the machine's own time zone, so fixtures
+  built from the machine's date agree with the app at any hour. The suite was run with the
+  machine set to UTC-11, UTC+2 and UTC+14.
+- Google: a refusal that is neither transient nor about the grant (a wrong calendar id, a
+  wrong client secret) also leaves the status alone, as instructed. It shows in the sync
+  result and the server log, not as an error badge.
+- Undo: a manual channel (LinkedIn, call) and a failed send stay undoable, because nothing
+  left the app. For a real send the follow-up task and the communication are kept as well.
+- Email: with a non-Gmail IMAP host no sender counts as verified until `EMAIL_AUTHSERV_ID`
+  names the server whose header is trusted. An unverified message from a client's contact
+  is stored and nothing else (no communication is logged).
+- Agents: a claim older than 30 minutes is treated as left by a dead process.
+- `migration_marks`: a database that ran an earlier build of this branch has no mark yet, so
+  its next startup runs the payment backfill one last time. Production has not run the branch.
+
+New environment variables: `DEFAULT_CURRENCY`, `DEFAULT_COUNTRY_CODE`, `EMAIL_AUTHSERV_ID`.
+New migration: `m023` (`agent_event_deliveries`, `change_log.undoable`,
+`email_messages.auth_result`, `agents.claimed_at`); `migration_marks` is created by m016.
+
+After Part 1: 762 backend tests, the startup chain twice on a fresh SQLite file, and the
+browser smoke tests, all green.
 
 ## External setup — Telegram and YouTube
 
