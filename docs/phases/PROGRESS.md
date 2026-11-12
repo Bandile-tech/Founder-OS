@@ -1119,10 +1119,6 @@ service after deployment.
 
 ## Follow-ups noticed
 
-- `tests/test_assistant_current_data.py::TestConversationHistory::test_grouped_by_day_newest_first_text_only`
-  (from before this branch) seeds messages "five minutes ago" in UTC, so it fails if it runs in
-  the first five minutes after 00:00 UTC. It failed once in a full run at 00:02 UTC on
-  12 November 2026 and passed on the rerun. Seed it from a fixed clock.
 - Brand tab: a Disconnect control behind a confirm dialog (`DELETE /brand/accounts/{id}`
   exists), and a way to drop an idea from the screen.
 - `tests/e2e/smoke.js` has a `KEEP=1` option that does not keep the server alive on

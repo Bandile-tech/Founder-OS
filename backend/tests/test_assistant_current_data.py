@@ -424,9 +424,17 @@ def _msg(db, role, text, when, **kw):
 
 class TestConversationHistory:
 
+    @pytest.fixture(autouse=True)
+    def _two_minutes_past_midnight(self, monkeypatch):
+        """A fixed clock at 00:02 UTC, the minute this class once failed in: "five minutes
+        ago" was yesterday, so "Today" came back empty."""
+        import user_clock
+        monkeypatch.setattr(user_clock, "utcnow", lambda: datetime(2026, 11, 12, 0, 2))
+
     def _seed(self):
+        import user_clock
         db = _db()
-        now = datetime.utcnow()
+        now = user_clock.utcnow()
         yesterday = now - timedelta(days=1)
         _msg(db, "user", "Revised S1 probability", yesterday.replace(hour=9, minute=0))
         _msg(db, "assistant", "", yesterday.replace(hour=9, minute=1),
@@ -434,9 +442,10 @@ class TestConversationHistory:
         _msg(db, "tool", '{"updated": "x"}', yesterday.replace(hour=9, minute=1), tool_call_id="c1")
         _msg(db, "assistant", "Marked S1 probability as revised.", yesterday.replace(hour=9, minute=2),
              changes=[{"id": 1}])
-        _msg(db, "user", "What is due today?", now - timedelta(minutes=5))
-        _msg(db, "assistant", "Two things are due.", now - timedelta(minutes=4))
-        _msg(db, "user", "Ironed my clothes", now - timedelta(minutes=3), session_id="voice:abc")
+        # Today's messages are seconds old, so they are today's even two minutes after midnight.
+        _msg(db, "user", "What is due today?", now - timedelta(seconds=90))
+        _msg(db, "assistant", "Two things are due.", now - timedelta(seconds=60))
+        _msg(db, "user", "Ironed my clothes", now - timedelta(seconds=30), session_id="voice:abc")
         db.close()
 
     def test_grouped_by_day_newest_first_text_only(self):
