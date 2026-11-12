@@ -1028,6 +1028,30 @@ checks pass at all four sizes.
 Limits to know:
 - Nothing in the UI was exercised against the real Telegram, Google or Gmail services.
 
+## External setup — Telegram and YouTube
+
+(The Google Calendar steps are under S18 and the Gmail steps under S19. None of these has
+been done, and nothing was tested against the live services.)
+
+Telegram:
+1. In Telegram, message @BotFather, send `/newbot`, choose a name and a username. Copy the
+   token it gives you.
+2. On Render set `TELEGRAM_BOT_TOKEN` (the token), `TELEGRAM_BOT_USERNAME` (the bot's
+   username), `TELEGRAM_WEBHOOK_SECRET` (any random string of 32 or more letters and digits)
+   and `FOUNDER_OS_API_URL` (`https://<your Render host>`, no trailing slash). Make sure
+   `FOUNDER_OS_PASSWORD` is set too: the pairing code is derived from it.
+3. In the app: Settings → Integrations → Telegram → Set webhook (once).
+4. Tap Open bot, press Start in Telegram, and send the six-character code shown in Settings.
+   The bot answers "Paired."
+5. Settings → Notifications → Send test.
+
+YouTube:
+1. In the Google Cloud console (the same project as the calendar will do), enable "YouTube
+   Data API v3" and create an API key (APIs & Services → Credentials → Create credentials →
+   API key).
+2. On Render set `YOUTUBE_API_KEY`.
+3. In the app: Business → Brand, type the channel's handle (`@handle`) and connect, then Sync.
+
 ## Environment variables added so far
 
 | Var | Default | Session | Purpose |
