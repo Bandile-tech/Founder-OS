@@ -103,6 +103,15 @@ def serialize_run(run: models.AgentRun) -> dict:
             "over_time": bool(run.over_time)}
 
 
+def _safe(db, text) -> str:
+    """Exception text with every stored secret taken out, before it is kept or printed."""
+    try:
+        import integrations
+        return integrations.redact(text, db)
+    except Exception:  # noqa: BLE001 — never fail a run over its own error message
+        return "error text withheld"
+
+
 # ── The claim ────────────────────────────────────────────────
 
 def _claim(db, key: str):
@@ -201,7 +210,7 @@ def run_agent(spec, trigger: str = "manual", event_ids: list[int] | None = None,
             db.commit()
         except Exception as exc:  # noqa: BLE001 — a failed agent is a recorded outcome, not a crash
             db.rollback()
-            status, error = "failed", f"{type(exc).__name__}: {exc}"[:2000]
+            status, error = "failed", _safe(db, f"{type(exc).__name__}: {exc}")[:2000]
             summary = f"failed: {type(exc).__name__}"
             print(f"[agents] {spec.key} failed: {error}")
 
@@ -212,7 +221,7 @@ def run_agent(spec, trigger: str = "manual", event_ids: list[int] | None = None,
                 change_log.undo_batch(db, batch_id)
             except Exception as exc:  # noqa: BLE001
                 db.rollback()
-                print(f"[agents] {spec.key}: could not undo a violating batch: {exc}")
+                print(f"[agents] {spec.key}: could not undo a violating batch: {type(exc).__name__}")
             status, error = "violation", f"wrote to {offending}"
             summary = f"reverted: wrote to {offending}, which this agent may not touch"
 
@@ -248,21 +257,24 @@ def run_agent(spec, trigger: str = "manual", event_ids: list[int] | None = None,
         db.commit()
         return {**serialize_run(run), "event_ids": handed}
     except Exception as exc:  # noqa: BLE001 — the runner never raises
-        print(f"[agents] runner error for {spec.key}: {type(exc).__name__}: {exc}")
         try:
             if db is not None:
                 db.rollback()
+        except Exception:  # noqa: BLE001
+            pass
+        problem = _safe(db, f"{type(exc).__name__}: {exc}")[:2000]
+        print(f"[agents] runner error for {spec.key}: {problem}")
+        try:
             if db is not None and run is not None and run.id is not None:
                 stuck = db.query(models.AgentRun).filter(models.AgentRun.id == run.id).first()
                 if stuck is not None and stuck.status == "running":
                     stuck.status, stuck.finished_at = "failed", datetime.utcnow()
-                    stuck.error = f"runner: {type(exc).__name__}: {exc}"[:2000]
+                    stuck.error = f"runner: {problem}"[:2000]
                     db.commit()
                     return serialize_run(stuck)
         except Exception:  # noqa: BLE001
             pass
-        return {"agent_key": spec.key, "status": "failed", "summary": "runner error",
-                "error": f"{type(exc).__name__}: {exc}"[:2000]}
+        return {"agent_key": spec.key, "status": "failed", "summary": "runner error", "error": problem}
     finally:
         llm.clear_run_context()
         if db is not None:
@@ -403,14 +415,15 @@ def tick(trigger: str = "manual", *, now: datetime | None = None) -> dict:
         tick_row.summary_json = json.dumps(summary, default=str)
         db.commit()
     except Exception as exc:  # noqa: BLE001 — a tick never raises
-        print(f"[agents] tick failed: {type(exc).__name__}: {exc}")
-        summary["errors"] += 1
-        summary["error"] = f"{type(exc).__name__}: {exc}"[:500]
         try:
             if db is not None:
                 db.rollback()
         except Exception:  # noqa: BLE001
             pass
+        problem = _safe(db, f"{type(exc).__name__}: {exc}")[:500]
+        print(f"[agents] tick failed: {problem}")
+        summary["errors"] += 1
+        summary["error"] = problem
     finally:
         if db is not None:
             db.close()

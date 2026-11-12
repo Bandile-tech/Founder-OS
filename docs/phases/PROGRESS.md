@@ -797,9 +797,10 @@ Decisions where the spec was silent:
 - `GET /integrations` computes each status from the row and the environment: Telegram and email
   show "pending" when their env vars are set but nothing is paired or synced yet; YouTube reads
   the Brand tab's `social_accounts` row.
-- The pairing code is derived from the server secret. With neither `FOUNDER_OS_SECRET` nor
-  `FOUNDER_OS_PASSWORD` set that secret is a public constant; in that state the whole API is
-  open anyway, so pairing is not refused. S17 limits wrong attempts per chat.
+- (Changed in the review round.) The pairing code was derived from the server secret, which
+  without `FOUNDER_OS_SECRET` is derived from the password, and it never changed. It is now six
+  random characters kept on the telegram row, spent when used: pairing and Disconnect both
+  discard it. S17 limits wrong attempts per chat.
 
 VERIFY: Telegram `setWebhook` parameter names (`url`, `secret_token`, `allowed_updates`).
 
@@ -1145,7 +1146,9 @@ Telegram:
 2. On Render set `TELEGRAM_BOT_TOKEN` (the token), `TELEGRAM_BOT_USERNAME` (the bot's
    username), `TELEGRAM_WEBHOOK_SECRET` (any random string of 32 or more letters and digits)
    and `FOUNDER_OS_API_URL` (`https://<your Render host>`, no trailing slash). Make sure
-   `FOUNDER_OS_PASSWORD` is set too: the pairing code is derived from it.
+   `FOUNDER_OS_PASSWORD` is set too, or the Settings page that shows the pairing code is open
+   to anyone. The webhook secret must be at least 16 characters; shorter, and the webhook
+   refuses every update.
 3. In the app: Settings → Integrations → Telegram → Set webhook (once).
 4. Tap Open bot, press Start in Telegram, and send the six-character code shown in Settings.
    The bot answers "Paired."

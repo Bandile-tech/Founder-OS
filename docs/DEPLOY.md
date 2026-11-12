@@ -25,7 +25,7 @@ configured.
 |---|---|---|---|
 | 1 | `DATABASE_URL` | Supabase Postgres URL (already set) | migrations run at boot |
 | 2 | `FOUNDER_OS_PASSWORD` | a long passphrase | without it the API boots open |
-| 3 | `FOUNDER_OS_SECRET` | 32+ random chars (`openssl rand -hex 32`) | keeps sessions valid if the password changes |
+| 3 | `FOUNDER_OS_SECRET` | 32+ random chars (`openssl rand -hex 32`) | keeps sessions valid if the password changes, and means nothing signed is derived from the password |
 | 4 | `FOUNDER_OS_ORIGINS` | leave unset — the app and the API share one origin. Set it only if some other origin must call the API | CORS |
 | 5 | `OPENAI_API_KEY` | the key | assistant, parser, embeddings, voice |
 | 6 | `ASSISTANT_MODEL` | `gpt-5.4-mini` (default) | cost |

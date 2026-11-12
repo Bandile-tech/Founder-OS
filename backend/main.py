@@ -161,7 +161,14 @@ async def startup():
     if not _auth.auth_required():
         print("[startup] WARNING: FOUNDER_OS_PASSWORD is not set — the API is open. Set it on Render.")
     if os.getenv("JOBS_TOKEN") and len(os.getenv("JOBS_TOKEN")) < 32:
-        print("[startup] WARNING: JOBS_TOKEN is shorter than 32 characters. Use a longer random value.")
+        print("[startup] WARNING: JOBS_TOKEN is shorter than 32 characters. Use a longer random value "
+              "(under 16, POST /jobs/tick answers 503).")
+    if os.getenv("TELEGRAM_WEBHOOK_SECRET") and len(os.getenv("TELEGRAM_WEBHOOK_SECRET")) < 32:
+        print("[startup] WARNING: TELEGRAM_WEBHOOK_SECRET is shorter than 32 characters. Use a longer random "
+              "value (under 16, the webhook refuses every update).")
+    if _auth.auth_required() and not os.getenv("FOUNDER_OS_SECRET"):
+        print("[startup] NOTE: FOUNDER_OS_SECRET is not set, so session tokens are signed with a key derived "
+              "from the password. Set a random FOUNDER_OS_SECRET on Render.")
     db = SessionLocal()
     try:
         load_kpi_state(db)
@@ -2587,6 +2594,8 @@ def jobs_tick(request: Request):
     expected = os.getenv("JOBS_TOKEN") or ""
     if not expected:
         raise HTTPException(503, "JOBS_TOKEN is not set")
+    if len(expected) < 16:      # a token that can be guessed is not a token; 32+ random characters are asked for
+        raise HTTPException(503, "JOBS_TOKEN must be at least 16 characters")
     given = request.headers.get("x-jobs-token") or ""
     if not hmac.compare_digest(given.encode("utf-8"), expected.encode("utf-8")):
         raise HTTPException(401, "Invalid jobs token")

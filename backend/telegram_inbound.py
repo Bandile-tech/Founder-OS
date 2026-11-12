@@ -322,7 +322,7 @@ def handle_update(db, update: dict) -> str:
         code = _code_from(text)
         if not code:
             return "ignored: not paired"
-        if not hmac.compare_digest(code.encode("utf-8"), integrations_telegram.pair_code().encode("utf-8")):
+        if not hmac.compare_digest(code.encode("utf-8"), integrations_telegram.pair_code(db).encode("utf-8")):
             _note_wrong_code(chat_id)
             return "ignored: wrong pairing code"
         sender = message.get("from") or {}
@@ -374,7 +374,7 @@ def _process(update: dict) -> None:
 async def webhook(request: Request, background: BackgroundTasks,
                   x_telegram_bot_api_secret_token: str | None = Header(default=None)):
     """Telegram's updates. 403 unless the secret header matches; otherwise always ``200 {}``."""
-    secret = os.getenv("TELEGRAM_WEBHOOK_SECRET")
+    secret = integrations_telegram.webhook_secret()       # None when unset or too short to be a secret
     given = x_telegram_bot_api_secret_token or ""
     if not secret or not hmac.compare_digest(given.encode("utf-8"), secret.encode("utf-8")):
         raise HTTPException(403, "Forbidden")

@@ -94,7 +94,9 @@ def serialize_settings(db: Session, s) -> dict:
         "quiet_start": s.quiet_start, "quiet_end": s.quiet_end, "alert_min_severity": s.alert_min_severity,
         "daily_cap": s.daily_cap, "channels": _channels(s), "deadline_days": deadline_days(s),
         "muted_until": s.muted_until, "updated_at": s.updated_at,
-        "paired": integrations_telegram.is_paired(db), "pair_code": integrations_telegram.pair_code(),
+        "paired": integrations_telegram.is_paired(db),
+        # Only while there is something to pair: a code on show after pairing is a code to steal.
+        "pair_code": None if integrations_telegram.is_paired(db) else integrations_telegram.pair_code(db),
         "bot_link": integrations_telegram.bot_link(),
         "channel_configured": bool(integrations_telegram.bot_token()),
     }

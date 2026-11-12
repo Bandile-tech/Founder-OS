@@ -613,7 +613,7 @@ Phases 5 and 6 add (all optional; each feature shows "not connected" without its
 | Var | Default | Purpose |
 |---|---|---|
 | `RESEARCH_MODEL` | the assistant model | Model for the market-intelligence roles |
-| `JOBS_TOKEN` | unset | Secret for `POST /jobs/tick`; 32+ random characters. Unset: the endpoint answers 503 |
+| `JOBS_TOKEN` | unset | Secret for `POST /jobs/tick`; 32+ random characters. Unset or under 16 characters: the endpoint answers 503 |
 | `FOUNDER_OS_TZ` | `Africa/Lusaka` | The user's zone: "today" everywhere, schedules and notification times |
 | `JOBS_TICK_BUDGET` | `80` | Seconds a tick may spend starting agents |
 | `JOBS_IN_PROCESS` | `1` | `0` turns off the in-process 15-minute tick |
@@ -621,7 +621,7 @@ Phases 5 and 6 add (all optional; each feature shows "not connected" without its
 | `FOUNDER_OS_API_URL` | unset | The service's public URL, no trailing slash. Needed for the Telegram webhook and the Google redirect |
 | `TELEGRAM_BOT_TOKEN` | unset | Secret. The bot's token from @BotFather |
 | `TELEGRAM_BOT_USERNAME` | unset | The bot's username, for the link in Settings |
-| `TELEGRAM_WEBHOOK_SECRET` | unset | Secret. A random string Telegram sends back with each update |
+| `TELEGRAM_WEBHOOK_SECRET` | unset | Secret. A random string Telegram sends back with each update; 32+ characters, refused under 16 |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | unset | The Google OAuth client (the secret is a secret) |
 | `GOOGLE_CALENDAR_ID` | `primary` | Which calendar to read and write |
 | `EMAIL_ADDRESS` / `EMAIL_APP_PASSWORD` | unset | The Gmail address and its App Password (a secret) |

@@ -92,17 +92,32 @@ def connected(db: Session) -> bool:
 
 # ── OAuth ────────────────────────────────────────────────────
 
-def _sign(nonce: str, stamp: int) -> str:
-    return hmac.new(auth._secret(), f"{nonce}:{stamp}".encode("utf-8"), hashlib.sha256).hexdigest()
+def _state_key(db: Session) -> bytes:
+    """A random key kept on the row, used only to sign OAuth states. Not the server secret:
+    without FOUNDER_OS_SECRET that is derived from the password, and a state passes through
+    Google, the browser's history and the access log, where its signature would be something
+    to test password guesses against."""
+    row = _row(db)
+    key = integrations.config(row).get("state_key")
+    if not key:
+        key = _secrets.token_hex(32)
+        integrations.set_config(row, state_key=key)
+        db.commit()
+    return str(key).encode("utf-8")
+
+
+def _sign(db: Session, nonce: str, stamp: int) -> str:
+    return hmac.new(_state_key(db), f"{nonce}:{stamp}".encode("utf-8"), hashlib.sha256).hexdigest()
 
 
 def new_state(db: Session) -> str:
     """A signed, single-use state good for ten minutes. The nonce is remembered on the row."""
     nonce, stamp = _secrets.token_urlsafe(16), int(time.time())
+    signature = _sign(db, nonce, stamp)
     row = _row(db)
     integrations.set_config(row, pending_state=nonce)
     db.commit()
-    return f"{nonce}.{stamp}.{_sign(nonce, stamp)}"
+    return f"{nonce}.{stamp}.{signature}"
 
 
 def check_state(db: Session, state: str | None) -> bool:
@@ -112,7 +127,7 @@ def check_state(db: Session, state: str | None) -> bool:
         stamp = int(stamp_text)
     except ValueError:
         return False
-    if not hmac.compare_digest(signature.encode("utf-8"), _sign(nonce, stamp).encode("utf-8")):
+    if not hmac.compare_digest(signature.encode("utf-8"), _sign(db, nonce, stamp).encode("utf-8")):
         return False
     if not 0 <= time.time() - stamp <= STATE_TTL_SECONDS:
         return False

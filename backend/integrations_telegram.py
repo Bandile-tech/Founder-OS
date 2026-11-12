@@ -14,6 +14,7 @@ import base64
 import hashlib
 import hmac
 import os
+import secrets as _secrets
 from datetime import datetime
 
 import httpx
@@ -39,10 +40,30 @@ def bot_link() -> str | None:
     return f"https://t.me/{username}" if username else None
 
 
-def pair_code() -> str:
-    """Six uppercase base32 characters from HMAC-SHA256(server secret, "telegram-pair")."""
-    digest = hmac.new(auth._secret(), b"telegram-pair", hashlib.sha256).digest()
-    return base64.b32encode(digest).decode("ascii")[:6].upper()
+_CODE_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
+MIN_SECRET_LENGTH = 16          # shorter than this, a shared secret is treated as not set
+
+
+def webhook_secret() -> str | None:
+    """TELEGRAM_WEBHOOK_SECRET, or None when it is unset or too short to be one. Whoever
+    holds it can speak as the paired chat, so a guessable value is no secret at all."""
+    value = os.getenv("TELEGRAM_WEBHOOK_SECRET") or ""
+    return value if len(value) >= MIN_SECRET_LENGTH else None
+
+
+def pair_code(db: Session) -> str:
+    """The code to send the bot: six random base32 characters kept on the telegram row.
+
+    Random, not derived from the server secret or the password, so seeing one tells nothing
+    about either. Spent when it is used: pairing and disconnecting both discard it, and the
+    next call makes a new one. The caller need not commit."""
+    row = _row(db)
+    code = integrations.config(row).get("pair_code")
+    if not code:
+        code = "".join(_secrets.choice(_CODE_ALPHABET) for _ in range(6))
+        integrations.set_config(row, pair_code=code)
+        db.commit()
+    return code
 
 
 def _row(db: Session):
@@ -60,7 +81,7 @@ def is_paired(db: Session) -> bool:
 def pair(db: Session, chat, username: str | None = None) -> None:
     """Store the chat that sent the right code. The caller commits."""
     row = _row(db)
-    integrations.set_config(row, chat_id=chat, username=username)
+    integrations.set_config(row, chat_id=chat, username=username, pair_code=None)    # the code is spent
     row.status, row.account_label, row.last_error = "connected", username, None
     row.connected_at = datetime.utcnow()
 
@@ -75,11 +96,13 @@ def unpair(db: Session) -> None:
 def set_webhook(db: Session = Depends(get_db)):
     """Tell Telegram where to deliver messages, with the secret it must send back in the
     ``X-Telegram-Bot-Api-Secret-Token`` header. 503 until the three env vars are set."""
-    token, base, secret = bot_token(), os.getenv("FOUNDER_OS_API_URL"), os.getenv("TELEGRAM_WEBHOOK_SECRET")
+    token, base, secret = bot_token(), os.getenv("FOUNDER_OS_API_URL"), webhook_secret()
     missing = [name for name, value in (("TELEGRAM_BOT_TOKEN", token), ("FOUNDER_OS_API_URL", base),
-                                        ("TELEGRAM_WEBHOOK_SECRET", secret)) if not value]
+                                        ("TELEGRAM_WEBHOOK_SECRET", os.getenv("TELEGRAM_WEBHOOK_SECRET"))) if not value]
     if missing:
         raise HTTPException(503, f"Not set: {', '.join(missing)}")
+    if secret is None:
+        raise HTTPException(503, f"TELEGRAM_WEBHOOK_SECRET must be at least {MIN_SECRET_LENGTH} characters")
     url = base.rstrip("/") + "/integrations/telegram/webhook"
     try:
         # VERIFY: setWebhook's parameter names (url, secret_token, allowed_updates).

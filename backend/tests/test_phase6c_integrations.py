@@ -192,21 +192,31 @@ def test_provider_is_unique_in_the_table():
 
 # ── Telegram pairing ─────────────────────────────────────────
 
-def test_pair_code_is_six_base32_characters_and_stable(monkeypatch):
-    monkeypatch.setenv("FOUNDER_OS_SECRET", "server-secret-one")
-    code = tg.pair_code()
-    assert len(code) == 6 and code == code.upper()
-    assert set(code) <= set("ABCDEFGHIJKLMNOPQRSTUVWXYZ234567")
-    assert tg.pair_code() == code                                  # nothing is stored: same every time
-    monkeypatch.setenv("FOUNDER_OS_SECRET", "server-secret-two")
-    assert tg.pair_code() != code                                  # tied to the server's secret
-
-
-def test_pair_code_follows_the_password_when_no_secret_is_set(monkeypatch):
+def test_pair_code_is_random_stored_and_not_derived_from_the_password(monkeypatch):
+    """Review: the code was HMAC(server secret), and with no FOUNDER_OS_SECRET the server
+    secret is derived from the password, so a code seen in a chat was something to test
+    password guesses against. It also never changed."""
+    import base64
+    import hashlib
+    import hmac as hmac_lib
+    import auth
     monkeypatch.setenv("FOUNDER_OS_PASSWORD", "password-one")
-    first = tg.pair_code()
+    db = _db()
+    code = tg.pair_code(db)
+    assert len(code) == 6 and set(code) <= set("ABCDEFGHIJKLMNOPQRSTUVWXYZ234567")
+    assert tg.pair_code(db) == code                                # the same while it waits to be used
     monkeypatch.setenv("FOUNDER_OS_PASSWORD", "password-two")
-    assert tg.pair_code() != first
+    assert tg.pair_code(db) == code                                # nothing to do with the password
+    derived = base64.b32encode(hmac_lib.new(auth._secret(), b"telegram-pair", hashlib.sha256).digest()).decode()[:6]
+    codes = {code}
+    for _ in range(3):                                             # each use spends the code
+        tg.pair(db, 42, "bandile")
+        db.commit()
+        tg.unpair(db)
+        db.commit()
+        codes.add(tg.pair_code(db))
+    assert len(codes) == 4 and derived not in codes
+    db.close()
 
 
 def test_pair_then_unpair(monkeypatch):
@@ -485,6 +495,27 @@ def test_only_the_callback_is_reachable_without_a_session(google, monkeypatch):
     assert client.get("/calendar/today").status_code == 401
     r = client.get("/integrations/google/callback", params={"code": "x", "state": "y"}, follow_redirects=False)
     assert r.status_code == 302 and r.headers["location"] == "/app/#settings?error=google_state"
+
+
+def test_the_oauth_state_is_not_signed_with_anything_derived_from_the_password(google, monkeypatch):
+    """Review: with FOUNDER_OS_SECRET unset the state was signed with sha256("founder-os:" +
+    password). The state travels through Google, the browser history and the access log, so
+    whoever saw one could test password guesses offline."""
+    import hashlib
+    import hmac as hmac_lib
+    monkeypatch.delenv("FOUNDER_OS_SECRET", raising=False)
+    monkeypatch.setenv("FOUNDER_OS_PASSWORD", "hunter2")
+    db = _db()
+    state = gcal.new_state(db)
+    nonce, stamp, signature = state.split(".")
+    from_password = hmac_lib.new(hashlib.sha256(b"founder-os:hunter2").digest(), f"{nonce}:{stamp}".encode(),
+                                 hashlib.sha256).hexdigest()
+    assert signature != from_password
+    assert gcal.check_state(db, state) is True and gcal.check_state(db, state) is False      # still single use
+    forged = f"{nonce}.{stamp}.{from_password}"
+    gcal.new_state(db)
+    assert gcal.check_state(db, forged) is False
+    db.close()
 
 
 # ── 2. Token refresh ─────────────────────────────────────────

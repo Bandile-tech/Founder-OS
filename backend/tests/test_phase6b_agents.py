@@ -757,6 +757,7 @@ def test_workflow_ships_with_the_schedule_switched_off():
     active = [line for line in text.splitlines() if not line.lstrip().startswith("#")]
     assert not any("cron" in line or line.strip() == "schedule:" for line in active)
     assert "for i in 1 2 3" in text and "sleep 20" in text and "-m 120" in text
+    assert "-o /dev/null" in text                 # the answer names projects and objectives: keep it out of the log
     assert "secrets.FOUNDER_OS_URL" in text and "X-Jobs-Token: ${{ secrets.JOBS_TOKEN }}" in text
 
 
@@ -936,3 +937,44 @@ def test_a_disabled_or_missing_subscriber_does_not_hold_an_event_forever():
     assert [r["key"] for r in out["ran"]] == ["on"] and seen == [1] and out["events_consumed"] == 1
     assert db.query(models.AgentEvent).one().consumed_at is not None          # the switched-off agent is not waited for
     db.close()
+
+
+# ── Review, part 3: nothing secret in a run's error ───────────
+
+def test_a_run_error_never_carries_a_stored_secret_or_statement_parameters(capsys):
+    """A failed commit raised a SQLAlchemy error whose text included the statement's
+    parameters (the whole secret_json), and the runner stored and printed it as it came."""
+    import database
+    import integrations
+    from sqlalchemy import text as sql
+    token = "ya29.secret-access-token-0001"
+    db = _db()
+    row = integrations.get_or_create(db, "google_calendar")
+    row.secret_json = json.dumps({"access_token": token, "refresh_token": "1//refresh-token-value-0001"})
+    db.commit()
+    db.close()
+
+    def run(ctx):
+        raise RuntimeError(f"commit failed [parameters: ('{{\"access_token\": \"{token}\"}}',)]")
+
+    out = runner.run_agent(_spec("leaky", run), "manual")
+    printed = capsys.readouterr().out
+    db = _db()
+    stored = db.query(models.AgentRun).one().error
+    db.close()
+    assert out["status"] == "failed"
+    assert token not in out["error"] and token not in stored and token not in printed
+    assert "RuntimeError" in out["error"]
+
+    # And the engine itself keeps parameters out of its errors.
+    assert database.engine.hide_parameters is True
+    with pytest.raises(Exception) as caught:
+        with database.engine.connect() as conn:
+            conn.execute(sql("SELECT * FROM no_such_table WHERE x = :secret"), {"secret": token})
+    assert token not in str(caught.value)
+
+
+def test_a_short_jobs_token_is_treated_as_unset(monkeypatch):
+    monkeypatch.setenv("JOBS_TOKEN", "abc123")
+    r = client.post("/jobs/tick", headers={"X-Jobs-Token": "abc123"})
+    assert r.status_code == 503 and "16" in r.json()["detail"]

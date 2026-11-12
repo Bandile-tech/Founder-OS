@@ -47,7 +47,7 @@ Environment (`backend/.env` locally, Render env vars in production):
 | `ASSISTANT_HISTORY_TURNS` / `ASSISTANT_SUMMARY_BATCH` | `20` / `10` | History budget |
 | `INTENT_CONFIDENCE_MIN` | `0.7` | Below this an extracted item becomes a suggestion |
 | `RESEARCH_MODEL` | the assistant model | Model for the market-intelligence roles |
-| `JOBS_TOKEN` | unset | Secret for `POST /jobs/tick` (the scheduler). Unset: the endpoint answers 503. Use 32+ random characters |
+| `JOBS_TOKEN` | unset | Secret for `POST /jobs/tick` (the scheduler). Unset, or shorter than 16 characters: the endpoint answers 503. Use 32+ random characters |
 | `FOUNDER_OS_TZ` | `Africa/Lusaka` | The user's zone: "today" everywhere (briefing, tasks, habits, payments), agent schedules and notification times. Never the server's clock |
 | `JOBS_TICK_BUDGET` | `80` | Seconds a tick may spend starting agents; the rest run on the next tick |
 | `JOBS_IN_PROCESS` | `1` | `0` turns off the in-process 15-minute tick (the external tick still works) |
@@ -55,7 +55,7 @@ Environment (`backend/.env` locally, Render env vars in production):
 | `FOUNDER_OS_API_URL` | unset | The backend's public base URL (no trailing slash). Needed for the Telegram webhook and the Google sign-in redirect |
 | `TELEGRAM_BOT_TOKEN` | unset | The bot's token from @BotFather. Unset: notifications are recorded as not sent |
 | `TELEGRAM_BOT_USERNAME` | unset | The bot's username, for the pairing link in Settings |
-| `TELEGRAM_WEBHOOK_SECRET` | unset | Random string Telegram must send back with each update |
+| `TELEGRAM_WEBHOOK_SECRET` | unset | Random string Telegram must send back with each update. 32+ characters; under 16 the webhook refuses every update |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | unset | The Google OAuth client for the calendar. Unset: the calendar shows "not connected" |
 | `GOOGLE_CALENDAR_ID` | `primary` | Which calendar to read and write |
 | `EMAIL_ADDRESS` / `EMAIL_APP_PASSWORD` | unset | The Gmail address and its App Password. Unset: email shows "not connected" and outreach email cannot send |

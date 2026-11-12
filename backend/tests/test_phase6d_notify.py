@@ -666,7 +666,7 @@ def test_settings_endpoint_returns_defaults_and_pairing_details(monkeypatch):
     assert body["alert_min_severity"] == "warn" and body["daily_cap"] == 12
     assert body["channels"] == {"telegram": True} and body["deadline_days"] == [30, 14, 7, 3, 1]
     assert body["paired"] is False and body["channel_configured"] is True
-    assert body["bot_link"] == "https://t.me/FounderOsBot" and body["pair_code"] == tg.pair_code()
+    assert body["bot_link"] == "https://t.me/FounderOsBot" and body["pair_code"] == tg.pair_code(_db())
     assert BOT_TOKEN not in json.dumps(body)
 
 
@@ -876,7 +876,7 @@ def test_pairing_needs_the_right_code_and_a_second_chat_is_ignored(hook, sends):
     assert hook("hello there").status_code == 200
     assert tg.is_paired(db) is False and sends == []                         # nothing is said to a stranger
 
-    assert hook(tg.pair_code().lower()).status_code == 200                   # case does not matter
+    assert hook(tg.pair_code(_db()).lower()).status_code == 200                   # case does not matter
     db.expire_all()
     assert tg.is_paired(db) is True and tg.chat_id(db) == CHAT
     assert _texts(sends)[0].startswith("Paired. You'll get your briefing at 06:00.")
@@ -887,7 +887,7 @@ def test_pairing_needs_the_right_code_and_a_second_chat_is_ignored(hook, sends):
 
     # Another chat — even with the right code — is ignored and told nothing.
     before = len(sends)
-    hook(tg.pair_code(), chat_id=OTHER_CHAT)
+    hook(tg.pair_code(_db()), chat_id=OTHER_CHAT)
     hook("show me everything", chat_id=OTHER_CHAT)
     db.expire_all()
     assert tg.chat_id(db) == CHAT and len(sends) == before
@@ -900,9 +900,9 @@ def test_pairing_accepts_the_code_after_start_and_locks_out_guessing(hook, sends
     hook("/start")                                                           # Telegram's Start button: not a guess
     for n in range(5):
         hook(f"GUESS{n}", chat_id=OTHER_CHAT)
-    hook(tg.pair_code(), chat_id=OTHER_CHAT)                                 # locked out after five wrong codes
+    hook(tg.pair_code(_db()), chat_id=OTHER_CHAT)                                 # locked out after five wrong codes
     assert tg.is_paired(db) is False
-    hook(f"/start {tg.pair_code()}")
+    hook(f"/start {tg.pair_code(_db())}")
     db.expire_all()
     assert tg.chat_id(db) == CHAT and _texts(sends)[0].startswith("Paired.")
     db.close()
@@ -911,7 +911,7 @@ def test_pairing_accepts_the_code_after_start_and_locks_out_guessing(hook, sends
 def test_group_chats_and_repeated_updates_are_ignored(hook, sends):
     db = _db()
     headers = {"X-Telegram-Bot-Api-Secret-Token": HOOK_SECRET}
-    group = {"update_id": 77, "message": {"chat": {"id": -100123, "type": "group"}, "text": tg.pair_code()}}
+    group = {"update_id": 77, "message": {"chat": {"id": -100123, "type": "group"}, "text": tg.pair_code(_db())}}
     client.post("/integrations/telegram/webhook", json=group, headers=headers)
     assert tg.is_paired(db) is False
 
@@ -1227,3 +1227,37 @@ def test_yes_will_not_guess_between_two_proposals_and_the_prompt_lists_them(hook
     assert _texts(sends)[-1].startswith("Cancelled: ")
     assert {p.status for p in db.query(models.PendingAction).all()} == {"cancelled"}
     db.close()
+
+
+# ── Review, part 3: secrets and pairing ───────────────────────
+
+def test_the_pairing_code_is_spent_once_used_and_hidden_once_paired(hook, sends):
+    """The code never changed: after Disconnect, the code still sitting in the old chat (or
+    on a screenshot of Settings) paired whoever sent it."""
+    db = _db()
+    code = tg.pair_code(db)
+    hook(code)
+    db.expire_all()
+    assert tg.is_paired(db)
+    assert client.get("/notifications/settings").json()["pair_code"] is None     # nothing to show while paired
+    assert client.post("/integrations/telegram/unpair").status_code == 200
+    hook(code, chat_id=OTHER_CHAT)                                               # the old code, from someone else
+    db.expire_all()
+    assert not tg.is_paired(db)
+    fresh = client.get("/notifications/settings").json()["pair_code"]
+    assert fresh and fresh != code
+    hook(fresh)
+    db.expire_all()
+    assert str(tg.chat_id(db)) == str(CHAT)
+    db.close()
+
+
+def test_a_short_webhook_secret_is_refused(monkeypatch, sends):
+    """The webhook secret alone lets a caller speak as the paired chat, /yes included."""
+    monkeypatch.setenv("TELEGRAM_WEBHOOK_SECRET", "short")
+    body = {"update_id": 1, "message": {"chat": {"id": CHAT, "type": "private"}, "text": "hello"}}
+    r = client.post("/integrations/telegram/webhook", json=body, headers={"X-Telegram-Bot-Api-Secret-Token": "short"})
+    assert r.status_code == 403
+    monkeypatch.setenv("FOUNDER_OS_API_URL", "https://founder.example")
+    refused = client.post("/integrations/telegram/set-webhook")
+    assert refused.status_code == 503 and "16" in refused.json()["detail"]

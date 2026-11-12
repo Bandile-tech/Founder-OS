@@ -24,7 +24,8 @@ jobs:
       - name: Tick (wakes Render if asleep)
         run: |
           for i in 1 2 3; do
-            curl -fsS -m 120 -X POST "${{ secrets.FOUNDER_OS_URL }}/jobs/tick" \
+            # The answer names agents, projects and research objectives: it is not printed.
+            curl -fsS -m 120 -o /dev/null -X POST "${{ secrets.FOUNDER_OS_URL }}/jobs/tick" \
               -H "X-Jobs-Token: ${{ secrets.JOBS_TOKEN }}" && exit 0
             sleep 20
           done
