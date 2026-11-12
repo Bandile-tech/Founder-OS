@@ -206,6 +206,24 @@ async function api(token, method, p, body, isForm) {
     check(rev && rev.amount === 1200 && rev.currency === "ZMW", "the revenue row was written in Kwacha");
     check((await page.locator("#ucmd-changes .chg-row").count()) >= 1, "the change is shown with Undo in the dock");
 
+    // Money that waits for a milestone, recorded through the tool bridge (it only ever
+    // arrives in conversation).
+    const tool = (name, args) => api(token, "POST", "/voice/realtime/tool", { name, arguments: args });
+    await tool("record_payment", { client: "Smoke Test Bakery", amount: 800, status: "due", due_trigger: "on go-live", title: "Balance" });
+    await tool("add_recurring", { client: "Smoke Test Bakery", amount: 450, frequency: "monthly", start_trigger: "from go-live" });
+    await page.evaluate((id) => openClient(id), cl.json.id);
+    await page.waitForSelector("#biz-body .card:has-text('Recurring')", { timeout: 15000 });
+    check((await page.locator("#biz-body .row", { hasText: "due on go-live" }).count()) === 1, "a payment waiting for go-live shows no date");
+    const recRow = page.locator("#biz-body .card:has-text('Recurring') .row");
+    check((await recRow.count()) === 1 && /K450/.test(await recRow.textContent()) && /Pending/.test(await recRow.textContent()) && /starts on go-live/.test(await recRow.textContent()),
+      "the recurring amount is listed as pending until go-live");
+    await tool("mark_milestone", { client: "Smoke Test Bakery", milestone: "went live" });
+    const live = (await api(token, "GET", `/clients/${cl.json.id}`)).json;
+    check(live.payments.find((p) => p.title === "Balance").due_date === today && live.recurring[0].status === "active",
+      "marking go-live dated the payment and started the recurring amount");
+    check(live.recurring[0].next_due > today && !live.payments.some((p) => p.recurring_id),
+      "the first recurring payment is not due on go-live day");
+
     // ── 6. Portfolio: Focus ──
     console.log("6. portfolio: focus a project");
     const projA = await api(token, "POST", "/projects", { title: "Smoke project one", priority: 1 });

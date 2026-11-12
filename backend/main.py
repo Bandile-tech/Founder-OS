@@ -216,6 +216,8 @@ async def startup():
         run_m023(db)        # m023 — agent_event_deliveries, change_log.undoable, email_messages.auth_result, agents.claimed_at
         from migrations.m024_briefing_summary_failures import run as run_m024
         run_m024(db)        # m024 — briefing_summaries.failed_at, last_error
+        from migrations.m025_payment_triggers import run as run_m025
+        run_m025(db)        # m025 — payments.due_trigger, recurring_revenue.start_trigger
         _validate_schema(engine)   # raises if any ORM column is absent from the live DB
         _seed_non_negotiables_if_empty(db)
         _verify_seed_integrity(db)

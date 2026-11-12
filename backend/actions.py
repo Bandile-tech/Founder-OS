@@ -261,6 +261,20 @@ def accept_suggestion(db: Session, sid: int) -> dict:
         s.resolved_at = datetime.utcnow()
         db.commit()
         return {**_suggestion_dict(s), "applied": True, "updates": {"lead_id": result["id"]}, "changes": changes}
+    if s.kind == "client_add":
+        # The assistant could not tell a client from a prospect: accepting it is Bandile
+        # saying they are a client.
+        import orchestrator_tools
+        fields = {k: payload.get(k) for k in orchestrator_tools._CLIENT_FIELDS if payload.get(k)}
+        with change_log.batch_scope(db, "ui"):
+            result, summary = orchestrator_tools.create_client(db, name=payload.get("name", ""), **fields)
+            changes = change_log.current_batch_changes(db)
+        if result.get("error") or result.get("ambiguous"):
+            return {**_suggestion_dict(s), "applied": False, "reason": summary}
+        s.status = "accepted"
+        s.resolved_at = datetime.utcnow()
+        db.commit()
+        return {**_suggestion_dict(s), "applied": True, "updates": {"client_id": result["id"]}, "changes": changes}
     parsed: dict = {}
     if s.kind == "todo_add":
         parsed["todos_add"] = [{**payload, "intent": "commitment", "confidence": 1.0}]

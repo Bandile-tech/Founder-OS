@@ -1200,6 +1200,106 @@ the line below.
 PostgreSQL suite on the final code (`2d2d858`; later commits only touch this file):
 780 passed in about ten minutes.
 
+## Live-use fix — clients, deals and money that waits for a milestone (12 November 2026)
+
+**The bug.** Sent in live use: "Bel Baby Shop is a client. Owner Christabel Sintema.
+Website deal: K2,500 set-up, K1,250 deposit paid, K1,250 due on go-live, then K450 a month
+from go-live." The assistant created a lead and recorded none of the money.
+
+**The cause.** The orchestrator's CRM tools were `crm_lookup`, `log_communication`,
+`update_deal`, `add_contact`, `record_payment`, `crm_summary` and `convert_lead`. None of
+them can create a client: `convert_lead` needs a lead that already exists, and
+`update_deal` (with `create`), `add_contact` and `record_payment` all answer "no client
+matches" until one is on file. `add_lead` was the only tool that could file a new business,
+so the model used it, and every money call then had nothing to attach to. There was also no
+tool for recurring revenue and no way to record money that is due at an event.
+
+**What was added.**
+
+- `create_client` — name, the owner as the primary contact, currency from
+  `DEFAULT_CURRENCY` unless one is named. A client already on file is returned, not
+  duplicated. A lead of the same name is converted (linked both ways) rather than left
+  beside a second record, which is what cleans up the lead the live message left behind.
+  `unsure: true` writes nothing and files a `client_add` suggestion; accepting it creates
+  the client.
+- `create_deal` — title, value and stage for a client on file. It is `update_deal` with
+  `create`, so naming the same deal twice updates it.
+- `record_payment` — unchanged for paid and for due with a date. New: `due_trigger` for
+  money due at an event. The payment is stored with no due date, `due_trigger` set and the
+  note "Due on go-live". A paid amount no longer settles a due payment recorded in the same
+  turn (the deposit and the balance are both K1,250). The currency now defaults to the
+  client's, not to ZMW. The payment is linked to the deal when the client has one deal.
+- `add_recurring` — amount and frequency, with `start` (a date) or `start_trigger` (an
+  event). With a trigger it is pending: inactive, no payments generated, not in MRR.
+- `mark_milestone` — "Bel went live today". Every open payment of that client waiting for
+  the milestone becomes due that day, and every recurring amount waiting for it starts,
+  first due one period later. "go-live", "went live", "launch" are one milestone; other events are matched by
+  their own words. When nothing is waiting for the milestone named it writes nothing and
+  returns what is waiting.
+- m025: `payments.due_trigger`, `recurring_revenue.start_trigger`.
+- Prompt: "is a client", "pays me" or a deal with money is the client path; a lead is a
+  prospect who has agreed to nothing; unclear means `create_client` with `unsure`; several
+  facts in one message are several tool calls in the turn (one batch, one Undo); money due
+  at an event never gets an invented date.
+- Client page: a payment waiting for a milestone reads "due on go-live", and a Recurring
+  card lists the client's recurring amounts with Active / Pending / Ended.
+
+**Decisions.**
+
+- `recurring_revenue.next_due` is NOT NULL and SQLite cannot relax that in place, so a
+  pending row holds the placeholder `crm.PENDING_NEXT_DUE` (9999-12-31). It is never shown
+  (the API reports `next_due: null`, `status: "pending"`) and never reached by
+  `generate_due`, because the row is inactive.
+- When a recurring amount starts at a milestone, its first payment is due one period after
+  the milestone (Bandile's rule, 12 November): a month after for a monthly amount, a
+  quarter after for a quarterly one, on the milestone's day of the month (go-live on 31
+  January: 28 February, then 31 March). Nothing recurring is due on the milestone day. So
+  after "Bel went live today" only the K1,250 is due that day; the first K450 is due a
+  month later. A recurring amount given a start *date* is unchanged: its first payment is
+  due on that date.
+- m025 adds two `VARCHAR` columns and nothing else, so there is no `DATETIME` (which
+  PostgreSQL does not have) in it.
+- A deal recorded as won creates its project, as it always has. The live message therefore
+  also produces one project, "Website".
+- The tool count is now 62, two over the "about 60" ceiling in CONVENTIONS §7. `create_deal`
+  overlaps `update_deal`'s `create` flag; it was asked for by name and keeps the client path
+  readable to the model.
+
+**Tests.** `tests/test_client_money_tools.py` (36): every tool, the milestone (first recurring payment one period later), the same-turn
+payment rule, the suggestion, and the live message as five tool calls in one turn with one
+batch and one Undo. Backend suite: 837 passed on SQLite. Not run on PostgreSQL. Smoke
+tests: all pass, with four new checks in step 5 (a payment waiting for go-live shows no
+date, the recurring amount shows as pending, marking go-live dates one and starts the
+other, the first recurring payment is not due that day). The smoke run needs `PYTHON` pointed at the 3.12 environment; the system Python
+here is 3.14.
+
+### Live check for Bandile, after deploying
+
+On the Render logs, confirm the line `[m025] Payment and recurring milestone columns ready
+on postgresql.` Then send this, exactly, in the talk bar:
+
+> Bel Baby Shop is a client. Owner Christabel Sintema. Website deal: K2,500 set-up, K1,250 deposit paid, K1,250 due on go-live, then K450 a month from go-live.
+
+Expected, on Business → Clients → Bel Baby Shop:
+
+| What | Expected |
+|---|---|
+| Client | One client, **Bel Baby Shop**, active, in Kwacha. No new lead. If the earlier attempt left a "Bel Baby Shop" lead in the Pipeline, it now shows as converted |
+| Contact | One contact, **Christabel Sintema**, owner, primary |
+| Deal | One deal, **K2,500**, stage Won |
+| Paid | One payment of **K1,250**, Paid, dated today, and K1,250 added to revenue |
+| Due | One payment of **K1,250**, Due, reading "due on go-live" with no date |
+| Recurring | **K450** monthly, **Pending**, "starts on go-live"; monthly recurring on the Clients tab does not include it |
+| Also | One project, "Website", from the won deal |
+| Undo | The reply shows one change strip; one Undo removes all of the above |
+
+Second step, whenever it is true: send "Bel went live today". Expected: the K1,250 becomes
+due today, and the K450 turns Active with its next due date one month from today. No K450
+payment exists yet; the first one appears as due on that date.
+
+If the first message produces a lead again, or the money is missing, the model did not take
+the client path: open Conversations, find the turn and note which tools it called.
+
 ## External setup — Telegram and YouTube
 
 (The Google Calendar steps are under S18 and the Gmail steps under S19. None of these has

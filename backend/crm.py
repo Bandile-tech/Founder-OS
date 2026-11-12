@@ -158,13 +158,23 @@ def serialize_payment(db: Session, p: models.Payment) -> dict:
             "currency": p.currency, "amount_usd": _usd(p.amount, p.currency), "status": p.status,
             "due_date": p.due_date, "paid_at": p.paid_at, "revenue_id": p.revenue_id,
             "recurring_id": p.recurring_id, "period_start": p.period_start, "notes": p.notes,
+            "due_trigger": p.due_trigger,
             "created_at": p.created_at, "updated_at": p.updated_at}
 
 
+def recurring_pending(r: models.RecurringRevenue) -> bool:
+    """Waiting for its milestone: recorded, but not running and with no date yet."""
+    return bool(r.start_trigger) and not r.active and r.ended_at is None
+
+
 def serialize_recurring(db: Session, r: models.RecurringRevenue) -> dict:
+    pending = recurring_pending(r)
     return {"id": r.id, "client_id": r.client_id, "client_name": _client_name(db, r.client_id),
             "title": r.title, "amount": r.amount, "currency": r.currency, "interval": r.interval,
-            "day_of_month": r.day_of_month, "next_due": r.next_due, "active": bool(r.active),
+            "day_of_month": r.day_of_month, "next_due": None if pending else r.next_due,
+            "active": bool(r.active),
+            "status": "pending" if pending else ("active" if r.active else "ended"),
+            "start_trigger": r.start_trigger,
             "ended_at": r.ended_at, "monthly_amount": round(monthly_amount(r), 2),
             "created_at": r.created_at, "updated_at": r.updated_at}
 
@@ -612,12 +622,15 @@ def _add_months(d: date, months: int, day_of_month: int | None = None) -> date:
     return date(year, month, day)
 
 
-def find_open_payment(db: Session, client_id: int, amount: float, currency: str):
-    """The oldest open payment of this client in this currency within 5 % of the amount."""
+def find_open_payment(db: Session, client_id: int, amount: float, currency: str, exclude_ids=()):
+    """The oldest open payment of this client in this currency within 5 % of the amount.
+    ``exclude_ids`` are payments that must not be picked (those recorded in the same turn:
+    "K1,250 paid, K1,250 due on go-live" is two payments, not one being settled)."""
     rows = db.query(models.Payment).filter(
         models.Payment.client_id == client_id, models.Payment.status.in_(OPEN_PAYMENT),
         models.Payment.currency == currency).all()
-    rows = [p for p in rows if p.amount and abs(p.amount - float(amount)) <= RECONCILE_TOLERANCE * p.amount]
+    rows = [p for p in rows if p.id not in exclude_ids
+            and p.amount and abs(p.amount - float(amount)) <= RECONCILE_TOLERANCE * p.amount]
     rows.sort(key=lambda p: (p.due_date is None, p.due_date or date.max, p.id))
     return rows[0] if rows else None
 
@@ -657,21 +670,27 @@ def mark_paid(db: Session, payment: models.Payment, paid_at: date | None = None,
 def record_payment(db: Session, client: models.Client, amount: float, currency: str | None = None, *,
                    status: str = "paid", title: str | None = None, due_date: date | None = None,
                    paid_at: date | None = None, deal: models.Deal | None = None,
-                   project: models.Project | None = None) -> dict:
+                   project: models.Project | None = None, due_trigger: str | None = None) -> dict:
     """Record money a client owes (``due``) or has paid (``paid`` — which also writes the
-    revenue row). The caller commits."""
+    revenue row). A due payment may wait for a milestone instead of a date (``due_trigger``,
+    e.g. "on go-live"): it is kept with no due date until ``mark_milestone``. The caller
+    commits."""
     if amount is None or float(amount) <= 0:
         raise ValueError("a payment needs an amount above zero")
     if status not in ("paid", "due"):
         raise ValueError("status must be paid or due")
+    trigger = milestone_key(due_trigger) if (status == "due" and due_date is None) else None
     payment = models.Payment(
         client_id=client.id, deal_id=deal.id if deal else None,
         project_id=project.id if project else None, title=(title or "").strip() or None,
-        amount=float(amount), currency=_currency(currency, "ZMW"), status="due", due_date=due_date,
+        amount=float(amount), currency=_currency(currency, client.currency or models.default_currency()),
+        status="due", due_date=due_date, due_trigger=trigger,
+        notes=f"Due on {trigger}" if trigger else None,
         created_at=datetime.utcnow(), updated_at=datetime.utcnow())
     db.add(payment)
     label = money_label(payment.amount, payment.currency)
-    change = change_log.record_create(db, payment, f"Payment due: {label} from {client.name[:40]}")
+    change = change_log.record_create(
+        db, payment, f"Payment due: {label} from {client.name[:40]}" + (f" on {trigger}" if trigger else ""))
     changes = [change]
     if status == "paid":
         changes += mark_paid(db, payment, paid_at)["changes"]
@@ -682,7 +701,11 @@ def record_payment(db: Session, client: models.Client, amount: float, currency: 
 
 def add_recurring(db: Session, client: models.Client, title: str, amount: float,
                   currency: str | None = None, interval: str = "monthly",
-                  day_of_month: int | None = None, start: date | None = None) -> dict:
+                  day_of_month: int | None = None, start: date | None = None,
+                  start_trigger: str | None = None) -> dict:
+    """A retainer or subscription. With ``start`` it runs from that day. With
+    ``start_trigger`` (and no start date) it is recorded as pending: inactive, generating
+    nothing and counted in no total until ``mark_milestone`` starts it."""
     title = (title or "").strip()
     if not title:
         raise ValueError("recurring revenue needs a title")
@@ -691,9 +714,13 @@ def add_recurring(db: Session, client: models.Client, title: str, amount: float,
     if interval not in INTERVALS:
         raise ValueError(f"interval must be one of: {', '.join(INTERVALS)}")
     today = user_clock.today()
+    trigger = milestone_key(start_trigger) if start is None else None
     if start is not None:
         day = int(day_of_month or start.day)
         next_due = start
+    elif trigger:
+        day = int(day_of_month or 1)
+        next_due = PENDING_NEXT_DUE
     else:
         day = int(day_of_month or 1)
         next_due = _add_months(today.replace(day=1), 0, day)
@@ -701,13 +728,147 @@ def add_recurring(db: Session, client: models.Client, title: str, amount: float,
             next_due = _add_months(next_due, 1, day)
     day = max(1, min(31, day))
     rec = models.RecurringRevenue(
-        client_id=client.id, title=title, amount=float(amount), currency=_currency(currency, "ZMW"),
-        interval=interval, day_of_month=day, next_due=next_due, active=True,
-        created_at=datetime.utcnow(), updated_at=datetime.utcnow())
+        client_id=client.id, title=title, amount=float(amount),
+        currency=_currency(currency, client.currency or models.default_currency()),
+        interval=interval, day_of_month=day, next_due=next_due, active=not trigger,
+        start_trigger=trigger, created_at=datetime.utcnow(), updated_at=datetime.utcnow())
     db.add(rec)
     change = change_log.record_create(
-        db, rec, f"Recurring: {money_label(rec.amount, rec.currency)} {interval} from {client.name[:30]}")
+        db, rec, f"Recurring: {money_label(rec.amount, rec.currency)} {interval} from {client.name[:30]}"
+                 + (f", pending {trigger}" if trigger else ""))
     return {**serialize_recurring(db, rec), "change": change}
+
+
+# ── Milestones ───────────────────────────────────────────────
+
+# ``recurring_revenue.next_due`` is NOT NULL, so a pending row holds this placeholder. It
+# is never shown (``serialize_recurring`` reports no date) and never reached by
+# ``generate_due`` (the row is inactive).
+PENDING_NEXT_DUE = date(9999, 12, 31)
+
+_MILESTONE_LEAD_WORDS = {"on", "from", "at", "upon", "after", "when", "once", "the", "a", "we",
+                         "they", "it", "its", "is", "site", "website", "project"}
+_GO_LIVE_WORDS = {"live", "golive", "launch", "launched", "launches", "launching"}
+
+
+def milestone_key(text: str | None) -> str | None:
+    """One spelling for a milestone, so "on go-live", "from go-live", "went live" and
+    "launch" all name the same thing. Anything else is its own words joined by hyphens."""
+    import re
+    words = re.findall(r"[a-z0-9]+", (text or "").lower())
+    if any(w in _GO_LIVE_WORDS for w in words):
+        return "go-live"
+    while words and words[0] in _MILESTONE_LEAD_WORDS:
+        words.pop(0)
+    return "-".join(words)[:60] or None
+
+
+def waiting_on(db: Session, client: models.Client) -> dict:
+    """What this client has waiting for a milestone: {trigger: {"payments", "recurring"}}."""
+    out = {}
+    for p in db.query(models.Payment).filter(
+            models.Payment.client_id == client.id, models.Payment.status.in_(OPEN_PAYMENT),
+            models.Payment.due_trigger.isnot(None)).order_by(models.Payment.id).all():
+        out.setdefault(p.due_trigger, {"payments": [], "recurring": []})["payments"].append(p)
+    for r in db.query(models.RecurringRevenue).filter(
+            models.RecurringRevenue.client_id == client.id,
+            models.RecurringRevenue.start_trigger.isnot(None)).order_by(models.RecurringRevenue.id).all():
+        if recurring_pending(r):
+            out.setdefault(r.start_trigger, {"payments": [], "recurring": []})["recurring"].append(r)
+    return out
+
+
+def mark_milestone(db: Session, client: models.Client, milestone: str, day: date | None = None) -> dict:
+    """The milestone happened on ``day`` (default today): every open payment of this client
+    waiting for it becomes due that day, and every recurring amount waiting for it starts
+    that day. Its first payment is due one period later (a month after the milestone for a
+    monthly amount), on the milestone's day of the month; nothing recurring is due on the
+    milestone day itself. Raises ValueError when nothing is waiting for it. The caller
+    commits."""
+    key = milestone_key(milestone)
+    if not key:
+        raise ValueError("say which milestone happened")
+    day = day or user_clock.today()
+    waiting = waiting_on(db, client).get(key)
+    if not waiting:
+        raise ValueError(f"nothing at {client.name} is waiting for '{key}'")
+    changes, payments, recurring = [], [], []
+    for p in waiting["payments"]:
+        before = change_log.snapshot(p)
+        p.due_date, p.due_trigger, p.updated_at = day, None, datetime.utcnow()
+        changes.append(change_log.record_update(
+            db, p, before, f"{money_label(p.amount, p.currency)} from {client.name[:30]} now due {day.isoformat()} ({key})"))
+        payments.append(serialize_payment(db, p))
+    for r in waiting["recurring"]:
+        before = change_log.snapshot(r)
+        step = MONTHS_PER_INTERVAL.get(r.interval or "monthly", 1)
+        r.active, r.start_trigger = True, None
+        r.day_of_month, r.next_due = day.day, _add_months(day, step, day.day)
+        r.updated_at = datetime.utcnow()
+        changes.append(change_log.record_update(
+            db, r, before, f"Recurring {money_label(r.amount, r.currency)} {r.interval} from {client.name[:30]} started ({key}), first due {r.next_due.isoformat()}"))
+        recurring.append(serialize_recurring(db, r))
+    touch_projects(db, client.id)
+    return {"client_id": client.id, "client_name": client.name, "milestone": key, "date": day,
+            "payments_now_due": payments, "recurring_started": recurring,
+            "changes": [c for c in changes if c]}
+
+
+def create_client(db: Session, name: str, *, lead=None, company: str | None = None,
+                  service: str | None = None, notes: str | None = None, currency: str | None = None,
+                  owner: str | None = None, owner_role: str | None = None, email: str | None = None,
+                  phone: str | None = None, whatsapp: str | None = None) -> dict:
+    """A new active client, with its owner as the primary contact. When ``lead`` is the
+    prospect this client used to be, the lead is converted (linked both ways) instead of a
+    second record being made. The caller commits."""
+    name = (name or "").strip()
+    if not name:
+        raise ValueError("a client needs a name")
+    now = datetime.utcnow()
+    changes = []
+    if lead is not None:
+        import leads
+        converted = leads.convert(db, lead)
+        changes += converted["changes"]
+        client = db.query(models.Client).filter(models.Client.id == converted["client"]["id"]).first()
+        before = change_log.snapshot(client)
+        if client.name != name:
+            client.company = client.company or (lead.company or "")
+            client.name = name
+        if company:
+            client.company = company.strip()
+        if service:
+            client.service = service.strip()
+        if notes:
+            client.notes = notes.strip()
+        if currency:
+            client.currency = _currency(currency)
+        if change_log.snapshot(client) != before:
+            client.updated_at = now
+            changes.append(change_log.record_update(db, client, before, f"Updated client: {name[:60]}"))
+    else:
+        client = models.Client(
+            name=name, company=(company or "").strip(), status="active",
+            service=(service or "").strip(), notes=(notes or "").strip(),
+            currency=_currency(currency, models.default_currency()), created_at=now, updated_at=now)
+        db.add(client)
+        changes.append(change_log.record_create(db, client, f"New client: {name[:60]}"))
+    db.flush()
+    contact = None
+    owner = (owner or "").strip()
+    if owner:
+        existing = [c for c in db.query(models.Contact).filter(models.Contact.client_id == client.id).all()
+                    if (c.name or "").strip().lower() == owner.lower()]
+        if existing:
+            contact = serialize_contact(existing[0])
+        else:
+            added = add_contact(db, client, name=owner, role=owner_role or "owner", email=email,
+                                phone=phone, whatsapp=whatsapp, is_primary=True)
+            changes += added["changes"]
+            contact = {k: v for k, v in added.items() if k not in ("change", "changes")}
+    return {"id": client.id, "name": client.name, "company": client.company, "status": client.status,
+            "service": client.service, "currency": client.currency, "lead_id": client.lead_id,
+            "contact": contact, "changes": [c for c in changes if c]}
 
 
 def generate_due(db: Session, today: date | None = None) -> int:
