@@ -3000,7 +3000,7 @@ function renderSuggestions(){
   if(!_suggestions.length){host.classList.remove("show");host.innerHTML="";if(chip)chip.style.display="none";_suggOpen=false;return;}
   if(chip){chip.style.display="inline-flex";if(chipText)chipText.textContent=`${_suggestions.length} suggestion${_suggestions.length>1?"s":""}`;}
   host.classList.toggle("show",_suggOpen);
-  const kindLabel=k=>k==="todo_add"?"Add task":k==="todo_complete"?"Complete":k==="inbox_add"?"Inbox idea":k==="project_pause"?"Pause project":k==="lead_reply"?"Mark replied":k;
+  const kindLabel=k=>k==="todo_add"?"Add task":k==="todo_complete"?"Complete":k==="inbox_add"?"Inbox idea":k==="project_pause"?"Pause project":k==="lead_reply"?"Mark replied":k==="client_add"?"Add client":k;
   host.innerHTML=`<div class="chg-head"><span>${_suggestions.length} suggestion${_suggestions.length>1?"s":""} waiting</span><button class="sug-btn dismiss" onclick="toggleSuggestions(false)" aria-label="Hide">✕</button></div>
     <div class="sug-strip">${_suggestions.map(sg=>`
       <div class="sug-row" id="sug-${Number(sg.id)}">
@@ -4399,7 +4399,7 @@ async function renderClientDetail(id){
     <div class="card-head"><div class="card-title"><span>Payments</span></div><span class="badge badge--muted">${c.payments.length}</span></div>
     ${c.payments.length?`<div class="list">${c.payments.map(p=>{
       const open=p.status==="due"||p.status==="overdue";
-      const when=p.status==="paid"?(p.paid_at?`paid ${_day(p.paid_at)}`:"paid"):(p.due_date?`due ${_day(p.due_date)}`:"no due date");
+      const when=p.status==="paid"?(p.paid_at?`paid ${_day(p.paid_at)}`:"paid"):(p.due_date?`due ${_day(p.due_date)}`:(p.due_trigger?`due on ${p.due_trigger}`:"no due date"));
       return `<div class="row row--wrap">
         <div class="row-main"><div class="row-title">${escHtml(_money(p.amount,p.currency))} <span class="muted">· ${escHtml(p.title||"Payment")}</span></div><div class="row-sub">${escHtml(when)}</div></div>
         <span class="badge ${payTone[p.status]||"badge--muted"}">${escHtml(_cap(p.status))}</span>
@@ -4414,7 +4414,17 @@ async function renderClientDetail(id){
       <div class="row-main"><div class="row-title wrap">${escHtml(m.summary)}</div><div class="row-sub">${escHtml(_cap(m.channel))} · ${m.direction==="in"?"from them":"from you"}</div></div>
       <span class="row-meta">${escHtml(_day(m.occurred_at))}</span></div>`).join("")}</div>`:`<div class="empty">Nothing logged. Tell Founder OS when you speak to them.</div>`}
   </div>`;
-  return head+`<div class="grid">${contacts}${deals}</div><div class="grid">${payments}${talk}</div>`;
+  const recTone={active:"badge--success",pending:"badge--glow",ended:"badge--muted"};
+  const recurring=(c.recurring||[]).length?`<div class="card">
+    <div class="card-head"><div class="card-title"><span>Recurring</span></div><span class="badge badge--muted">${c.recurring.length}</span></div>
+    <div class="list">${c.recurring.map(r=>{
+      const when=r.status==="pending"?`starts on ${r.start_trigger}`:(r.status==="active"&&r.next_due?`next due ${_day(r.next_due)}`:(r.ended_at?`ended ${_day(r.ended_at)}`:"stopped"));
+      return `<div class="row row--wrap">
+        <div class="row-main"><div class="row-title">${escHtml(_money(r.amount,r.currency))} <span class="muted">· ${escHtml(r.title)} · ${escHtml(r.interval)}</span></div><div class="row-sub">${escHtml(when)}</div></div>
+        <span class="badge ${recTone[r.status]||"badge--muted"}">${escHtml(_cap(r.status))}</span>
+      </div>`;}).join("")}</div>
+  </div>`:"";
+  return head+`<div class="grid">${contacts}${deals}</div><div class="grid">${payments}${talk}</div>${recurring?`<div class="grid">${recurring}</div>`:""}`;
 }
 
 /* ── Agents: scheduler strip, registry, one agent's run log ── */

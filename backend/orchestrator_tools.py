@@ -1757,9 +1757,22 @@ _register(
 
 # ── 5C: payments and the CRM summary ─────────────────────────
 
-def record_payment(db, client: str, amount: float, currency: str = "ZMW", status: str = "paid",
-                   due_date: str | None = None, title: str | None = None):
-    """Record money invoiced to (due) or received from (paid) a client."""
+def _resolve_deal(db, owner, deal):
+    """The deal a payment belongs to: the one named, or the client's only deal."""
+    import crm
+    if deal:
+        found, _scored = crm.find_deal(db, deal, owner)
+        return found
+    rows = db.query(models.Deal).filter(
+        models.Deal.client_id == owner.id, models.Deal.stage != "lost").all()
+    return rows[0] if len(rows) == 1 else None
+
+
+def record_payment(db, client: str, amount: float, currency: str | None = None, status: str = "paid",
+                   due_date: str | None = None, title: str | None = None,
+                   due_trigger: str | None = None, deal: str | None = None):
+    """Record money received from (paid) or owed by (due) a client. A due payment has a
+    date, or a milestone it waits for (``due_trigger``), or neither; never an invented date."""
     import business_common
     import change_log
     import crm
@@ -1773,19 +1786,29 @@ def record_payment(db, client: str, amount: float, currency: str = "ZMW", status
     if due_date:
         due = business_common.parse_day(due_date)
         if due is None:
-            msg = f"could not read the date '{due_date}'"
-            return {"error": msg}, msg
+            if status == "due" and not due_trigger and crm.milestone_key(due_date):
+                due_trigger = due_date          # "on go-live" given as the date: it is a milestone
+            else:
+                msg = f"could not read the date '{due_date}'"
+                return {"error": msg}, msg
     import main
-    cur = main._normalise_currency(currency or "ZMW")
+    cur = main._normalise_currency(currency) if currency else (owner.currency or models.default_currency())
     with change_log.batch_scope(db, "assistant"):
         try:
-            existing = crm.find_open_payment(db, owner.id, float(amount or 0), cur) if status == "paid" else None
+            # A payment recorded earlier in this same turn is a separate statement, not an
+            # invoice this one settles.
+            this_turn = {c["record_id"] for c in change_log.current_batch_changes(db)
+                         if c["table"] == "payments" and c["action"] == "create"}
+            existing = (crm.find_open_payment(db, owner.id, float(amount or 0), cur, exclude_ids=this_turn)
+                        if status == "paid" else None)
             if existing is not None:
                 # He was already invoiced for this: settle that payment, do not add a second.
                 result = crm.mark_paid(db, existing)
                 result["settled_existing"] = True
             else:
-                result = crm.record_payment(db, owner, amount, cur, status=status, title=title, due_date=due)
+                result = crm.record_payment(db, owner, amount, cur, status=status, title=title,
+                                            due_date=due, due_trigger=due_trigger,
+                                            deal=_resolve_deal(db, owner, deal))
         except (ValueError, TypeError) as exc:
             return {"error": str(exc)}, str(exc)
         crm.refresh_statuses(db)
@@ -1794,7 +1817,8 @@ def record_payment(db, client: str, amount: float, currency: str = "ZMW", status
     result["client_name"] = owner.name
     if status == "paid":
         return result, f"{label} received from {owner.name}"
-    return result, f"{label} due from {owner.name}" + (f" on {due.isoformat()}" if due else "")
+    when = f" on {due.isoformat()}" if due else (f" on {result['due_trigger']}" if result.get("due_trigger") else "")
+    return result, f"{label} due from {owner.name}{when}"
 
 
 def crm_summary(db):
@@ -1809,15 +1833,20 @@ def crm_summary(db):
 _register(
     "record_payment",
     lambda db, a: record_payment(db, client=a.get("client", ""), amount=a.get("amount"),
-                                 currency=a.get("currency", "ZMW"), status=a.get("status", "paid"),
-                                 due_date=a.get("due_date"), title=a.get("title")),
-    "Record money a client was invoiced (status due) or has paid (status paid, which also "
-    "logs the revenue). ONLY when Bandile states an invoice or a payment for a named client.",
+                                 currency=a.get("currency"), status=a.get("status", "paid"),
+                                 due_date=a.get("due_date"), title=a.get("title"),
+                                 due_trigger=a.get("due_trigger"), deal=a.get("deal")),
+    "Record money a client has paid (status paid, which also logs the revenue) or owes "
+    "(status due). ONLY when Bandile states a payment or an amount owed for a named client. "
+    "A due payment takes a due_date, or a due_trigger when it is due at an event rather "
+    "than on a date ('on go-live'). Never invent a date.",
     {"client": _str("Client name or part of it."), "amount": _num("The amount."),
-     "currency": _str("ZMW or USD (default ZMW)."),
-     "status": _str("paid when the money arrived, due when it was invoiced (default paid).", ["paid", "due"]),
+     "currency": _str("ZMW or USD (default: the client's currency)."),
+     "status": _str("paid when the money arrived, due when it is owed (default paid).", ["paid", "due"]),
      "due_date": _str("When it is due, as he said it (for status due)."),
-     "title": _str("What it is for, e.g. 'Deposit'.")},
+     "due_trigger": _str("The event it is due at when there is no date, e.g. 'go-live'."),
+     "title": _str("What it is for, e.g. 'Deposit'."),
+     "deal": _str("The deal it belongs to, if the client has more than one.")},
     ["client", "amount"],
 )
 
@@ -3021,4 +3050,230 @@ _register(
     "from people already on file is ever stored.",
     {"who": _str("The person's or company's name, or part of it.")},
     ["who"],
+)
+
+
+# ── Clients, deals and money that waits for a milestone ──────
+
+_CLIENT_FIELDS = ("owner", "owner_role", "email", "phone", "whatsapp", "company", "service",
+                  "currency", "notes")
+
+
+def create_client(db, name: str, owner: str | None = None, owner_role: str | None = None,
+                  email: str | None = None, phone: str | None = None, whatsapp: str | None = None,
+                  company: str | None = None, service: str | None = None,
+                  currency: str | None = None, notes: str | None = None, unsure: bool = False):
+    """Put a client on file, with the owner as its primary contact. A client already on
+    file is returned, not duplicated; a matching lead is converted. ``unsure`` files a
+    one-tap suggestion and writes nothing."""
+    import actions
+    import change_log
+    import crm
+    import leads
+    name = (name or "").strip()
+    if not name:
+        return {"error": "a client needs a name"}, "a client needs a name"
+    fields = {"owner": owner, "owner_role": owner_role, "email": email, "phone": phone,
+              "whatsapp": whatsapp, "company": company, "service": service,
+              "currency": currency, "notes": notes}
+    if unsure:
+        with change_log.batch_scope(db, "assistant"):
+            suggestion = actions.add_suggestion(
+                db, "client_add",
+                {"text": f"{name} as a client", "name": name, **{k: v for k, v in fields.items() if v}},
+                confidence=None, reason="It was not clear whether they are a client or a prospect",
+                source="assistant")
+            db.commit()
+        return ({"suggested": True, "written": False, "suggestion": suggestion},
+                f"suggested adding {name} as a client")
+    existing, scored = crm.find_client(db, name)
+    if existing is None and any(score >= 0.75 for score, _c in scored):
+        return _ambiguous("client", name, scored, _client_label)
+    lead = None
+    if existing is None:
+        lead, _lead_scored = leads.pick_lead(db, name)
+        if lead is not None and lead.status == "lost":
+            lead = None
+    with change_log.batch_scope(db, "assistant"):
+        try:
+            if existing is not None:
+                # Already a client: add the owner if he is new, change nothing else.
+                changes, contact = [], None
+                known = {(c.name or "").strip().lower() for c in db.query(models.Contact).filter(
+                    models.Contact.client_id == existing.id).all()}
+                if owner and owner.strip().lower() not in known:
+                    added = crm.add_contact(db, existing, name=owner, role=owner_role or "owner",
+                                            email=email, phone=phone, whatsapp=whatsapp, is_primary=True)
+                    changes, contact = added["changes"], added["name"]
+                result = {"id": existing.id, "name": existing.name, "currency": existing.currency,
+                          "already_on_file": True, "contact_added": contact, "changes": changes}
+            else:
+                result = crm.create_client(db, name, lead=lead, **fields)
+                result["created"] = True
+                if lead is not None:
+                    result["converted_from_lead"] = lead.name
+        except ValueError as exc:
+            return {"error": str(exc)}, str(exc)
+        db.commit()
+    if result.get("already_on_file"):
+        return result, f"{result['name']} is already a client"
+    summary = f"added client {result['name']}"
+    if result.get("contact"):
+        summary += f" with contact {result['contact']['name']}"
+    if lead is not None:
+        summary += " (was a lead)"
+    return result, summary
+
+
+def create_deal(db, client: str, title: str | None = None, amount: float | None = None,
+                currency: str | None = None, stage: str | None = None,
+                expected_close: str | None = None):
+    """A new deal for a client on file (or the same deal updated, when it is already there)."""
+    if not (client or "").strip():
+        return {"error": "a deal needs a client"}, "a deal needs a client"
+    return update_deal(db, deal=title, client=client, stage=stage, amount=amount,
+                       currency=currency, expected_close=expected_close, create=True)
+
+
+_RECURRING_TITLES = {"monthly": "Monthly fee", "quarterly": "Quarterly fee", "annual": "Annual fee"}
+_FREQUENCY_WORDS = {"month": "monthly", "quarter": "quarterly", "year": "annual",
+                    "yearly": "annual", "annually": "annual"}
+
+
+def add_recurring(db, client: str, amount: float, frequency: str = "monthly",
+                  title: str | None = None, currency: str | None = None,
+                  start: str | None = None, start_trigger: str | None = None):
+    """A recurring amount a client pays: from a date, or pending until a milestone."""
+    import business_common
+    import change_log
+    import crm
+    owner, scored = crm.find_client(db, client)
+    if owner is None:
+        if scored:
+            return _ambiguous("client", client, scored, _client_label)
+        return {"error": f"no client matches '{client}'"}, f"no client matches '{client}'"
+    frequency = str(frequency or "monthly").lower()
+    frequency = _FREQUENCY_WORDS.get(frequency, frequency)
+    begin = None
+    if start:
+        begin = business_common.parse_day(start)
+        if begin is None:
+            if not start_trigger and crm.milestone_key(start):
+                start_trigger = start          # "from go-live" given as the date: it is a milestone
+            else:
+                msg = f"could not read the date '{start}'"
+                return {"error": msg}, msg
+    with change_log.batch_scope(db, "assistant"):
+        try:
+            result = crm.add_recurring(db, owner, title or _RECURRING_TITLES.get(frequency, "Recurring fee"),
+                                       amount, currency, frequency, start=begin, start_trigger=start_trigger)
+        except (ValueError, TypeError) as exc:
+            return {"error": str(exc)}, str(exc)
+        db.commit()
+    label = f"{crm.money_label(result['amount'], result['currency'])} {result['interval']} from {owner.name}"
+    if result["status"] == "pending":
+        return result, f"{label}, pending {result['start_trigger']}"
+    return result, f"{label}, next due {result['next_due']}"
+
+
+def mark_milestone(db, client: str, milestone: str, date: str | None = None):
+    """A client's milestone happened: date the payments and start the recurring amounts
+    that were waiting for it."""
+    import business_common
+    import change_log
+    import crm
+    owner, scored = crm.find_client(db, client)
+    if owner is None:
+        if scored:
+            return _ambiguous("client", client, scored, _client_label)
+        return {"error": f"no client matches '{client}'"}, f"no client matches '{client}'"
+    day = None
+    if date:
+        day = business_common.parse_day(date, past=True)
+        if day is None:
+            msg = f"could not read the date '{date}'"
+            return {"error": msg}, msg
+    with change_log.batch_scope(db, "assistant"):
+        try:
+            result = crm.mark_milestone(db, owner, milestone, day)
+        except ValueError as exc:
+            waiting = sorted(crm.waiting_on(db, owner))
+            return ({"error": str(exc), "waiting_for": waiting,
+                     "next_step": ("Ask Bandile whether he means one of these." if waiting
+                                   else "Nothing at this client is waiting for a milestone.")},
+                    str(exc))
+        crm.refresh_statuses(db)
+        db.commit()
+    return result, (f"{owner.name} {result['milestone']}: {len(result['payments_now_due'])} payment(s) now due, "
+                    f"{len(result['recurring_started'])} recurring started")
+
+
+_register(
+    "create_client",
+    lambda db, a: create_client(db, name=a.get("name", ""), unsure=bool(a.get("unsure", False)),
+                                **{k: a.get(k) for k in _CLIENT_FIELDS if a.get(k)}),
+    "Put a client on file. ONLY when Bandile says someone is a client, pays him, or has "
+    "agreed a deal. A prospect who has agreed nothing is a lead (add_lead). Set unsure "
+    "true when it is not clear which they are: that files a one-tap suggestion and writes "
+    "nothing.",
+    {"name": _str("The business's name (or the person's, when there is no business)."),
+     "owner": _str("The owner or main contact's name."),
+     "owner_role": _str("Their role (default owner)."),
+     "email": _str("The contact's email."), "phone": _str("The contact's phone as given."),
+     "whatsapp": _str("WhatsApp number if different."),
+     "company": _str("Registered or longer company name, if different from the name."),
+     "service": _str("What Bandile does for them, e.g. 'Website'."),
+     "currency": _str("ZMW or USD. Leave out unless he names one."),
+     "notes": _str("Anything else he said about them."),
+     "unsure": {"type": "boolean", "description": "True when client or prospect is unclear."}},
+    ["name"],
+)
+
+_register(
+    "create_deal",
+    lambda db, a: create_deal(db, client=a.get("client", ""), title=a.get("title"), amount=a.get("amount"),
+                              currency=a.get("currency"), stage=a.get("stage"),
+                              expected_close=a.get("expected_close")),
+    "Record a new deal for a client on file. ONLY when Bandile describes the deal. The "
+    "amount is the one-off price; a monthly fee is add_recurring, not part of the amount.",
+    {"client": _str("Client name or part of it."),
+     "title": _str("What is being sold, e.g. 'Website'."),
+     "amount": _num("The one-off value of the deal."),
+     "currency": _str("ZMW or USD (default: the client's currency)."),
+     "stage": _str("won when it is agreed or money has been paid; otherwise where it stands "
+                   "(default lead).", ["lead", "proposal", "negotiation", "won", "lost"]),
+     "expected_close": _str("Expected close date as he said it.")},
+    ["client"],
+)
+
+_register(
+    "add_recurring",
+    lambda db, a: add_recurring(db, client=a.get("client", ""), amount=a.get("amount"),
+                                frequency=a.get("frequency", "monthly"), title=a.get("title"),
+                                currency=a.get("currency"), start=a.get("start"),
+                                start_trigger=a.get("start_trigger")),
+    "Record an amount a client pays every period (a retainer, hosting, a subscription). "
+    "ONLY when Bandile states it. Give start when he names a date, or start_trigger when "
+    "it begins at an event ('from go-live'): it then stays pending until mark_milestone.",
+    {"client": _str("Client name or part of it."), "amount": _num("The amount each period."),
+     "frequency": _str("How often (default monthly).", ["monthly", "quarterly", "annual"]),
+     "title": _str("What it is for, e.g. 'Hosting and maintenance'."),
+     "currency": _str("ZMW or USD (default: the client's currency)."),
+     "start": _str("The date it starts, as he said it."),
+     "start_trigger": _str("The event it starts at when there is no date, e.g. 'go-live'.")},
+    ["client", "amount"],
+)
+
+_register(
+    "mark_milestone",
+    lambda db, a: mark_milestone(db, client=a.get("client", ""), milestone=a.get("milestone", ""),
+                                 date=a.get("date")),
+    "Record that a client's milestone happened ('Bel went live today'). Payments waiting "
+    "for it become due that day; recurring amounts waiting for it start, with the first "
+    "payment due one period later (a month after for a monthly amount). ONLY when Bandile "
+    "says it happened.",
+    {"client": _str("Client name or part of it."),
+     "milestone": _str("The event, in the words used when the money was recorded, e.g. 'go-live'."),
+     "date": _str("When it happened, as he said it (default today).")},
+    ["client", "milestone"],
 )

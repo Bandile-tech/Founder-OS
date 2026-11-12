@@ -961,6 +961,7 @@ class Payment(Base):
     recurring_id = Column(Integer, nullable=True)        # set for generated instalments
     period_start = Column(Date, nullable=True)
     notes        = Column(Text, nullable=True)
+    due_trigger  = Column(String, nullable=True)         # milestone it waits for ("go-live"); no date until then
     created_at   = Column(DateTime, default=datetime.utcnow)
     updated_at   = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -979,6 +980,7 @@ class RecurringRevenue(Base):
     next_due     = Column(Date, nullable=False)
     active       = Column(Boolean, default=True)
     ended_at     = Column(Date, nullable=True)
+    start_trigger = Column(String, nullable=True)        # milestone it waits for; inactive until then
     created_at   = Column(DateTime, default=datetime.utcnow)
     updated_at   = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
