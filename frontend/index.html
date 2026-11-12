@@ -256,6 +256,10 @@ body.nav-open #nav-scrim{display:block}
 .badge--danger{background:rgba(255,92,92,0.12);color:#FF8A8A;border-color:rgba(255,92,92,0.4)}
 .badge--purple{background:rgba(167,139,250,0.12);color:#C8B6FF;border-color:rgba(167,139,250,0.4)}
 .badge--muted{background:rgba(234,238,242,0.05);color:var(--muted);border-color:rgba(234,238,242,0.12)}
+/* A short code to copy by eye (a pairing code). */
+.code{display:inline-flex;align-items:center;flex:none;height:30px;padding:0 var(--sp-3);border-radius:var(--r-sm);
+  font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:var(--fs-md);font-weight:600;letter-spacing:0.18em;
+  color:#fff;background:rgba(8,10,14,0.6);border:1px solid rgba(167,235,242,0.32);user-select:all}
 
 /* List row */
 .row{display:flex;align-items:center;gap:var(--sp-3);min-height:var(--row-h);padding:var(--sp-2) var(--sp-1);border-bottom:1px solid var(--line);min-width:0}
@@ -321,6 +325,8 @@ mark.hl{background:rgba(167,235,242,0.18);color:#fff;border-radius:3px;padding:0
 .field:last-child{border-bottom:none}
 .field-label{font-size:var(--fs-2xs);letter-spacing:var(--track-caps);text-transform:uppercase;color:var(--muted);font-weight:500}
 .field-control{display:flex;align-items:center;gap:var(--sp-2);flex-wrap:wrap;min-width:0}
+.field-control > .input--narrow{width:132px;flex:none}
+.field-control > select.input--narrow{width:auto;min-width:132px;max-width:100%}
 .hint{font-size:var(--fs-xs);color:var(--muted);line-height:1.55}
 
 /* Button */
@@ -491,6 +497,14 @@ button.chip:active{transform:scale(0.97)}
 .home-greeting{font-size:var(--fs-display);font-weight:600;letter-spacing:-0.025em;line-height:1.15;color:#fff;margin:var(--sp-1) 0 var(--sp-2)}
 .cc-name{color:var(--glow-2);text-shadow:0 0 18px rgba(102,227,244,0.35)}
 .home-line{font-size:var(--fs-md);color:var(--text-2);min-height:1.5em}
+/* One quiet line under the greeting: today's timed events, when the briefing went out, and
+   a connection warning. Never wraps, so it cannot move the cards. */
+.home-note{font-size:var(--fs-xs);color:var(--muted);margin-top:var(--sp-1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.home-note[hidden]{display:none}
+.home-note b{font-weight:600;color:var(--text-2);letter-spacing:0.06em;text-transform:uppercase;font-size:var(--fs-2xs)}
+.home-note a{color:var(--glow);cursor:pointer;text-decoration:none}
+.home-note a.is-warn{color:var(--warn)}
+.home-note a:hover,.home-note a:focus-visible{text-decoration:underline}
 .skel-line{display:block;height:1.1em;max-width:520px}
 .home-cards{grid-area:cards;display:grid;gap:var(--sp-5);grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);align-items:stretch}
 .home-cards .card{display:flex;flex-direction:column}
@@ -952,6 +966,7 @@ button.home-tile:active{transform:scale(0.98)}
           <div class="page-eyebrow">Command Centre</div>
           <h1 class="home-greeting" id="cc-greeting">Good day, <span class="cc-name">Bandile</span>.</h1>
           <p class="home-line" id="cc-line"><span class="skel skel-line"></span></p>
+          <p class="home-note" id="cc-note" hidden></p>
         </div>
 
         <div class="home-cards">
@@ -1301,6 +1316,7 @@ button.home-tile:active{transform:scale(0.98)}
         <div class="section-label">Toggles and badges</div>
         <div class="cluster"><button class="toggle is-on">Done</button><button class="toggle">Pending</button><button class="toggle is-off">Missed</button>
           <div class="seg"><button>1</button><button>2</button><button class="is-on">3</button><button>4</button><button>5</button></div></div>
+        <div class="cluster mt-3"><span class="code">K7QX2M</span><span class="hint">.code — a short code to read off the screen</span></div>
         <div class="cluster mt-3"><span class="badge badge--glow">Glow</span><span class="badge badge--success">Success</span><span class="badge badge--warn">Warn</span><span class="badge badge--danger">Danger</span><span class="badge badge--purple">Purple</span><span class="badge badge--muted">Muted</span><span class="badge">Neutral</span></div>
         <div class="section-label">Progress and KPI</div>
         <div class="meter"><div class="meter-head"><span>Academics</span><span class="v">84%</span></div><div class="bar"><div class="bar-fill academics" style="width:84%"></div></div></div>
@@ -1325,7 +1341,17 @@ button.home-tile:active{transform:scale(0.98)}
     <!-- ── SETTINGS ── -->
     <section class="page" id="p-settings">
       <div class="page-head">
-        <div><div class="page-eyebrow">System</div><h1 class="page-title">Settings</h1><div class="page-sub">Session, scores, targets and local data.</div></div>
+        <div><div class="page-eyebrow">System</div><h1 class="page-title">Settings</h1><div class="page-sub">Connections, notifications, session, scores, targets and local data.</div></div>
+      </div>
+      <div class="grid">
+        <div class="card">
+          <div class="card-head"><div class="card-title"><span>Integrations</span></div><span class="badge badge--muted" id="set-integ-count">—</span></div>
+          <div class="list" id="set-integrations"><div class="skel skel-row"></div><div class="skel skel-row"></div><div class="skel skel-row"></div></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><div class="card-title"><span>Notifications</span></div><span class="badge badge--muted" id="set-notif-state">—</span></div>
+          <div id="set-notifications"><div class="skel skel-row"></div><div class="skel skel-row"></div></div>
+        </div>
       </div>
       <div class="grid">
         <div class="card">
@@ -1971,7 +1997,38 @@ function renderHome(){
     prog.innerHTML=row("Academics","academics",pr.academics)+row("Business","business",pr.business)+row("Targets","targets",pr.targets);
   }
 
+  renderHomeNote(b);
   renderAlertsBell(b);
+}
+
+// Today's timed events, when the briefing went to Telegram, and a connection warning.
+function _clockOf(iso){
+  if(!iso)return "";
+  const t=new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(iso)?iso:iso+"Z");     // server times are UTC
+  return isNaN(t)?"":t.toLocaleTimeString("en-GB",{hour:"2-digit",minute:"2-digit"});
+}
+function openSettings(){nav("settings",document.querySelector(`.nav-item[onclick*="nav('settings'"]`));}
+function renderHomeNote(b){
+  const el=document.getElementById("cc-note");
+  if(!el)return;
+  const parts=[];
+  const cal=b.calendar||{};
+  const events=cal.events_today||[], allDay=cal.all_day||[];
+  if(events.length||allDay.length){
+    const shown=events.slice(0,3).map(e=>`${escHtml(e.start_local||"")} ${escHtml(e.title||"")}`);
+    if(events.length>3)shown.push(`+${events.length-3} more`);
+    allDay.slice(0,2).forEach(e=>shown.push(`All day: ${escHtml(e.title||"")}`));
+    parts.push(`<b>Today</b> ${shown.join(" · ")}`);
+  }
+  const integ=b.integrations||{}, delivery=b.delivery||{};
+  const sent=_clockOf(delivery.last_sent_at);
+  if(sent)parts.push(`Sent to Telegram at ${escHtml(sent)}`);
+  const broken=["google_calendar","email"].some(k=>integ[k]==="error");
+  if(broken)parts.push(`<a class="is-warn" role="button" tabindex="0" onclick="openSettings()" onkeydown="if(event.key==='Enter')openSettings()">An integration needs attention</a>`);
+  else if(integ.telegram===false)parts.push(`<a role="button" tabindex="0" onclick="openSettings()" onkeydown="if(event.key==='Enter')openSettings()">Telegram is not paired</a>`);
+  el.hidden=!parts.length;
+  el.innerHTML=parts.join(" &nbsp;·&nbsp; ");
+  el.title=el.textContent;
 }
 
 /* ── Dock placement: on the desktop home the talk bar sits in the home grid (#home-dock);
@@ -3125,7 +3182,166 @@ function mdHtml(text){
 /* ═══════════════════════════════════════════════════
    SETTINGS
 ═══════════════════════════════════════════════════ */
+/* ── Settings: integrations and notifications ── */
+const SET={integrations:[],notif:null,recent:[],pairOpen:false};
+const INTEG_NEEDS={google_calendar:"Needs GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and FOUNDER_OS_API_URL on the server.",
+  email:"Needs EMAIL_ADDRESS and EMAIL_APP_PASSWORD on the server.",telegram:"Needs TELEGRAM_BOT_TOKEN on the server.",
+  youtube:"Needs YOUTUBE_API_KEY on the server."};
+const INTEG_ACTIONS={connect:"Connect",sync:"Sync",disconnect:"Disconnect",pair:"Pair",set_webhook:"Set webhook"};
+
+async function loadSettingsCards(){
+  const box=document.getElementById("set-integrations"), nbox=document.getElementById("set-notifications");
+  if(!box||!nbox)return;
+  try{
+    const [integ,notif,recent]=await Promise.all([_bizGet("/integrations"),_bizGet("/notifications/settings"),_bizGet("/notifications?limit=10")]);
+    SET.integrations=integ;SET.notif=notif;SET.recent=recent;
+    renderIntegrations();renderNotifications();
+  }catch(e){
+    box.innerHTML=nbox.innerHTML=`<div class="empty">Could not load — the backend is not reachable.</div>`;
+  }
+}
+
+function _integBadge(status){
+  const cls={connected:"badge--success",pending:"badge--glow",error:"badge--danger"}[status]||"badge--muted";
+  const label={connected:"Connected",pending:"Waiting",error:"Error",disconnected:"Not connected"}[status]||status;
+  return `<span class="badge ${cls}">${escHtml(label)}</span>`;
+}
+function _integSub(i){
+  if(i.status==="error")return i.last_error||"Needs attention.";
+  if(i.status==="connected")return [i.account_label,i.last_sync_at?`synced ${_ago(i.last_sync_at)}`:null].filter(Boolean).join(" · ")||"Connected.";
+  if(i.status==="pending"){
+    if(i.provider==="telegram")return "Send the code below to the bot to pair your phone.";
+    if(i.provider==="email")return `${i.account_label||"Email"} · not checked yet. Tap Sync.`;
+    return "The key is set. Add your channel on Business → Brand.";
+  }
+  if(!i.configured)return INTEG_NEEDS[i.provider]||"Not set up on the server yet.";
+  return i.provider==="google_calendar"?"Ready to connect.":"Not connected.";
+}
+function renderIntegrations(){
+  const box=document.getElementById("set-integrations");
+  if(!box)return;
+  const on=SET.integrations.filter(i=>i.status==="connected").length;
+  safeUpdate("set-integ-count",`${on} of ${SET.integrations.length} connected`);
+  box.innerHTML=SET.integrations.map(i=>{
+    const buttons=(i.actions||[]).map(a=>`<button class="btn btn--sm${a==="disconnect"?" btn--danger":""}" data-provider="${escHtml(i.provider)}" data-action="${escHtml(a)}" onclick="integAction(this)">${escHtml(INTEG_ACTIONS[a]||a)}</button>`).join("");
+    let row=`<div class="row row--wrap">
+      <div class="row-main"><div class="row-title">${escHtml(i.label)}</div><div class="row-sub wrap">${escHtml(_integSub(i))}</div></div>
+      ${_integBadge(i.status)}
+      ${buttons?`<div class="row-actions">${buttons}</div>`:""}
+    </div>`;
+    if(i.provider==="telegram"&&i.status!=="connected"&&i.configured&&(SET.pairOpen||i.status==="pending")&&SET.notif){
+      const link=SET.notif.bot_link;
+      row+=`<div class="row row--wrap">
+        <div class="row-main"><div class="row-title">Pair your phone</div><div class="row-sub wrap">Tap Set webhook once. Then open the bot${link?"":" in Telegram"}, press Start and send it this code.</div></div>
+        <div class="row-actions"><span class="code" aria-label="Pairing code">${escHtml(SET.notif.pair_code||"")}</span>
+          ${link?`<a class="btn btn--sm" href="${escHtml(link)}" target="_blank" rel="noopener">Open bot</a>`:""}
+          <button class="btn btn--sm" onclick="loadSettingsCards()">I've sent it</button></div>
+      </div>`;
+    }
+    return row;
+  }).join("")||`<div class="empty">No integrations.</div>`;
+}
+
+// One tap = one request, with a loading state and a plain error.
+async function _setTap(btn,method,path,body){
+  if(btn){btn.disabled=true;btn.classList.add("is-loading");}
+  try{
+    const r=await fetch(`${API_BASE}${path}`,{method,headers:body?{"Content-Type":"application/json"}:{},body:body?JSON.stringify(body):undefined});
+    const data=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(data.detail||("HTTP "+r.status));
+    return data;
+  }catch(e){
+    showToast("Could not do that: "+e.message,"error");
+    return null;
+  }finally{
+    if(btn){btn.disabled=false;btn.classList.remove("is-loading");}
+  }
+}
+async function integAction(btn){
+  const provider=btn.dataset.provider, action=btn.dataset.action;
+  if(action==="pair"){SET.pairOpen=!SET.pairOpen;renderIntegrations();return;}
+  if(action==="connect"){
+    const d=await _setTap(btn,"GET","/integrations/google/start");
+    if(d&&d.url)location.href=d.url;
+    return;
+  }
+  if(action==="set_webhook"){
+    const d=await _setTap(btn,"POST","/integrations/telegram/set-webhook");
+    if(d)showToast(d.ok?"Telegram will deliver messages here":(d.description||"Telegram refused"),d.ok?"success":"error");
+    return;
+  }
+  if(action==="sync"){
+    const d=await _setTap(btn,"POST",provider==="email"?"/integrations/email/sync":"/integrations/google/sync");
+    if(d){
+      if(d.ok===false)showToast(d.error||"Sync failed","error");
+      else showToast(provider==="email"?`${d.stored} new from people you know, ${d.ignored} ignored`:`${d.created} new, ${d.updated} changed, ${d.deleted} removed`,"success");
+      loadSettingsCards();try{loadBriefing();}catch(_){}
+    }
+    return;
+  }
+  if(action==="disconnect"){
+    const name=provider==="telegram"?"Telegram":"Google Calendar";
+    if(!confirm(`Disconnect ${name}?`))return;
+    const d=await _setTap(btn,"POST",provider==="telegram"?"/integrations/telegram/unpair":"/integrations/google/disconnect");
+    if(d){showToast(`${name} disconnected`,"info");SET.pairOpen=false;loadSettingsCards();try{loadBriefing();}catch(_){}}
+  }
+}
+
+function _notifBadge(n){
+  const cls={sent:"badge--success",queued:"badge--glow",failed:"badge--danger"}[n.status]||"badge--muted";
+  const reason={quiet_hours:"quiet hours",daily_cap:"daily cap",channel_disabled:"channel off",not_paired:"not paired"}[n.suppressed_reason]||"";
+  return `<span class="badge ${cls}" title="${escHtml(n.error||reason)}">${escHtml(n.status==="suppressed"&&reason?reason:n.status)}</span>`;
+}
+function renderNotifications(){
+  const box=document.getElementById("set-notifications"), s=SET.notif;
+  if(!box||!s)return;
+  safeUpdate("set-notif-state",!s.enabled?"Off":s.paired?"Telegram":"Not paired");
+  const time=(key,value,label)=>`<input class="input input--narrow" type="time" value="${escHtml(value||"")}" aria-label="${escHtml(label)}" onchange="notifPatch('${key}',this.value)">`;
+  const caps=[...new Set([4,6,8,12,16,24,Number(s.daily_cap)])].sort((a,b)=>a-b);
+  const sev={info:"Everything",warn:"Warnings and critical",critical:"Critical only"};
+  const recent=SET.recent.map(n=>`<div class="row">
+      <div class="row-main"><div class="row-title">${escHtml(_cap(n.kind))}${n.title?` · ${escHtml(n.title)}`:""}</div><div class="row-sub">${escHtml(String(n.body||"").split("\n")[0].slice(0,120))}</div></div>
+      <span class="row-meta">${escHtml(_ago(n.sent_at||n.created_at))}</span>${_notifBadge(n)}
+    </div>`).join("")||`<div class="empty">Nothing has been sent yet.</div>`;
+  box.innerHTML=`
+    <div class="field"><div class="field-label">Messages</div><div class="field-control"><button class="toggle ${s.enabled?"is-on":"is-off"}" aria-pressed="${!!s.enabled}" onclick="notifPatch('enabled',${!s.enabled})">${s.enabled?"On":"Off"}</button><span class="hint">${s.paired?"Sent to your Telegram.":"Pair Telegram under Integrations to receive them."}</span></div></div>
+    <div class="field"><div class="field-label">Morning briefing</div><div class="field-control">${time("morning_time",s.morning_time,"Morning briefing time")}</div></div>
+    <div class="field"><div class="field-label">Evening review</div><div class="field-control">${time("evening_time",s.evening_time,"Evening review time")}${s.evening_time?`<button class="btn btn--sm btn--ghost" onclick="notifPatch('evening_time','off')">Turn off</button>`:`<span class="hint">Off. Pick a time to turn it on.</span>`}</div></div>
+    <div class="field"><div class="field-label">Quiet hours</div><div class="field-control">${time("quiet_start",s.quiet_start,"Quiet hours start")}<span class="hint">to</span>${time("quiet_end",s.quiet_end,"Quiet hours end")}</div></div>
+    <div class="field"><div class="field-label">Alerts</div><div class="field-control"><select class="select input--narrow" aria-label="Least serious alert to send" onchange="notifPatch('alert_min_severity',this.value)">${Object.keys(sev).map(k=>`<option value="${k}"${s.alert_min_severity===k?" selected":""}>${sev[k]}</option>`).join("")}</select></div></div>
+    <div class="field"><div class="field-label">Daily cap</div><div class="field-control"><select class="select input--narrow" aria-label="Most messages in a day" onchange="notifPatch('daily_cap',Number(this.value))">${caps.map(c=>`<option value="${c}"${Number(s.daily_cap)===c?" selected":""}>${c} a day</option>`).join("")}</select></div></div>
+    <div class="cluster mt-3"><button class="btn" onclick="notifSend(this,'/notifications/test')">Send test</button><button class="btn" onclick="notifSend(this,'/notifications/brief-now')">Brief now</button></div>
+    <div class="section-label">Last 10</div>
+    <div class="list">${recent}</div>`;
+}
+async function notifPatch(key,value){
+  if((key==="morning_time"||key==="quiet_start"||key==="quiet_end")&&!value){renderNotifications();return;}   // these cannot be empty
+  const d=await _setTap(null,"PATCH","/notifications/settings",{[key]:key==="evening_time"&&!value?"off":value});
+  if(d){SET.notif=d;if(d.change)showChanges([d.change]);}
+  renderNotifications();
+}
+async function notifSend(btn,path){
+  const d=await _setTap(btn,"POST",path);
+  if(!d)return;
+  if(d.status==="sent")showToast("Sent to Telegram","success");
+  else showToast(d.error||`Not sent (${d.status})`,"error");
+  try{SET.recent=await _bizGet("/notifications?limit=10");}catch(_){}
+  renderNotifications();try{loadBriefing();}catch(_){}
+}
+
+// Coming back from Google's sign-in: /app/#settings?connected=google (or ?error=…).
+function handleReturnHash(){
+  const h=location.hash||"";
+  if(!h.startsWith("#settings"))return;
+  const q=new URLSearchParams(h.split("?")[1]||"");
+  openSettings();
+  if(q.get("connected")==="google")showToast("Google Calendar connected","success");
+  else if(q.get("error"))showToast({google_denied:"Google sign-in was cancelled",google_state:"That sign-in had expired. Tap Connect again.",google_exchange:"Google refused the sign-in. Tap Connect again."}[q.get("error")]||"Could not connect","error");
+  try{history.replaceState(null,"",location.pathname+location.search);}catch(_){}
+}
+
 function renderSettings(){
+  loadSettingsCards();
   const ss=document.getElementById("social-score-slider");
   const sv=document.getElementById("social-score-val");
   if(ss){ss.value=S.social;sv.textContent=S.social;ss.style.setProperty("--pct",S.social+"%");}
@@ -4568,6 +4784,7 @@ renderHeader();
   const fallback=new Promise(res=>setTimeout(res,1500));
   await Promise.race([syncPromise,fallback]);
   initialRender();
+  handleReturnHash();
   syncPromise.then(()=>{try{renderPage(getActivePageName());}catch(_){}});
   // Entrance animations are scoped to .page.fade-up — drop the flag after boot
   // so the 30s background sync never replays them.

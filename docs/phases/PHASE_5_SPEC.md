@@ -119,7 +119,7 @@ Model prices from `llm._DEFAULT_PRICING` (gpt-5.4-mini: $0.25 / M input, $0.025 
 cached, $2.00 / M output; embeddings $0.02 / M). An orchestrator turn costs ≈ $0.0013
 (8k mostly-cached input, 300 output). Phase 5 adds the per-module figures below;
 **the whole phase stays under $1 / month at the stated usage**, on top of ≈ $1.20 / month
-for 30 assistant turns a day. Hosting: Render free, Supabase free, Netlify free (unchanged).
+for 30 assistant turns a day. Hosting: Render free (one service for the app and the API), Supabase free (unchanged).
 
 ---
 

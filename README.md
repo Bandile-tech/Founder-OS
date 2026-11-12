@@ -1,32 +1,33 @@
 # Founder OS
 
-A personal operating system for disciplined execution, KPI tracking, and systems thinking. This is the author's daily system for academics, health, trading, and business execution — not a multi-tenant SaaS product.
+A personal operating system for one person: academics, health, business and long-term goals, run by conversation. Information gets in by talking or a single tap, never through forms. It is the author's daily system, not a multi-tenant product.
 
 ## Status
 
-**Feature-complete, deliberately paused.** All seven core build phases are shipped, plus the Phase 6 orchestrator and the Session C Obsidian cold-archive integration. 268 passing tests, zero known regressions.
-
-Active development is paused while priority shifts to client acquisition (Aether AI outreach) and A-Level exam preparation. This is a closed chapter, not an unfinished one — it reopens on a stated trigger (e.g. Aether AI lands its first paid client, or a bug here directly blocks something else), not by default.
+Phases 1 to 6 are core built (see `ROADMAP.md` for what each phase holds and what remains). The backend suite has 721 tests and runs with no API key and no network. The external accounts for Phase 6 (a Telegram bot, a Google Cloud project, a Gmail App Password) still have to be set up before those features do anything; the steps are in `docs/phases/PROGRESS.md`.
 
 ## What it does
 
-- **Academic tracking** — syllabus progress by subject, topic, and subtopic, weighted against actual exam dates
-- **Health** — daily and weekly logs, lift progression
-- **Trading** — backtest logging with a hard-coded 50-trade / 90%-adherence gate before live trading unlocks
-- **Non-negotiables** — daily habit tracking against personal standards
-- **AI orchestrator** — a single `/orchestrator` endpoint (GPT-5.4, via `ORCHESTRATOR_MODEL` env var — no Anthropic API budget) exposing eight tools: `route_brain_dump`, `get_dashboard_state`, `detect_off_track`, `synthesize_weekly_review`, `surface_weakest_subtopic`, `query_war_room`, `add_todos`, `query_cold_archive`. `add_todos` and `query_cold_archive` only fire on explicit instruction — the orchestrator surfaces findings, it doesn't write to pipeline tables on its own.
-- **Cold archive** — Obsidian vault integrated as searchable long-term memory (Session C)
+- **Conversation first** — one assistant with tools for everything below, by text or live voice. It acts, shows what changed, and every change can be undone. Deletes and anything that leaves the system wait for a yes.
+- **Command Centre** — a ranked daily brief, progress, today's calendar events and alerts.
+- **Academics** — a four-state syllabus tracker per subject and paper, exam dates, weakest topics.
+- **Health, timetable, annual targets, non-negotiables** — daily and weekly logs and habits.
+- **Business** — research into opportunities, leads and outreach, clients, deals and payments, a project portfolio, and personal-brand analytics from the platforms' own numbers.
+- **Applications** — deadlines, requirements and a gap review for things like university applications.
+- **Agents** — small jobs that run on a schedule (housekeeping, follow-ups, research, syncs, the couriers), each with a permission list, a cost cap and an activity log.
+- **Integrations and notifications** — Google Calendar, email (replies from known people; approved outreach is sent), and a Telegram bot that sends the morning briefing, alerts and reminders and takes replies.
+- **Long-term memory** — notes, an Obsidian vault and remembered facts, searchable by meaning.
 
 ## What it isn't
 
-Not a SaaS product. Not built for other users. No auth layer, no multi-tenancy — it's scoped to one person's data because that's the only person it was built for.
+Not a SaaS product and not built for other users: one password, one person's data.
 
 ## Tech stack
 
 - **Frontend:** HTML / CSS / vanilla JavaScript (single file, no build step), served by the backend at `/app/`
 - **Backend:** FastAPI — Render (one host: the same service serves the app and the API)
 - **Persistence:** Supabase Postgres (RLS enforced across all tables), with localStorage as a frontend fallback
-- **AI:** OpenAI APIs (GPT-4o-mini for parsing, GPT-5.4 for orchestration), STT/TTS for voice
+- **AI:** OpenAI APIs through one gateway (`backend/llm.py`): `ASSISTANT_MODEL` for the assistant, parser and summaries, an embedding model for retrieval, a realtime model for live voice
 
 ## Running the project
 
@@ -45,8 +46,13 @@ Deployment steps: `docs/DEPLOY.md`.
 
 ## Docs
 
-- `docs/specs/` — architecture and feature specs (database, orchestrator, RLS security audit, market intelligence agent, Obsidian integration)
-- `docs/sessions/` — chronological build and fix logs from individual development sessions
+- `ROADMAP.md` — the phases, what is built and what remains
+- `CLAUDE.md` — how the system is put together, environment variables, how to run the tests
+- `docs/REBUILD_HANDOFF.md` — every endpoint and its shape
+- `docs/phases/` — the Phase 5 and 6 specifications, the build order, and `PROGRESS.md` (what was built, every decision, the setup steps for external accounts)
+- `docs/adr/` — architecture decisions; `docs/CONVENTIONS.md` — the patterns new code follows
+- `docs/DEPLOY.md` — deployment and rollback
+- `docs/specs/`, `docs/sessions/` — earlier specs and build logs
 
 ## Repo
 

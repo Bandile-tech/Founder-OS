@@ -64,7 +64,7 @@ Phase 6 adds **no** `show_view` entries. Agents, Applications and Settings are r
 the nav; a later decision can add stage views.
 
 ### 0.6 Running cost baseline
-Hosting stays free (Render free web service, Supabase free, Netlify free, GitHub Actions
+Hosting stays free (Render free web service for the app and the API, Supabase free, GitHub Actions
 free for a public repository). Telegram Bot API is free. Google Calendar API and the Gmail
 IMAP/SMTP path are free. Phase 6's own LLM spend is small (table at the end); the agents
 it schedules spend what Phase 5 budgeted.

@@ -1155,3 +1155,18 @@ def test_email_lookup_says_when_email_is_not_connected():
     out, summary = ot.run_tool("email_lookup", {"who": "Mercy"}, db)
     assert out == {"connected": False, "message": "Email is not connected"} and summary == "Email is not connected"
     db.close()
+
+
+# ── YouTube's row reports the Brand account's own state ──────
+
+def test_youtube_row_shows_the_brand_accounts_error(monkeypatch):
+    monkeypatch.setenv("YOUTUBE_API_KEY", "AIzaSy-youtube-key")
+    db = _db()
+    assert {i["provider"]: i for i in client.get("/integrations").json()}["youtube"]["status"] == "pending"
+    db.add(models.SocialAccount(platform="youtube", handle="@bandile", external_id="UCx", access="api_key",
+                                status="error", last_error="quota exceeded for key AIzaSy-youtube-key"))
+    db.commit()
+    item = {i["provider"]: i for i in client.get("/integrations").json()}["youtube"]
+    assert item["status"] == "error" and item["account_label"] == "@bandile" and item["actions"] == []
+    assert item["last_error"] == "quota exceeded for key ***"
+    db.close()

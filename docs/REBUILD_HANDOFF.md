@@ -568,6 +568,15 @@ anything. RLS enabled on every new table on Postgres (m008 convention).
 | m011 | `change_log`, `pending_actions`, `suggestions`, `notes` |
 | m012 | `revenue.currency` (backfilled USD), `todos.due_date` (Python backfill), `embeddings`, `exam_dates`; one-off copy of books + Bible log into notes |
 | m013 | `syllabus_points`, `briefing_summaries` |
+| m014 | Phase 5A: `research_objectives`; columns on `research_projects`, `research_findings`, `opportunity_pipeline`; a Python backfill of `recommendation` |
+| m015 | Phase 5B: `leads`, `lead_imports`, `outreach_messages`; `todos.lead_id`, `todos.client_id` |
+| m016 | Phase 5C: `contacts`, `deals`, `projects`, `payments`, `recurring_revenue`, `communications`; `clients.lead_id/currency/tags/health`. **Backfills**: existing clients become `USD`; every revenue row with a client gets one paid payment (matched by `revenue_id`, so re-running adds nothing). Back up before the first production run |
+| m017 | Phase 5D: `social_accounts`, `content_posts`, `content_metrics`, `account_metrics`, `content_ideas`, `brand_insights` |
+| m018 | Phase 5E: `project_updates` |
+| m019 | Phase 6A: `applications`, `application_requirements`, `application_gaps` |
+| m020 | Phase 6B: `agents`, `agent_runs`, `agent_events`, `job_ticks`; `llm_usage.agent_run_id` |
+| m021 | Phase 6C: `integrations`, `calendar_events`, `email_messages`; `outreach_messages.replied_at` |
+| m022 | Phase 6D: `notifications`, `notification_settings` (row 1 created with the defaults) |
 
 **Postgres notes**
 - All ADD COLUMN use `IF NOT EXISTS`; all tables `CREATE TABLE IF NOT EXISTS`.
@@ -595,6 +604,25 @@ anything. RLS enabled on every new table on Postgres (m008 convention).
 | `ZMW_PER_USD` | `27.0` | Kwacha→dollar rate for the $10K scoreboard. **Set this.** |
 | `LLM_PRICING_JSON` | built-in table | Override per-model prices for `llm_usage` cost estimates |
 | `ORCHESTRATOR_MODEL` | — | Legacy; still honoured if `ASSISTANT_MODEL` is unset |
+
+Phases 5 and 6 add (all optional; each feature shows "not connected" without its variables):
+
+| Var | Default | Purpose |
+|---|---|---|
+| `RESEARCH_MODEL` | the assistant model | Model for the market-intelligence roles |
+| `JOBS_TOKEN` | unset | Secret for `POST /jobs/tick`; 32+ random characters. Unset: the endpoint answers 503 |
+| `FOUNDER_OS_TZ` | `Africa/Lusaka` | The zone schedules and notification times are read in |
+| `JOBS_TICK_BUDGET` | `80` | Seconds a tick may spend starting agents |
+| `JOBS_IN_PROCESS` | `1` | `0` turns off the in-process 15-minute tick |
+| `YOUTUBE_API_KEY` | unset | YouTube Data API v3 key for the Brand tab |
+| `FOUNDER_OS_API_URL` | unset | The service's public URL, no trailing slash. Needed for the Telegram webhook and the Google redirect |
+| `TELEGRAM_BOT_TOKEN` | unset | Secret. The bot's token from @BotFather |
+| `TELEGRAM_BOT_USERNAME` | unset | The bot's username, for the link in Settings |
+| `TELEGRAM_WEBHOOK_SECRET` | unset | Secret. A random string Telegram sends back with each update |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | unset | The Google OAuth client (the secret is a secret) |
+| `GOOGLE_CALENDAR_ID` | `primary` | Which calendar to read and write |
+| `EMAIL_ADDRESS` / `EMAIL_APP_PASSWORD` | unset | The Gmail address and its App Password (a secret) |
+| `EMAIL_IMAP_HOST` / `EMAIL_SMTP_HOST` / `EMAIL_SMTP_PORT` / `EMAIL_FROM_NAME` | Gmail's, `465`, `Bandile Masocha` | Mail servers and the sender name |
 
 ---
 

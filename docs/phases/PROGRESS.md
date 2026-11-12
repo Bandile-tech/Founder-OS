@@ -987,6 +987,42 @@ External setup — Gmail (not done; nothing here was tested against Gmail):
 VERIFY (6C): that App Passwords are still offered on the account and IMAP is enabled; the
 `X-GM-THRID` fetch item; the IMAP fetch item syntax `BODY.PEEK[TEXT]<0.2000>`.
 
+### S22 (rest) — Phase 6 UI: Settings cards, Command Centre indicators, docs
+
+(The Agents page and the Applications page were built in their own sessions; this is the
+remainder.)
+
+Shipped: Settings → Integrations card (`GET /integrations`: status badge, account, last sync,
+a button per action — Connect, Sync, Disconnect behind a confirm, Pair, Set webhook — and a
+"Pair your phone" row with the code and the bot link while Telegram is configured but not
+paired); Settings → Notifications card (the on/off toggle, morning time, evening time, quiet
+hours, least serious alert, daily cap, Send test, Brief now, the last ten notifications);
+returning from Google lands on Settings with a message; Command Centre: one line under the
+greeting with today's timed events, "Sent to Telegram at HH:MM" and a link to Settings when an
+integration is in error or Telegram is not paired; the Design Guide shows the new `.code`
+chip; docs (ROADMAP, README, CLAUDE.md, REBUILD_HANDOFF migrations and environment variables,
+the Netlify mentions in ADR-0002 and both phase specs).
+
+Decisions where the spec was silent:
+- The home indicators are one line that never wraps (longer content is cut with an ellipsis
+  and shown in full on hover), so the home grid keeps its proportions.
+- Every notification control saves on change (one request each) and shows the change with
+  Undo. The daily cap is a select (4, 6, 8, 12, 16, 24 and the current value).
+- The frontend names that the build order used and that no longer exist: `renderChangesStrip`
+  is reached through `showChanges`; list rows are `.row`, not `.list-row`.
+- `GET /integrations` shows the YouTube row from the Brand tab's account, including that
+  account's own error and last sync (one small backend change in this session, with a test).
+- `tests/e2e/screens.js` seeds a paired phone, a connected calendar with events today and
+  three notifications, so the contact sheet shows the populated states.
+
+Checked in a browser (headless Chrome, 1280×720 and 390×844): Settings with a bot configured
+but not paired (pair row, code, Open bot), Settings with the calendar connected and Telegram
+paired, and the home screen with two events, an all-day event and a sent briefing. The layout
+checks pass at all four sizes.
+
+Limits to know:
+- Nothing in the UI was exercised against the real Telegram, Google or Gmail services.
+
 ## Environment variables added so far
 
 | Var | Default | Session | Purpose |
@@ -1037,6 +1073,10 @@ service after deployment.
 
 ## Follow-ups noticed
 
+- `tests/test_assistant_current_data.py::TestConversationHistory::test_grouped_by_day_newest_first_text_only`
+  (from before this branch) seeds messages "five minutes ago" in UTC, so it fails if it runs in
+  the first five minutes after 00:00 UTC. It failed once in a full run at 00:02 UTC on
+  12 November 2026 and passed on the rerun. Seed it from a fixed clock.
 - `GET /briefing/today` uses the server's clock (`datetime.now()`), which is UTC on Render:
   between 00:00 and 02:00 in Lusaka the home screen briefing is still yesterday's. The
   couriers already pass the local clock; the endpoint should do the same. (not done here)

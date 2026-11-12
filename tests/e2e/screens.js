@@ -191,6 +191,22 @@ function seedDraft(env) {
     "wharton.gaps_reviewed_at = datetime.utcnow() - timedelta(days=2)",
     "stale = db.query(models.Project).filter(models.Project.title == 'Newsletter').first()",
     "stale.last_activity_at = datetime.utcnow() - timedelta(days=20)",
+    // Phase 6C/6D: a paired phone, a connected calendar with two events today, and a few notifications.
+    "import integrations, integrations_telegram",
+    "from agents import schedule",
+    "integrations_telegram.pair(db, 4455667788, 'bandile')",
+    "google = integrations.get_or_create(db, 'google_calendar')",
+    "google.status, google.account_label, google.last_sync_at = 'connected', 'primary', datetime.utcnow() - timedelta(minutes=12)",
+    "google.secret_json = json.dumps({'access_token': 'synthetic-access', 'refresh_token': 'synthetic-refresh', 'expiry': '2099-01-01T00:00:00'})",
+    "today_local = schedule.to_local(datetime.utcnow()).date()",
+    "def at(hour, minute=0):",
+    "    return schedule.to_utc(datetime(today_local.year, today_local.month, today_local.day, hour, minute, tzinfo=schedule.tz()))",
+    "db.add(models.CalendarEvent(provider='google', external_id='evt-a', title='Further Maths P1 past paper', start_at=at(9), end_at=at(10, 30), start_date=today_local, location='Library'))",
+    "db.add(models.CalendarEvent(provider='google', external_id='evt-b', title='Clinic demo', start_at=at(23), end_at=at(23, 45), start_date=today_local, created_by_us=True))",
+    "db.add(models.CalendarEvent(provider='google', external_id='evt-c', title='Mock exams', start_at=at(0), end_at=at(23, 59), start_date=today_local, all_day=True))",
+    "db.add(models.Notification(kind='briefing', body='Good morning. Three things need you today.', status='sent', sent_at=datetime.utcnow() - timedelta(hours=1), dedupe_key='briefing:seed', source='agent:briefing_courier'))",
+    "db.add(models.Notification(kind='alert', title='CRITICAL', body='No revenue logged in the last 30 days.', status='suppressed', suppressed_reason='daily_cap', dedupe_key='alert:seed'))",
+    "db.add(models.Notification(kind='reminder', title='Reminder', body='Call the clinic', status='queued', send_at=datetime.utcnow() + timedelta(hours=3), source='assistant'))",
     "db.commit()",
   ].join("\n");
   const r = spawnSync(PYTHON, ["-c", code], { cwd: path.join(ROOT, "backend"), env, encoding: "utf8" });

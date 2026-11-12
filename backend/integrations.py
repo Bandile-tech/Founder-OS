@@ -141,6 +141,14 @@ def configured(provider: str) -> bool:
     return False
 
 
+def _youtube_account(db: Session):
+    """The Brand tab's YouTube account, which is where that connection really lives."""
+    if not hasattr(models, "SocialAccount"):
+        return None
+    return db.query(models.SocialAccount).filter(
+        models.SocialAccount.platform == "youtube", models.SocialAccount.status != "disconnected").first()
+
+
 def _effective(db: Session, row: models.Integration) -> tuple[str, str | None, list[str]]:
     """(status, account label, actions) as the Settings card should show them."""
     provider, ready = row.provider, configured(row.provider)
@@ -161,9 +169,7 @@ def _effective(db: Session, row: models.Integration) -> tuple[str, str | None, l
             return "connected", config(row).get("username") or row.account_label, ["set_webhook", "disconnect"]
         return ("pending" if ready else "disconnected"), None, (["pair", "set_webhook"] if ready else [])
     if provider == "youtube":
-        account = db.query(models.SocialAccount).filter(
-            models.SocialAccount.platform == "youtube", models.SocialAccount.status != "disconnected").first() \
-            if hasattr(models, "SocialAccount") else None
+        account = _youtube_account(db)
         if account is not None:
             return ("error" if account.status == "error" else "connected"), account.handle, []
         return ("pending" if ready else "disconnected"), None, []
@@ -173,9 +179,14 @@ def _effective(db: Session, row: models.Integration) -> tuple[str, str | None, l
 def serialize(db: Session, row: models.Integration) -> dict:
     """Never includes ``secret_json``."""
     status, label, actions = _effective(db, row)
+    last_error, last_sync = row.last_error, row.last_sync_at
+    if row.provider == "youtube":
+        account = _youtube_account(db)
+        if account is not None:
+            last_error, last_sync = (redact(account.last_error, db) if account.last_error else None), account.last_synced_at
     return {"provider": row.provider, "label": LABELS.get(row.provider, row.provider), "status": status,
-            "account_label": label, "connected_at": row.connected_at, "last_sync_at": row.last_sync_at,
-            "last_error": row.last_error if status == "error" else None,
+            "account_label": label, "connected_at": row.connected_at, "last_sync_at": last_sync,
+            "last_error": last_error if status == "error" else None,
             "configured": configured(row.provider), "actions": actions}
 
 
