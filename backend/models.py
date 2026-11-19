@@ -1393,7 +1393,7 @@ class NotificationSettings(Base):
     alert_min_severity = Column(String, default="warn")    # info|warn|critical
     daily_cap          = Column(Integer, default=12)
     channels_json      = Column(Text, nullable=True)       # {"telegram": true, "push": true}
-    deadline_days_json = Column(Text, nullable=True)       # [7, 3, 1]
+    deadline_days_json = Column(Text, nullable=True)       # [30, 14, 7, 3, 1]
     muted_until        = Column(DateTime, nullable=True)   # naive UTC; /mute sets it
     updated_at         = Column(DateTime, default=datetime.utcnow)
 

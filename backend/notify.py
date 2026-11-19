@@ -50,7 +50,7 @@ API = "https://api.telegram.org"
 # 12:30 and 19:45 in FOUNDER_OS_TZ: .github/workflows/jobs-tick.yml).
 DEFAULTS = {"enabled": True, "morning_time": "05:45", "evening_time": "19:45", "quiet_start": "22:00",
             "quiet_end": "05:00", "alert_min_severity": "warn", "daily_cap": 12,
-            "channels_json": '{"telegram": true, "push": true}', "deadline_days_json": "[7, 3, 1]"}
+            "channels_json": '{"telegram": true, "push": true}', "deadline_days_json": "[30, 14, 7, 3, 1]"}
 PUSH_BODY_LIMIT = 500
 # The view a tap on a notification opens, by kind, when the sender names none.
 DEFAULT_TARGETS = {"briefing": "home", "evening": "home", "alert": "home", "deadline": "home",
@@ -92,7 +92,7 @@ def deadline_days(s) -> list[int]:
         marks = [int(d) for d in json.loads(s.deadline_days_json or "[]")]
     except (ValueError, TypeError):
         marks = []
-    return sorted({m for m in marks if m >= 0}, reverse=True) or [7, 3, 1]
+    return sorted({m for m in marks if m >= 0}, reverse=True) or [30, 14, 7, 3, 1]
 
 
 def serialize_settings(db: Session, s) -> dict:

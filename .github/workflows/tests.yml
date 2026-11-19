@@ -110,7 +110,7 @@ jobs:
             if [ "$found" != "7" ]; then echo "$database: row-level security is on for $found of 7 Phase 7 tables"; exit 1; fi
           done
           echo "Row-level security is on for all seven Phase 7 tables on both databases."
-      - name: The upgrade seeded the routes and moved the notification defaults, and kept what was there
+      - name: The upgrade seeded the routes, moved the briefing times, and left the reminder days alone
         env:
           PGPASSWORD: founder
         run: |
@@ -119,7 +119,7 @@ jobs:
                 || '|' || morning_time || '|' || evening_time || '|' || deadline_days_json
             FROM notification_settings WHERE id = 1")
           echo "$got"
-          [ "$got" = "12|8|05:45|19:45|[7, 3, 1]" ]
+          [ "$got" = "12|8|05:45|19:45|[30, 14, 7, 3, 1]" ]
       - name: Suite
         working-directory: backend
         env:

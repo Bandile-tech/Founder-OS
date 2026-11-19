@@ -13,8 +13,8 @@ The notification settings row (id 1) is moved to the three daily wakes, once, an
 where it still holds the value it shipped with (a value Bandile set himself is left alone):
   morning_time   06:00            → 05:45   (the morning wake; at 06:00 it would wait until 12:30)
   evening_time   not set          → 19:45   (the evening check, on the evening wake)
-  deadline days  30, 14, 7, 3, 1  → 7, 3, 1
   channels       telegram         → telegram and push
+The reminder days (30, 14, 7, 3 and 1 days out) are not touched.
 
 SQLite + Postgres. Idempotent. No drops. RLS enabled on the new table (Postgres).
 """
@@ -51,7 +51,6 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
 _SETTINGS = [
     ("morning_time", "06:00", "05:45"),
     ("evening_time", None, "19:45"),
-    ("deadline_days_json", "[30, 14, 7, 3, 1]", "[7, 3, 1]"),
     ("channels_json", '{"telegram": true}', '{"telegram": true, "push": true}'),
 ]
 

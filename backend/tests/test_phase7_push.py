@@ -7,7 +7,7 @@ The keys below are made for the test and sign nothing real.
   1. subscribing a device, and which endpoints the server will post to
   2. a notification leaves by push when a device is on, with a view to open
   3. what is pushed, all of it deterministic: the morning briefing (greeting line and the
-     top three items), the evening check, reminders 7, 3 and 1 days out, payments due,
+     top three items), the evening check, reminders 30, 14, 7, 3 and 1 days out, payments due,
      the cost-cap alert
   4. QUIET_HOURS: nothing at all inside the window
   5. the schedule: three wakes a day, "last scheduled run" in the briefing, an alert past 26 hours
@@ -259,26 +259,28 @@ def test_the_evening_check_says_what_is_still_open_and_what_carried_over(pushed)
     db.close()
 
 
-def test_reminders_go_out_seven_three_and_one_days_before_and_only_once(pushed):
+def test_reminders_go_out_on_each_mark_before_a_deadline_and_only_once(pushed):
     _device()
     db = _db()
     for days, text in ((7, "Scholarship essay"), (3, "Renew the domain"), (1, "Pay the exam fee"),
-                       (5, "Not on a mark"), (0, "Due today"), (14, "Two weeks out")):
+                       (5, "Not on a mark"), (0, "Due today"), (14, "Two weeks out"), (21, "Three weeks out")):
         db.add(models.Todo(text=text, done=False, due_date=TODAY + timedelta(days=days)))
     db.add(models.Todo(text="Already done", done=True, due_date=TODAY + timedelta(days=3)))
     db.add(models.ExamDate(subject_code="9709", paper="P1", exam_date=TODAY + timedelta(days=3)))
     db.add(models.ExamDate(subject_code="9708", paper="P2", exam_date=TODAY + timedelta(days=30)))
+    db.add(models.ExamDate(subject_code="9609", paper="P1", exam_date=TODAY + timedelta(days=10)))
     db.commit()
-    assert notify.deadline_days(notify.settings(db)) == [7, 3, 1]
+    assert notify.deadline_days(notify.settings(db)) == [30, 14, 7, 3, 1]      # the marks Phase 6 shipped, untouched
 
     _run(alert_courier.SPEC, utc(5, 47))
     deadlines = {p["tag"]: p for p in pushed if p["tag"].startswith("deadline:")}
     todo_notes = sorted(p["body"] for tag, p in deadlines.items() if tag.startswith("deadline:todo:"))
     assert todo_notes == ["Pay the exam fee is due tomorrow (13 Nov).", "Renew the domain is due in 3 days (15 Nov).",
-                          "Scholarship essay is due in 7 days (19 Nov)."]
-    exam = next(p for tag, p in deadlines.items() if tag.startswith("deadline:exam:"))
-    assert "exam in 3 days (15 Nov)" in exam["body"] and exam["url"] == "/app/#go=syllabus"
-    assert len(deadlines) == 4                               # nothing for 5, 14 or 30 days out, or a finished task
+                          "Scholarship essay is due in 7 days (19 Nov).", "Two weeks out is due in 14 days (26 Nov)."]
+    exams = sorted(p["body"] for tag, p in deadlines.items() if tag.startswith("deadline:exam:"))
+    assert exams == ["Economics 9708 P2 exam in 30 days (12 Dec).", "Maths 9709 P1 exam in 3 days (15 Nov)."]
+    assert all(p["url"] == "/app/#go=syllabus" for tag, p in deadlines.items() if tag.startswith("deadline:exam:"))
+    assert len(deadlines) == 6                               # nothing for 5, 10 or 21 days out, today, or a finished task
     count = len(pushed)
     _run(alert_courier.SPEC, utc(12, 31))
     _run(alert_courier.SPEC, utc(19, 47))

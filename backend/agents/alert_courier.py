@@ -133,7 +133,7 @@ def run(ctx) -> AgentResult:
                            "body": f"{name} exam {_days(days)} ({_short_date(exam['exam_date'])}).",
                            "dedupe_key": f"deadline:exam:{exam['subject_code']}:{exam['paper'] or ''}:{days}"})
 
-    # Tasks with a date: a reminder at each mark (7, 3 and 1 days out by default).
+    # Tasks with a date: a reminder at each mark (30, 14, 7, 3 and 1 days out by default).
     for todo in ctx.db.query(models.Todo).filter(models.Todo.done.is_(False), models.Todo.due_date.isnot(None)).all():
         days = (todo.due_date - ctx.today).days
         if days in marks and days > 0:
@@ -176,7 +176,7 @@ def run(ctx) -> AgentResult:
 SPEC = agents.register(AgentSpec(
     key="alert_courier", name="Alert courier",
     description="Sends an alert when something crosses a threshold: an off-track rule, a payment due or "
-                "overdue, a deadline or an exam 7, 3 and 1 days out, the AI spend cap. Once each.",
+                "overdue, a deadline or an exam 30, 14, 7, 3 and 1 days out, the AI spend cap. Once each.",
     schedule=Schedule(interval_minutes=15), events=EVENTS,
     permissions=Permissions(tools=[], tables_write=[], may_notify=True, max_llm_calls=0),
     run=run, phase="6",

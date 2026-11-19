@@ -663,11 +663,11 @@ def test_parse_when_reads_the_documented_forms():
 def test_settings_endpoint_returns_defaults_and_pairing_details(monkeypatch):
     monkeypatch.setenv("TELEGRAM_BOT_USERNAME", "FounderOsBot")
     body = client.get("/notifications/settings").json()
-    # The defaults sit on the three daily wakes (05:45, 12:30, 19:45) and remind at 7, 3 and 1 days.
+    # The briefing and the evening check sit on two of the three daily wakes; the reminder days are unchanged.
     assert body["enabled"] is True and body["morning_time"] == "05:45" and body["evening_time"] == "19:45"
     assert (body["quiet_start"], body["quiet_end"]) == ("22:00", "05:00")
     assert body["alert_min_severity"] == "warn" and body["daily_cap"] == 12
-    assert body["channels"] == {"telegram": True, "push": True} and body["deadline_days"] == [7, 3, 1]
+    assert body["channels"] == {"telegram": True, "push": True} and body["deadline_days"] == [30, 14, 7, 3, 1]
     assert body["channel"] is None and body["push"] == {"configured": False, "public_key": None, "subscriptions": 0}
     assert body["paired"] is False and body["channel_configured"] is True
     assert body["bot_link"] == "https://t.me/FounderOsBot" and body["pair_code"] == tg.pair_code(_db())

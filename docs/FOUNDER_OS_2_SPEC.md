@@ -73,7 +73,7 @@ Important: Opening a workspace should not interrupt the conversation. The assist
 
 **Status: Partial.** Evidence: the daily command centre and task extraction are built (`backend/briefing.py`, `apply_parse_updates` in `main.py`, `actions.py`). Proactive communication is built for Telegram (`notify.py`, `agents/briefing_courier.py`) but no account is set up and the external schedule ships switched off (`docs/adr/0001`, amendment), so nothing reaches Bandile while the app is closed. Weekly planning is not built (`ROADMAP.md`, Phase 3). Outbound voice calls are not built.
 
-**Phase 7 (branch `phase-7`):** the schedule now runs three times a day and Web Push is the first channel: the morning briefing, an evening check, reminders 7, 3 and 1 days out, payments due and the cost-cap alert reach Bandile with the app closed (`backend/push.py`, `notify.py`, `.github/workflows/jobs-tick.yml`, `tests/test_phase7_push.py`). The VAPID keys and the two repository secrets still have to be set.
+**Phase 7 (branch `phase-7`):** the schedule now runs three times a day and Web Push is the first channel: the morning briefing, an evening check, reminders 30, 14, 7, 3 and 1 days out, payments due and the cost-cap alert reach Bandile with the app closed (`backend/push.py`, `notify.py`, `.github/workflows/jobs-tick.yml`, `tests/test_phase7_push.py`). The VAPID keys and the two repository secrets still have to be set.
 
 Core functionality
 

@@ -1515,8 +1515,8 @@ Decisions:
 - `jobs-tick.yml` runs at 05:45, 12:30 and 19:45 Lusaka time, with the existing `JOBS_TOKEN`.
 - Web Push: m029 `push_subscriptions`, `push.py`, `frontend/sw.js`, the switch in Settings.
 - Pushed, all from queries: the morning briefing (greeting line and the top three items), the
-  evening check (still open, carried over), reminders 7, 3 and 1 days before a task, an exam or
-  an application, a payment due today or overdue, the cost-cap alert (once a month), a stopped
+  evening check (still open, carried over), reminders 30, 14, 7, 3 and 1 days before a task, an
+  exam or an application, a payment due today or overdue, the cost-cap alert (once a month), a stopped
   schedule. Each opens its view (`notifications.target`). The only model call is the day's one
   briefing summary.
 - `QUIET_HOURS`. "Last scheduled run" in the briefing, with an alert past 26 hours.
@@ -1525,8 +1525,11 @@ Decisions:
 - The channel is chosen when a message is queued: push when a device is on, else Telegram
   when paired. Telegram is not extended.
 - `QUIET_HOURS` replaces the window in Settings and holds everything, reminders included.
-- m029 moved the morning briefing to 05:45, turned the evening check on at 19:45, and set the
-  reminder marks to 7, 3 and 1 days, each only where the shipped value was still in place.
+- m029 moved the morning briefing to 05:45 and turned the evening check on at 19:45, each only
+  where the shipped value was still in place. The reminder marks stay at 30, 14, 7, 3 and 1
+  days (Bandile, 19 November: an earlier draft of m029 cut them to 7, 3 and 1; that was taken
+  out before the merge). Tasks with a date are now reminded on the same marks as exams and
+  applications.
 - A spoken confirmation from a browser tab that predates this change (it reports no turn) is
   refused for a send; the tap works.
 - Events raised during a tick are handed to agents later in the same tick.
