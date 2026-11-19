@@ -178,8 +178,11 @@ def test_telegram_is_still_used_when_no_device_is_on(monkeypatch, pushed):
         _device()                                            # a device switches on: push takes over
         assert notify.active_channel(db) == "push"
         assert client.post("/notifications/test").json()["status"] == "sent"
+        # A reply to something he wrote in Telegram still goes back to Telegram.
+        import telegram_inbound
+        assert telegram_inbound._reply(db, "Logged.")["status"] == "sent"
     db.close()
-    assert len(posts) == 1 and len(pushed) == 1
+    assert len(posts) == 2 and posts[-1]["text"] == "Logged." and len(pushed) == 1
 
 
 # ════════════════════════════════════════════════════════════════

@@ -268,11 +268,12 @@ def _by_key(db: Session, dedupe_key: str):
 
 def queue(db: Session, *, kind: str, body: str, title: str | None = None, dedupe_key: str | None = None,
           send_at: datetime | None = None, source: str | None = None, agent_run_id: int | None = None,
-          target: str | None = None) -> dict:
+          target: str | None = None, channel: str | None = None) -> dict:
     """Add a notification to the queue. Never sends. A ``dedupe_key`` already used returns
     the existing row with ``deduped: True``. ``send_at`` is naive UTC (None = now).
     ``target`` is the view a tap opens. The channel is the one that can reach him now
-    (``active_channel``). The caller owns the transaction."""
+    (``active_channel``) unless the caller names it (a reply to a Telegram message goes back
+    to Telegram). The caller owns the transaction."""
     if kind not in KINDS:
         return {"error": f"unknown notification kind '{kind}'"}
     text = str(body or "").strip()
@@ -283,7 +284,8 @@ def queue(db: Session, *, kind: str, body: str, title: str | None = None, dedupe
         if existing is not None:
             return {**serialize(existing), "deduped": True}
     row = models.Notification(
-        channel=active_channel(db) or "telegram", kind=kind, title=(str(title).strip()[:200] if title else None),
+        channel=channel or active_channel(db) or "telegram", kind=kind,
+        title=(str(title).strip()[:200] if title else None),
         body=text, target=target or DEFAULT_TARGETS.get(kind, "home"),
         dedupe_key=dedupe_key, send_at=send_at, status="queued", source=source, created_at=datetime.utcnow(),
         agent_run_id=agent_run_id if agent_run_id is not None else db.info.get("agent_run_id"))
@@ -651,9 +653,10 @@ def _outcome(db: Session, notification_id: int) -> dict:
 
 
 def send_now(db: Session, *, kind: str, body: str, title: str | None = None, dedupe_key: str | None = None,
-             source: str | None = None, target: str | None = None) -> dict:
+             source: str | None = None, target: str | None = None, channel: str | None = None) -> dict:
     """Queue one message and dispatch only it, through quiet hours."""
-    queued = queue(db, kind=kind, body=body, title=title, dedupe_key=dedupe_key, source=source, target=target)
+    queued = queue(db, kind=kind, body=body, title=title, dedupe_key=dedupe_key, source=source, target=target,
+                   channel=channel)
     if queued.get("error"):
         return {"id": None, "status": "failed", "error": queued["error"], "suppressed_reason": None}
     db.commit()

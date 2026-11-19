@@ -2855,7 +2855,7 @@ def _when_label(send_at, now_local) -> str:
 
 
 def set_reminder(db, text: str, when: str):
-    """Queue a reminder for a moment. Sent to Telegram by the reminder courier."""
+    """Queue a reminder for a moment. Sent by the reminder courier, to whichever channel is on."""
     import business_common
     import change_log
     import notify
@@ -2876,10 +2876,10 @@ def set_reminder(db, text: str, when: str):
         row = db.query(models.Notification).filter(models.Notification.id == queued["id"]).first()
         change = change_log.record_create(db, row, f"Reminder set for {label}: {text}")
         db.commit()
-    paired = notify.integrations_telegram.is_paired(db)
     out = {"reminder_id": queued["id"], "text": text, "when": label, "change": change}
-    if not paired:
-        out["note"] = "Telegram is not paired yet, so this reminder cannot be delivered until it is."
+    if notify.active_channel(db) is None:
+        out["note"] = ("No device has notifications turned on (Settings, Notifications, This device) and Telegram "
+                       "is not paired, so this reminder cannot reach him until one of them is.")
     return out, f"reminder set for {label}"
 
 

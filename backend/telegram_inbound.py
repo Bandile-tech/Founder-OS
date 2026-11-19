@@ -77,7 +77,7 @@ def _session_id(chat_id) -> str:
 
 def _reply(db, text: str) -> dict:
     import notify
-    return notify.send_now(db, kind="reply", body=text, source="telegram")
+    return notify.send_now(db, kind="reply", body=text, source="telegram", channel="telegram")
 
 
 def _locked_out(chat_id) -> bool:
