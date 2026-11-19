@@ -751,15 +751,18 @@ def test_agent_tools_report_run_and_reschedule():
     db.close()
 
 
-def test_workflow_ships_with_the_schedule_switched_off():
+def test_workflow_wakes_the_backend_three_times_a_day_and_no_more():
+    """Phase 7 switched the schedule on: 05:45, 12:30 and 19:45 in Lusaka (UTC+2). Never the
+    every-15-minutes schedule, which would keep a free Render instance awake all month."""
     text = (Path(__file__).parent.parent.parent / ".github" / "workflows" / "jobs-tick.yml").read_text(encoding="utf-8")
-    assert "workflow_dispatch: {}" in text
-    assert '  # schedule:\n  #   - cron: "*/15 * * * *"' in text                      # present, commented out
-    active = [line for line in text.splitlines() if not line.lstrip().startswith("#")]
-    assert not any("cron" in line or line.strip() == "schedule:" for line in active)
-    assert "for i in 1 2 3" in text and "sleep 20" in text and "-m 120" in text
+    active = [line.strip() for line in text.splitlines() if not line.lstrip().startswith("#")]
+    crons = [line.split('"')[1] for line in active if line.startswith("- cron:")]
+    assert crons == ["45 3 * * *", "30 10 * * *", "45 17 * * *"]
+    assert "schedule:" in active and "workflow_dispatch: {}" in active and "*/15" not in "\n".join(active)
+    assert "for i in 1 2 3 4" in text and "sleep 25" in text and "-m 150" in text      # retries for a cold start
     assert "-o /dev/null" in text                 # the answer names projects and objectives: keep it out of the log
-    assert "secrets.FOUNDER_OS_URL" in text and "X-Jobs-Token: ${{ secrets.JOBS_TOKEN }}" in text
+    assert "secrets.FOUNDER_OS_URL" in text and "secrets.JOBS_TOKEN" in text and 'X-Jobs-Token: $JOBS_TOKEN' in text
+    assert "permissions: {}" in active            # the job needs nothing from the repository
 
 
 def test_in_process_tick_is_guarded_by_the_env_flag(monkeypatch):

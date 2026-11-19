@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 import integrations
 import integrations_telegram
 import models
+import push
 from agents import schedule
 from database import get_db
 
@@ -45,9 +46,15 @@ MAX_TODAY = 5
 TIMEOUT = 10
 API = "https://api.telegram.org"
 
-DEFAULTS = {"enabled": True, "morning_time": "06:00", "evening_time": None, "quiet_start": "22:00",
+# The morning briefing and the evening check sit on two of the three daily wakes (05:45,
+# 12:30 and 19:45 in FOUNDER_OS_TZ: .github/workflows/jobs-tick.yml).
+DEFAULTS = {"enabled": True, "morning_time": "05:45", "evening_time": "19:45", "quiet_start": "22:00",
             "quiet_end": "05:00", "alert_min_severity": "warn", "daily_cap": 12,
-            "channels_json": '{"telegram": true}', "deadline_days_json": "[30, 14, 7, 3, 1]"}
+            "channels_json": '{"telegram": true, "push": true}', "deadline_days_json": "[7, 3, 1]"}
+PUSH_BODY_LIMIT = 500
+# The view a tap on a notification opens, by kind, when the sender names none.
+DEFAULT_TARGETS = {"briefing": "home", "evening": "home", "alert": "home", "deadline": "home",
+                   "reminder": "home", "reply": "history", "test": "settings"}
 
 # One process serves the app, so a lock is enough to stop two dispatches (the tick and a
 # reply, say) from sending the same row twice.
@@ -85,7 +92,7 @@ def deadline_days(s) -> list[int]:
         marks = [int(d) for d in json.loads(s.deadline_days_json or "[]")]
     except (ValueError, TypeError):
         marks = []
-    return sorted({m for m in marks if m >= 0}, reverse=True) or [30, 14, 7, 3, 1]
+    return sorted({m for m in marks if m >= 0}, reverse=True) or [7, 3, 1]
 
 
 def serialize_settings(db: Session, s) -> dict:
@@ -95,6 +102,10 @@ def serialize_settings(db: Session, s) -> dict:
         "daily_cap": s.daily_cap, "channels": _channels(s), "deadline_days": deadline_days(s),
         "muted_until": s.muted_until, "updated_at": s.updated_at,
         "paired": integrations_telegram.is_paired(db),
+        # Which channel a message would leave by right now (push first; None when nothing can be reached).
+        "channel": active_channel(db, s),
+        "push": {"configured": push.configured(), "public_key": push.public_key(), "subscriptions": push.count(db)},
+        "quiet_hours_env": env_quiet_hours() and "{}-{}".format(*env_quiet_hours()),
         # Only while there is something to pair: a code on show after pairing is a code to steal.
         "pair_code": None if integrations_telegram.is_paired(db) else integrations_telegram.pair_code(db),
         "bot_link": integrations_telegram.bot_link(),
@@ -158,8 +169,30 @@ def update_settings(db: Session, fields: dict, source: str | None = None) -> dic
 
 # ── Quiet hours and the cap ──────────────────────────────────
 
+def env_quiet_hours() -> tuple[str, str] | None:
+    """``QUIET_HOURS`` as ("22:00", "05:30"), or None when it is unset or unreadable. When it
+    is set it replaces the window in Settings, and NOTHING is sent inside it: no reminder,
+    no reply, no alert. A message held back goes out when the window ends."""
+    raw = (os.getenv("QUIET_HOURS") or "").strip()
+    if not raw:
+        return None
+    parts = [part.strip() for part in raw.replace("–", "-").replace(" to ", "-").split("-")]
+    if len(parts) != 2:
+        return None
+    try:
+        return _clean_time(parts[0]), _clean_time(parts[1])
+    except ValueError:
+        return None
+
+
+def _window(s) -> tuple:
+    fixed = env_quiet_hours()
+    start, end = fixed if fixed else (s.quiet_start, s.quiet_end)
+    return schedule.parse_time(start), schedule.parse_time(end)
+
+
 def _in_window(now_local: datetime, s) -> bool:
-    start, end = schedule.parse_time(s.quiet_start), schedule.parse_time(s.quiet_end)
+    start, end = _window(s)
     if start is None or end is None or start == end:
         return False
     t = (now_local.hour, now_local.minute)
@@ -177,7 +210,7 @@ def quiet_ends(now_local: datetime, s) -> datetime:
     """Naive UTC: when the current quiet stretch (window and mute) is over."""
     until = schedule.to_utc(now_local)
     if _in_window(now_local, s):
-        end = schedule.parse_time(s.quiet_end)
+        end = _window(s)[1]
         candidate = now_local.replace(hour=end[0], minute=end[1], second=0, microsecond=0)
         if candidate <= now_local:
             candidate += timedelta(days=1)
@@ -203,8 +236,27 @@ def sent_today(db: Session, today: date) -> int:
 
 # ── Queue ────────────────────────────────────────────────────
 
+def active_channel(db: Session, s=None) -> str | None:
+    """How a message would reach Bandile right now: "push" when a device has notifications
+    on, else "telegram" when it is paired (Telegram is paused: built, not extended), else
+    None. Switching a channel off in the settings takes it out."""
+    s = s or settings(db)
+    on = _channels(s)
+    if on.get("push", True) and push.ready(db):
+        return "push"
+    if on.get("telegram", True) and TelegramChannel.configured() and integrations_telegram.is_paired(db):
+        return "telegram"
+    return None
+
+
+def target_url(target: str | None) -> str:
+    """The address a notification opens: the app, on the view it is about."""
+    return "/app/#go=" + (target or "home")
+
+
 def serialize(n: models.Notification) -> dict:
     return {"id": n.id, "created_at": n.created_at, "channel": n.channel, "kind": n.kind, "title": n.title,
+            "target": n.target,
             "body": n.body, "dedupe_key": n.dedupe_key, "send_at": n.send_at, "status": n.status,
             "sent_at": n.sent_at, "error": n.error, "source": n.source, "agent_run_id": n.agent_run_id,
             "suppressed_reason": n.suppressed_reason}
@@ -215,10 +267,12 @@ def _by_key(db: Session, dedupe_key: str):
 
 
 def queue(db: Session, *, kind: str, body: str, title: str | None = None, dedupe_key: str | None = None,
-          send_at: datetime | None = None, source: str | None = None, agent_run_id: int | None = None) -> dict:
+          send_at: datetime | None = None, source: str | None = None, agent_run_id: int | None = None,
+          target: str | None = None) -> dict:
     """Add a notification to the queue. Never sends. A ``dedupe_key`` already used returns
-    the existing row with ``deduped: True``. ``send_at`` is naive UTC (None = now). The
-    caller owns the transaction."""
+    the existing row with ``deduped: True``. ``send_at`` is naive UTC (None = now).
+    ``target`` is the view a tap opens. The channel is the one that can reach him now
+    (``active_channel``). The caller owns the transaction."""
     if kind not in KINDS:
         return {"error": f"unknown notification kind '{kind}'"}
     text = str(body or "").strip()
@@ -229,7 +283,8 @@ def queue(db: Session, *, kind: str, body: str, title: str | None = None, dedupe
         if existing is not None:
             return {**serialize(existing), "deduped": True}
     row = models.Notification(
-        channel="telegram", kind=kind, title=(str(title).strip()[:200] if title else None), body=text,
+        channel=active_channel(db) or "telegram", kind=kind, title=(str(title).strip()[:200] if title else None),
+        body=text, target=target or DEFAULT_TARGETS.get(kind, "home"),
         dedupe_key=dedupe_key, send_at=send_at, status="queued", source=source, created_at=datetime.utcnow(),
         agent_run_id=agent_run_id if agent_run_id is not None else db.info.get("agent_run_id"))
     # The insert runs inside a savepoint: if another request queued the same key first, only
@@ -307,6 +362,10 @@ class TelegramChannel:
         return {"ok": True, "external_id": external_id, "error": None}
 
 
+PUSH_TITLES = {"briefing": "Morning briefing", "evening": "Evening check", "alert": "Founder OS",
+               "deadline": "Deadline", "reminder": "Reminder", "reply": "Founder OS", "test": "Founder OS"}
+
+
 def _text(n: models.Notification) -> str:
     if n.title and n.kind in ("alert", "deadline", "reminder"):
         return f"{n.title}\n{n.body}"
@@ -336,17 +395,26 @@ def dispatch(db: Session, now: datetime | None = None, *, force: bool = False, o
             return out
         chat = integrations_telegram.chat_id(db)
         channel_on = bool(_channels(s).get("telegram", True))
+        push_on = bool(_channels(s).get("push", True))
         quiet = is_quiet(now_local, s)
+        # With QUIET_HOURS set, nothing leaves inside the window, whatever kind it is.
+        quiet_exempt = () if env_quiet_hours() else QUIET_EXEMPT
         count = sent_today(db, now_local.date())
         cap = s.daily_cap if s.daily_cap is not None else DEFAULTS["daily_cap"]
 
         for n in rows:
             reason = None
-            if chat is None:
+            by_push = n.channel == "push"
+            if by_push:
+                if not push.ready(db):
+                    reason = "no_device"
+                elif not push_on or (not s.enabled and n.kind not in ALWAYS_ON):
+                    reason = "channel_disabled"
+            elif chat is None:
                 reason = "not_paired"
             elif not channel_on or not TelegramChannel.configured() or (not s.enabled and n.kind not in ALWAYS_ON):
                 reason = "channel_disabled"
-            if reason is None and quiet and not force and n.kind not in QUIET_EXEMPT:
+            if reason is None and quiet and not force and n.kind not in quiet_exempt:
                 n.send_at = quiet_ends(now_local, s)
                 out["held"] += 1
                 db.commit()
@@ -359,7 +427,13 @@ def dispatch(db: Session, now: datetime | None = None, *, force: bool = False, o
                 db.commit()
                 continue
 
-            result = TelegramChannel.send(chat, _text(n))
+            if by_push:
+                sent = push.send(db, title=n.title or PUSH_TITLES.get(n.kind, "Founder OS"),
+                                 body=_clip(n.body, PUSH_BODY_LIMIT) if "\n" not in n.body else n.body[:PUSH_BODY_LIMIT],
+                                 url=target_url(n.target), tag=n.dedupe_key or f"notification-{n.id}")
+                result = {"ok": sent["ok"], "external_id": None, "error": sent.get("error")}
+            else:
+                result = TelegramChannel.send(chat, _text(n))
             if result["ok"]:
                 n.status, n.sent_at, n.external_id, n.error = "sent", now, result["external_id"], None
                 out["sent"] += 1
@@ -470,6 +544,70 @@ def render_evening(briefing: dict) -> str:
     return text if len(text) <= BRIEFING_LIMIT else text[:BRIEFING_LIMIT - 1].rstrip() + "…"
 
 
+def _top_items(briefing: dict, limit: int = 3) -> list[str]:
+    """The highest-ranked items of the brief, as short numbered lines."""
+    lines = []
+    for item in (briefing.get("items") or [])[:limit]:
+        label = item.get("due_label")
+        lines.append(f"{len(lines) + 1}. {_clip(item.get('title'), 70)}" + (f" ({label})" if label else ""))
+    return lines
+
+
+def render_push_briefing(briefing: dict) -> tuple[str, str]:
+    """The morning notification: the greeting line and the top three items. Deterministic,
+    apart from the greeting line, which is the day's one cached summary when there is one."""
+    title = f"{briefing.get('greeting') or 'Good morning'}, Bandile"
+    lines = [_clip(briefing.get("greeting_line") or "", 160)] + _top_items(briefing)
+    body = "\n".join(line for line in lines if line) or "Nothing needs your attention today."
+    return title, body[:PUSH_BODY_LIMIT]
+
+
+def evening_counts(briefing: dict) -> tuple[list, list, int]:
+    """(tasks due today and still open, tasks carried over from earlier days, non-negotiables left)."""
+    today = briefing.get("date")
+    tasks = [i for i in briefing.get("items") or [] if i.get("category") == "task" and i.get("target_type") == "todo"]
+    open_today = [i for i in tasks if i.get("due_date") == today]
+    carried = [i for i in tasks if i.get("due_date") and i["due_date"] < today]
+    counts = briefing.get("counts") or {}
+    left = max(0, (counts.get("non_negotiables_total") or 0) - (counts.get("non_negotiables_done") or 0))
+    return open_today, carried, left
+
+
+def render_push_evening(briefing: dict) -> tuple[str, str]:
+    """The evening notification: what is still open today and what carried over."""
+    open_today, carried, left = evening_counts(briefing)
+    if not (open_today or carried or left):
+        return "Evening check", "Everything for today is done. Nothing carried over."
+    head = [f"{len(open_today)} still open today" if open_today else None,
+            f"{len(carried)} carried over" if carried else None,
+            f"{left} non-negotiable{'s' if left != 1 else ''} left" if left else None]
+    lines = [", ".join(part for part in head if part).capitalize() + "."]
+    for item in (carried + open_today)[:3]:
+        lines.append(f"• {_clip(item.get('title'), 70)}" + (f" ({item['due_label']})" if item.get("due_label") else ""))
+    return "Evening check", "\n".join(lines)[:PUSH_BODY_LIMIT]
+
+
+def briefing_message(db: Session, now: datetime | None = None, channel: str | None = None) -> tuple[str, str]:
+    """(title, body) of today's briefing for the channel it will leave by."""
+    import briefing
+    now = now or datetime.utcnow()
+    if (channel or active_channel(db)) != "push":
+        return "Morning briefing", briefing_text(db, now)
+    local = schedule.to_local(now).replace(tzinfo=None)
+    return render_push_briefing(briefing.build_briefing(db, now=local, with_summary=True))
+
+
+def evening_message(db: Session, now: datetime | None = None, channel: str | None = None) -> tuple[str, str]:
+    """(title, body) of the evening check for the channel it will leave by. No model call."""
+    import briefing
+    now = now or datetime.utcnow()
+    local = schedule.to_local(now).replace(tzinfo=None)
+    data = briefing.build_briefing(db, now=local, with_summary=False)
+    if (channel or active_channel(db)) != "push":
+        return "Evening review", render_evening(data)
+    return render_push_evening(data)
+
+
 def suppressed_overnight(db: Session, now: datetime | None = None) -> list[dict]:
     """What quiet hours or the cap stopped in the last 24 hours."""
     now = now or datetime.utcnow()
@@ -496,24 +634,26 @@ def delivery(db: Session, today: date) -> dict:
         models.Notification.kind == "briefing", models.Notification.status == "sent",
         models.Notification.sent_at >= start, models.Notification.sent_at < end).order_by(
         models.Notification.sent_at.desc()).first()
-    return {"last_sent_at": last.sent_at if last else None, "channel": "telegram",
-            "paired": integrations_telegram.is_paired(db)}
+    return {"last_sent_at": last.sent_at if last else None,
+            "channel": (last.channel if last else None) or active_channel(db) or "telegram",
+            "paired": integrations_telegram.is_paired(db), "reachable": active_channel(db) is not None}
 
 
 # ── One-off sends ────────────────────────────────────────────
 
 def _outcome(db: Session, notification_id: int) -> dict:
     n = db.query(models.Notification).filter(models.Notification.id == notification_id).first()
-    error = n.error or ({"not_paired": "Telegram is not paired yet",
-                         "channel_disabled": "The Telegram channel is off or TELEGRAM_BOT_TOKEN is not set",
+    error = n.error or ({"not_paired": "No device has notifications turned on, and Telegram is not paired",
+                         "no_device": "No device has notifications turned on",
+                         "channel_disabled": "That channel is switched off, or its keys are not set on the server",
                          "daily_cap": "The daily cap has been reached"}.get(n.suppressed_reason or ""))
     return {"id": n.id, "status": n.status, "error": error, "suppressed_reason": n.suppressed_reason}
 
 
 def send_now(db: Session, *, kind: str, body: str, title: str | None = None, dedupe_key: str | None = None,
-             source: str | None = None) -> dict:
+             source: str | None = None, target: str | None = None) -> dict:
     """Queue one message and dispatch only it, through quiet hours."""
-    queued = queue(db, kind=kind, body=body, title=title, dedupe_key=dedupe_key, source=source)
+    queued = queue(db, kind=kind, body=body, title=title, dedupe_key=dedupe_key, source=source, target=target)
     if queued.get("error"):
         return {"id": None, "status": "failed", "error": queued["error"], "suppressed_reason": None}
     db.commit()
@@ -529,7 +669,8 @@ def brief_now(db: Session, now: datetime | None = None, source: str = "settings"
     now = now or datetime.utcnow()
     local = schedule.to_local(now)
     key = f"briefing:{local.date().isoformat()}:manual:{local.strftime('%H%M%S')}"
-    return send_now(db, kind="briefing", body=briefing_text(db, now), dedupe_key=key, source=source)
+    title, body = briefing_message(db, now)
+    return send_now(db, kind="briefing", title=title, body=body, dedupe_key=key, source=source)
 
 
 # ── Endpoints ────────────────────────────────────────────────

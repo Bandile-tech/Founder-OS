@@ -44,6 +44,7 @@ delivered or closed in the last 90 days out of those plus the active ones (null 
 projects).
 """
 
+import os
 import re
 from datetime import date, datetime, timedelta
 
@@ -225,7 +226,42 @@ def system_alerts(db: Session) -> list[dict]:
                                    f"${state['monthly_cap_usd']:,.2f} cap. {tail}"})
     except Exception as exc:  # noqa: BLE001
         print(f"[briefing] cost-cap check failed: {type(exc).__name__}")
+    try:
+        state = scheduler_state(db)
+        if state["stale"]:
+            when = (f"since {state['label']} ({state['hours_ago']:.0f} hours ago)" if state["last_run_at"]
+                    else "yet")
+            out.append({"rule_id": "scheduler_stale", "check": "scheduler_stale", "severity": "warn",
+                        "message": f"The schedule has not run {when}, so nothing is being sent while the app is "
+                                   f"closed. GitHub switches a schedule off after 60 days with no activity in the "
+                                   f"repository: open Actions and turn 'Founder OS jobs tick' back on."})
+    except Exception as exc:  # noqa: BLE001
+        print(f"[briefing] schedule check failed: {type(exc).__name__}")
     return out
+
+
+SCHEDULE_STALE_HOURS = 26         # three wakes a day: a day and two hours with none means it stopped
+
+
+def scheduler_state(db: Session, now: datetime | None = None) -> dict:
+    """When the external schedule (the GitHub Actions tick) last ran. ``stale`` once that
+    is more than 26 hours ago, or has never happened, while ``JOBS_TOKEN`` says the
+    schedule is meant to be running."""
+    from agents import schedule
+    now = now or datetime.utcnow()
+    last = db.query(models.JobTick).filter(models.JobTick.trigger == "github").order_by(
+        models.JobTick.id.desc()).first()
+    expected = len(os.getenv("JOBS_TOKEN") or "") >= 16
+    at = last.started_at if last is not None else None
+    hours = round((now - at).total_seconds() / 3600, 1) if at else None
+    label = None
+    if at:
+        local, today = schedule.to_local(at), schedule.to_local(now).date()
+        days = (today - local.date()).days
+        clock = local.strftime("%H:%M")
+        label = clock if days == 0 else f"yesterday {clock}" if days == 1 else f"{local.day} {local.strftime('%b')} {clock}"
+    return {"last_run_at": at, "label": label, "hours_ago": hours, "expected": expected,
+            "stale": expected and (hours is None or hours > SCHEDULE_STALE_HOURS)}
 
 
 def _alert_items(db: Session, today: date) -> tuple[list, list]:
@@ -729,6 +765,7 @@ def build_briefing(db: Session, *, refresh: bool = False, now: datetime | None =
     core["greeting_line"] = greeting_line or _deterministic_greeting_line(core)
     core.pop("today_date")
     core["delivery"] = _delivery(db, today)
+    core["scheduler"] = scheduler_state(db)
     return core
 
 

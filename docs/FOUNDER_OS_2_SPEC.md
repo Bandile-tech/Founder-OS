@@ -73,6 +73,8 @@ Important: Opening a workspace should not interrupt the conversation. The assist
 
 **Status: Partial.** Evidence: the daily command centre and task extraction are built (`backend/briefing.py`, `apply_parse_updates` in `main.py`, `actions.py`). Proactive communication is built for Telegram (`notify.py`, `agents/briefing_courier.py`) but no account is set up and the external schedule ships switched off (`docs/adr/0001`, amendment), so nothing reaches Bandile while the app is closed. Weekly planning is not built (`ROADMAP.md`, Phase 3). Outbound voice calls are not built.
 
+**Phase 7 (branch `phase-7`):** the schedule now runs three times a day and Web Push is the first channel: the morning briefing, an evening check, reminders 7, 3 and 1 days out, payments due and the cost-cap alert reach Bandile with the app closed (`backend/push.py`, `notify.py`, `.github/workflows/jobs-tick.yml`, `tests/test_phase7_push.py`). The VAPID keys and the two repository secrets still have to be set.
+
 Core functionality
 
 This is what separates Founder OS from an ordinary chatbot.
@@ -322,7 +324,7 @@ For example, if you ask about a business decision, it should be able to retrieve
 
 # 7. AI agent ecosystem
 
-**Status: Built.** Evidence: as jobs, not as chatbots: one registry, one runner, twelve agents, an activity log with Undo per run and the Agents page (`backend/agents/`; `PROGRESS.md` S13, S14 and the Agents UI). See "As built" below.
+**Status: Built.** Evidence: as jobs, not as chatbots: one registry, one runner, thirteen agents, an activity log with Undo per run and the Agents page (`backend/agents/`; `PROGRESS.md` S13, S14 and the Agents UI). See "As built" below.
 
 Advanced capability
 
@@ -365,9 +367,9 @@ agents that are due, one after another, records each run, checks afterwards that
 tables it declared, and undoes the run if it did not. Agents pass work to each other through events
 (a payment falls overdue, a lead replies), not through conversation.
 
-Twelve agents ship: market intelligence, lead qualifier, follow-up sentinel, CRM housekeeper, portfolio
-reviewer, brand sync, application watch, calendar sync, email sync, and three couriers (briefing, alerts,
-reminders). The departments in the table above map onto them and onto the assistant's tools: the Executive
+Thirteen agents ship: market intelligence, lead qualifier, follow-up sentinel, CRM housekeeper, portfolio
+reviewer, brand sync, application watch, calendar sync, email sync, vault export (Phase 7), and three
+couriers (briefing, alerts, reminders). The departments in the table above map onto them and onto the assistant's tools: the Executive
 role is the assistant itself with the daily briefing; Research is the market intelligence agent; Business is
 the lead qualifier, the follow-up sentinel and the CRM housekeeper; Brand is brand sync; Projects is the
 portfolio reviewer; Applications is application watch. The Academic and Knowledge roles have no agent: they
@@ -622,8 +624,8 @@ Founder OS should give more time to study, build Aether AI, develop the personal
 
 # 14. Model routing and cost
 
-**Status: Missing.** Evidence: every call goes to OpenAI through `backend/llm.py`, with one model for all
-tasks. Planned as Phase 7, Stage 1 (`ROADMAP.md`).
+**Status: Built.** Built on the `phase-7` branch; on `main` once its pull request is merged. Evidence: `backend/llm.py`, `backend/llm_adapters/`, `backend/model_routes.py`,
+migration `m026`, `tests/test_phase7_model_router.py`; `docs/phases/PROGRESS.md`, Phase 7, Stage 1.
 
 Founder OS should not be tied to one model provider or one model.
 
@@ -640,8 +642,8 @@ Founder OS should not be tied to one model provider or one model.
 
 # 15. Personal finance ledger
 
-**Status: Missing.** Evidence: the only money Founder OS knows is business revenue and client payments
-(`backend/crm.py`). Planned as Phase 7, Stage 2 (`ROADMAP.md`).
+**Status: Built.** Built on the `phase-7` branch; on `main` once its pull request is merged. Evidence: `backend/finance.py`, migration `m027`, the Budget page in
+`frontend/index.html`, `tests/test_phase7_finance.py`; `docs/phases/PROGRESS.md`, Phase 7, Stage 2.
 
 Bandile says what he spent or received, and every balance is up to date.
 
@@ -656,8 +658,9 @@ Bandile says what he spent or received, and every balance is up to date.
 
 # 16. Second brain sync
 
-**Status: Missing.** Evidence: the vault is pulled at startup, every six hours while the app is awake, or by
-hand (`backend/vault_sync.py`, `main.start_vault_scheduler`). Planned as Phase 7, Stage 3 (`ROADMAP.md`).
+**Status: Built.** Built on the `phase-7` branch; on `main` once its pull request is merged. The webhook, the token and Obsidian's auto-push still have to be set up
+(`docs/DEPLOY.md`, Phase 7). Evidence: `backend/vault_webhook.py`, `vault_export.py`, `vault_sync.sync_paths`,
+migration `m028`, `tests/test_phase7_vault.py`; `docs/phases/PROGRESS.md`, Phase 7, Stage 3.
 
 The Obsidian vault and Founder OS should agree within minutes, in both directions.
 

@@ -61,6 +61,7 @@ import usage as _usage
 import model_routes as _model_routes
 import finance as _finance
 import vault_webhook as _vault_webhook
+import push as _push
 import change_log as _change_log
 import actions as _actions
 import notes as _notes
@@ -71,6 +72,7 @@ app.include_router(_usage.router)
 app.include_router(_model_routes.router)
 app.include_router(_finance.router)
 app.include_router(_vault_webhook.router)
+app.include_router(_push.router)
 app.include_router(_change_log.router)
 app.include_router(_actions.router)
 app.include_router(_notes.router)
@@ -234,6 +236,8 @@ async def startup():
         run_m027(db)        # m027 — buckets, ledger_transactions, allocation_rules
         from migrations.m028_vault_live import run as run_m028
         run_m028(db)        # m028 — vault_exports
+        from migrations.m029_web_push import run as run_m029
+        run_m029(db)        # m029 — push_subscriptions, notifications.target, notification defaults
         _validate_schema(engine)   # raises if any ORM column is absent from the live DB
         _seed_non_negotiables_if_empty(db)
         _verify_seed_integrity(db)

@@ -338,6 +338,7 @@ mark.hl{background:rgba(167,235,242,0.18);color:#fff;border-radius:3px;padding:0
 @media(hover:hover) and (pointer:fine){.btn:hover{border-color:rgba(167,235,242,0.45);background:rgba(167,235,242,0.06)}}
 .btn:active{transform:scale(0.97)}
 .btn:disabled{opacity:0.45;cursor:not-allowed;transform:none}
+.toggle:disabled{opacity:0.45;cursor:not-allowed}
 .btn svg{width:1.1em;height:1.1em}
 .btn--primary{color:#E9FBFE;background:linear-gradient(160deg,rgba(167,235,242,0.2),rgba(26,143,191,0.42));border-color:rgba(167,235,242,0.5);box-shadow:inset 0 1px 0 rgba(255,255,255,0.1),0 0 22px -10px rgba(47,211,240,0.8)}
 @media(hover:hover) and (pointer:fine){.btn--primary:hover{border-color:var(--glow);box-shadow:inset 0 1px 0 rgba(255,255,255,0.1),0 0 26px -6px rgba(47,211,240,0.8)}}
@@ -2046,12 +2047,15 @@ function renderHomeNote(b){
     allDay.slice(0,2).forEach(e=>shown.push(`All day: ${escHtml(e.title||"")}`));
     parts.push(`<b>Today</b> ${shown.join(" · ")}`);
   }
-  const integ=b.integrations||{}, delivery=b.delivery||{};
+  const integ=b.integrations||{}, delivery=b.delivery||{}, sched=b.scheduler||{};
   const sent=_clockOf(delivery.last_sent_at);
-  if(sent)parts.push(`Sent to Telegram at ${escHtml(sent)}`);
+  if(sent)parts.push(`Briefing sent ${delivery.channel==="telegram"?"to Telegram":"to your phone"} at ${escHtml(sent)}`);
   const broken=["google_calendar","email"].some(k=>integ[k]==="error");
   if(broken)parts.push(`<a class="is-warn" role="button" tabindex="0" onclick="openSettings()" onkeydown="if(event.key==='Enter')openSettings()">An integration needs attention</a>`);
-  else if(integ.telegram===false)parts.push(`<a role="button" tabindex="0" onclick="openSettings()" onkeydown="if(event.key==='Enter')openSettings()">Telegram is not paired</a>`);
+  else if(delivery.reachable===false)parts.push(`<a role="button" tabindex="0" onclick="openSettings()" onkeydown="if(event.key==='Enter')openSettings()">Notifications are off</a>`);
+  // When the schedule (the three daily wakes) last ran. Past 26 hours it has stopped.
+  if(sched.stale)parts.push(`<a class="is-warn" role="button" tabindex="0" onclick="openAgentsTile()" onkeydown="if(event.key==='Enter')openAgentsTile()">Last scheduled run: ${escHtml(sched.label||"never")}</a>`);
+  else if(sched.label)parts.push(`Last scheduled run: ${escHtml(sched.label)}`);
   // The way into the Budget from the command centre: this month's money in and out.
   const money=HOME_MONEY.line?`${escHtml(HOME_MONEY.line)} this month`:"Budget";
   parts.push(`<a id="cc-money" role="button" tabindex="0" onclick="openBudgetTile()" onkeydown="if(event.key==='Enter')openBudgetTile()">${money}</a>`);
@@ -3276,9 +3280,74 @@ const INTEG_NEEDS={google_calendar:"Needs GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
   youtube:"Needs YOUTUBE_API_KEY on the server."};
 const INTEG_ACTIONS={connect:"Connect",sync:"Sync",disconnect:"Disconnect",pair:"Pair",set_webhook:"Set webhook"};
 
+// ── Web Push on this device ──
+const PUSH={supported:("serviceWorker" in navigator)&&("PushManager" in window)&&("Notification" in window),on:false};
+function _b64urlBytes(text){
+  const pad="=".repeat((4-text.length%4)%4), raw=atob((text+pad).replace(/-/g,"+").replace(/_/g,"/"));
+  return Uint8Array.from(raw,c=>c.charCodeAt(0));
+}
+async function _pushSubscription(){
+  if(!PUSH.supported)return null;
+  try{const reg=await navigator.serviceWorker.getRegistration("./");return reg?await reg.pushManager.getSubscription():null;}
+  catch(_){return null;}
+}
+async function pushRefresh(){PUSH.on=!!(await _pushSubscription());}
+async function pushToggle(btn){
+  if(btn)btn.disabled=true;
+  try{
+    const current=await _pushSubscription();
+    if(current){
+      await _setTap(null,"POST","/push/unsubscribe",{endpoint:current.endpoint});
+      await current.unsubscribe();
+      showToast("Notifications are off for this device","info");
+    }else{
+      const key=((SET.notif||{}).push||{}).public_key;
+      if(!key){showToast("The server has no push keys yet","error");return;}
+      if(await Notification.requestPermission()!=="granted"){showToast("Notifications are blocked for this site. Allow them in the browser's settings, then try again.","error");return;}
+      const reg=await navigator.serviceWorker.register("sw.js",{scope:"./"});
+      await navigator.serviceWorker.ready;
+      const made=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:_b64urlBytes(key)});
+      const j=made.toJSON();
+      const saved=await _setTap(null,"POST","/push/subscribe",{endpoint:j.endpoint,keys:j.keys});
+      if(!saved){await made.unsubscribe();return;}
+      showToast("Notifications are on for this device","success");
+    }
+  }catch(e){showToast("Could not change notifications: "+e.message,"error");}
+  finally{
+    await pushRefresh();
+    try{SET.notif=await _bizGet("/notifications/settings");}catch(_){}
+    renderNotifications();try{loadBriefing();}catch(_){}
+  }
+}
+
+// A tap on a notification opens the app at #go=<view>. An app that is already open is told
+// by the service worker instead. Either way: go to the view the notification is about.
+function goTarget(target){
+  const [page,tab]=String(target||"home").split(":");
+  const railItem=name=>document.querySelector(`.nav-item[onclick*="nav('${name}'"]`);
+  if(page==="business")openBusinessTile(tab||undefined);
+  else if(page==="settings")openSettings();
+  else if(page==="applications")openApplicationsTile();
+  else if(page==="syllabus")openAcademicsTile();
+  else if(page==="agents")openAgentsTile();
+  else if(page==="budget")openBudgetTile();
+  else if(page==="history")nav("history",railItem("history"));
+  else nav("home",railItem("home"));
+}
+function handleGoHash(href){
+  const hash=href?(new URL(href,location.href).hash):location.hash;
+  if(!hash||!hash.startsWith("#go="))return false;
+  goTarget(decodeURIComponent(hash.slice(4)));
+  try{history.replaceState(null,"",location.pathname+location.search);}catch(_){}
+  return true;
+}
+window.addEventListener("hashchange",()=>handleGoHash());
+if("serviceWorker" in navigator)navigator.serviceWorker.addEventListener("message",ev=>{if(ev.data&&ev.data.type==="founder-os-go")handleGoHash(ev.data.url);});
+
 async function loadSettingsCards(){
   const box=document.getElementById("set-integrations"), nbox=document.getElementById("set-notifications");
   if(!box||!nbox)return;
+  await pushRefresh();
   try{
     const [integ,notif,recent]=await Promise.all([_bizGet("/integrations"),_bizGet("/notifications/settings"),_bizGet("/notifications?limit=10")]);
     SET.integrations=integ;SET.notif=notif;SET.recent=recent;
@@ -3552,7 +3621,13 @@ function _notifBadge(n){
 function renderNotifications(){
   const box=document.getElementById("set-notifications"), s=SET.notif;
   if(!box||!s)return;
-  safeUpdate("set-notif-state",!s.enabled?"Off":s.paired?"Telegram":"Not paired");
+  safeUpdate("set-notif-state",!s.enabled?"Off":s.channel==="push"?"This device and others":s.channel==="telegram"?"Telegram":"No device yet");
+  const pushCfg=s.push||{};
+  const deviceHint=!PUSH.supported?"This browser cannot receive notifications."
+    :!pushCfg.configured?"Needs VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY on the server."
+    :`On iPhone, notifications only work from the app added to the Home Screen (Share, then Add to Home Screen). ${pushCfg.subscriptions} device${pushCfg.subscriptions===1?"":"s"} on.`;
+  const deviceRow=`<div class="field"><div class="field-label">This device</div><div class="field-control"><button class="toggle ${PUSH.on?"is-on":"is-off"}" aria-pressed="${!!PUSH.on}" onclick="pushToggle(this)"${PUSH.supported&&pushCfg.configured?"":" disabled"}>${PUSH.on?"On":"Off"}</button><span class="hint">${escHtml(deviceHint)}</span></div></div>`;
+  const quietNote=s.quiet_hours_env?`<span class="hint">The server's QUIET_HOURS (${escHtml(s.quiet_hours_env)}) is in force: nothing at all is sent inside it.</span>`:"";
   const time=(key,value,label)=>`<input class="input input--narrow" type="time" value="${escHtml(value||"")}" aria-label="${escHtml(label)}" onchange="notifPatch('${key}',this.value)">`;
   const caps=[...new Set([4,6,8,12,16,24,Number(s.daily_cap)])].sort((a,b)=>a-b);
   const sev={info:"Everything",warn:"Warnings and critical",critical:"Critical only"};
@@ -3561,10 +3636,11 @@ function renderNotifications(){
       <span class="row-meta">${escHtml(_ago(n.sent_at||n.created_at))}</span>${_notifBadge(n)}
     </div>`).join("")||`<div class="empty">Nothing has been sent yet.</div>`;
   box.innerHTML=`
-    <div class="field"><div class="field-label">Messages</div><div class="field-control"><button class="toggle ${s.enabled?"is-on":"is-off"}" aria-pressed="${!!s.enabled}" onclick="notifPatch('enabled',${!s.enabled})">${s.enabled?"On":"Off"}</button><span class="hint">${s.paired?"Sent to your Telegram.":"Pair Telegram under Integrations to receive them."}</span></div></div>
+    <div class="field"><div class="field-label">Messages</div><div class="field-control"><button class="toggle ${s.enabled?"is-on":"is-off"}" aria-pressed="${!!s.enabled}" onclick="notifPatch('enabled',${!s.enabled})">${s.enabled?"On":"Off"}</button><span class="hint">${s.channel==="push"?"Sent as notifications to the devices that are switched on.":s.channel==="telegram"?"Sent to your Telegram.":"Switch this device on below to receive them."}</span></div></div>
+    ${deviceRow}
     <div class="field"><div class="field-label">Morning briefing</div><div class="field-control">${time("morning_time",s.morning_time,"Morning briefing time")}</div></div>
-    <div class="field"><div class="field-label">Evening review</div><div class="field-control">${time("evening_time",s.evening_time,"Evening review time")}${s.evening_time?`<button class="btn btn--sm btn--ghost" onclick="notifPatch('evening_time','off')">Turn off</button>`:`<span class="hint">Off. Pick a time to turn it on.</span>`}</div></div>
-    <div class="field"><div class="field-label">Quiet hours</div><div class="field-control">${time("quiet_start",s.quiet_start,"Quiet hours start")}<span class="hint">to</span>${time("quiet_end",s.quiet_end,"Quiet hours end")}</div></div>
+    <div class="field"><div class="field-label">Evening check</div><div class="field-control">${time("evening_time",s.evening_time,"Evening review time")}${s.evening_time?`<button class="btn btn--sm btn--ghost" onclick="notifPatch('evening_time','off')">Turn off</button>`:`<span class="hint">Off. Pick a time to turn it on.</span>`}</div></div>
+    <div class="field"><div class="field-label">Quiet hours</div><div class="field-control">${time("quiet_start",s.quiet_start,"Quiet hours start")}<span class="hint">to</span>${time("quiet_end",s.quiet_end,"Quiet hours end")}${quietNote}</div></div>
     <div class="field"><div class="field-label">Alerts</div><div class="field-control"><select class="select input--narrow" aria-label="Least serious alert to send" onchange="notifPatch('alert_min_severity',this.value)">${Object.keys(sev).map(k=>`<option value="${k}"${s.alert_min_severity===k?" selected":""}>${sev[k]}</option>`).join("")}</select></div></div>
     <div class="field"><div class="field-label">Daily cap</div><div class="field-control"><select class="select input--narrow" aria-label="Most messages in a day" onchange="notifPatch('daily_cap',Number(this.value))">${caps.map(c=>`<option value="${c}"${Number(s.daily_cap)===c?" selected":""}>${c} a day</option>`).join("")}</select></div></div>
     <div class="cluster mt-3"><button class="btn" onclick="notifSend(this,'/notifications/test')">Send test</button><button class="btn" onclick="notifSend(this,'/notifications/brief-now')">Brief now</button></div>
@@ -3580,7 +3656,7 @@ async function notifPatch(key,value){
 async function notifSend(btn,path){
   const d=await _setTap(btn,"POST",path);
   if(!d)return;
-  if(d.status==="sent")showToast("Sent to Telegram","success");
+  if(d.status==="sent")showToast("Sent","success");
   else showToast(d.error||`Not sent (${d.status})`,"error");
   try{SET.recent=await _bizGet("/notifications?limit=10");}catch(_){}
   renderNotifications();try{loadBriefing();}catch(_){}
@@ -5070,6 +5146,7 @@ renderHeader();
   await Promise.race([syncPromise,fallback]);
   initialRender();
   handleReturnHash();
+  handleGoHash();
   syncPromise.then(()=>{try{renderPage(getActivePageName());}catch(_){}});
   // Entrance animations are scoped to .page.fade-up — drop the flag after boot
   // so the 30s background sync never replays them.

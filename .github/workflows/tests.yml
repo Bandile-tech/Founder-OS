@@ -97,17 +97,29 @@ jobs:
           cd backend
           python -c "import asyncio, main; asyncio.run(main.startup())"
           python -c "import asyncio, main; asyncio.run(main.startup())"
-      - name: Row-level security is on for every table the migrations own
+      - name: Row-level security is on for every Phase 7 table, on both databases
         env:
           PGPASSWORD: founder
         run: |
-          missing=$(psql -h localhost -U founder -d founder_fresh -At -c "
-            SELECT string_agg(c.relname, ', ') FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-            WHERE n.nspname = 'public' AND c.relkind = 'r' AND NOT c.relrowsecurity
-              AND c.relname IN ('model_routes', 'model_prices', 'buckets', 'ledger_transactions',
-                                'allocation_rules', 'vault_exports', 'vault_state', 'push_subscriptions')")
-          if [ -n "$missing" ]; then echo "No row-level security on: $missing"; exit 1; fi
-          echo "Row-level security is on for every Phase 7 table."
+          for database in founder_fresh founder_upgrade; do
+            found=$(psql -h localhost -U founder -d "$database" -At -c "
+              SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+              WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relrowsecurity
+                AND c.relname IN ('model_routes', 'model_prices', 'buckets', 'ledger_transactions',
+                                  'allocation_rules', 'vault_exports', 'push_subscriptions')")
+            if [ "$found" != "7" ]; then echo "$database: row-level security is on for $found of 7 Phase 7 tables"; exit 1; fi
+          done
+          echo "Row-level security is on for all seven Phase 7 tables on both databases."
+      - name: The upgrade seeded the routes and moved the notification defaults, and kept what was there
+        env:
+          PGPASSWORD: founder
+        run: |
+          got=$(psql -h localhost -U founder -d founder_upgrade -At -c "
+            SELECT (SELECT count(*) FROM model_routes) || '|' || (SELECT count(*) FROM model_prices WHERE confirmed)
+                || '|' || morning_time || '|' || evening_time || '|' || deadline_days_json
+            FROM notification_settings WHERE id = 1")
+          echo "$got"
+          [ "$got" = "12|8|05:45|19:45|[7, 3, 1]" ]
       - name: Suite
         working-directory: backend
         env:

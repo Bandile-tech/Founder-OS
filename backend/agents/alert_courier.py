@@ -53,7 +53,7 @@ def _from_event(ctx, event) -> dict | None:
         who = f" from {client.name}" if client is not None else ""
         late = p.get("days_overdue")
         how_late = f"{late} day{'s' if late != 1 else ''} overdue" if isinstance(late, int) and late > 0 else "overdue"
-        return {"kind": "alert", "title": "Payment overdue",
+        return {"kind": "alert", "title": "Payment overdue", "target": "business:clients",
                 "body": f"Payment{who} of {crm.money_label(p.get('amount'), p.get('currency'))} is {how_late}.",
                 "dedupe_key": f"payment:{payment_id}:{day}"}
     if event.kind == "lead.replied":
@@ -63,7 +63,7 @@ def _from_event(ctx, event) -> dict | None:
         lead = ctx.db.query(models.Lead).filter(models.Lead.id == lead_id).first()
         name = (lead.name if lead is not None else None) or p.get("name") or "A lead"
         return {"kind": "alert", "title": "A lead replied", "body": f"{name} replied. Open the pipeline to answer.",
-                "dedupe_key": f"lead_replied:{lead_id}"}
+                "dedupe_key": f"lead_replied:{lead_id}", "target": "business:pipeline"}
     if event.kind == "application.deadline_near":
         app_id = p.get("application_id")
         if app_id is None:
@@ -75,7 +75,7 @@ def _from_event(ctx, event) -> dict | None:
         body += "."
         if isinstance(missing, int) and missing > 0:
             body += f" {missing} requirement{'s' if missing != 1 else ''} still open."
-        return {"kind": "deadline", "title": "Application deadline", "body": body,
+        return {"kind": "deadline", "title": "Application deadline", "body": body, "target": "applications",
                 "dedupe_key": f"deadline:application:{app_id}:{p.get('mark', days)}"}
     if event.kind == "brand.sync_failed":
         account_id = p.get("account_id")
@@ -83,7 +83,7 @@ def _from_event(ctx, event) -> dict | None:
             return None
         import integrations
         reason = integrations.redact(p.get("error") or "no reason given", ctx.db)[:200]
-        return {"kind": "alert", "title": "Brand sync failed",
+        return {"kind": "alert", "title": "Brand sync failed", "target": "business:brand",
                 "body": f"{str(p.get('platform') or 'An account').capitalize()} could not be synced: {reason}",
                 "dedupe_key": f"brand_sync_failed:{account_id}:{day}"}
     return None
@@ -91,7 +91,9 @@ def _from_event(ctx, event) -> dict | None:
 
 def run(ctx) -> AgentResult:
     try:
-        import integrations_telegram
+        import briefing
+        import crm
+        import models
         import notify
         import orchestrator_tools
         import syllabus
@@ -100,26 +102,53 @@ def run(ctx) -> AgentResult:
     settings = notify.settings(ctx.db)
     if not settings.enabled:
         return AgentResult(status="skipped", summary="notifications are off")
-    if not integrations_telegram.is_paired(ctx.db):
-        return AgentResult(status="skipped", summary="Telegram is not paired")
+    if notify.active_channel(ctx.db, settings) is None:
+        return AgentResult(status="skipped", summary="no device has notifications on, and Telegram is not paired")
 
-    day, wanted = ctx.today.isoformat(), []
+    # Everything below is a query and a sentence: no model call.
+    day, month, wanted = ctx.today.isoformat(), ctx.today.strftime("%Y-%m"), []
     floor = _RANK.get(settings.alert_min_severity or "warn", 1)
     alerts, _ = orchestrator_tools.detect_off_track(ctx.db)
     for alert in alerts:
         severity = alert.get("severity", "info")
         if _RANK.get(severity, 0) >= floor:
             wanted.append({"kind": "alert", "title": _TITLES.get(severity, "Note"), "body": alert["message"],
-                           "dedupe_key": f"alert:{alert['rule_id']}:{day}"})
+                           "dedupe_key": f"alert:{alert['rule_id']}:{day}", "target": "home"})
+
+    # Founder OS's own alerts: the cost cap once a month, a schedule that stopped once a day.
+    for alert in briefing.system_alerts(ctx.db):
+        if _RANK.get(alert.get("severity", "info"), 0) < floor:
+            continue
+        cap = alert["rule_id"] == "llm_cost_cap"
+        wanted.append({"kind": "alert", "title": "AI spend" if cap else "Schedule", "body": alert["message"],
+                       "dedupe_key": f"alert:{alert['rule_id']}:{month if cap else day}",
+                       "target": "settings" if cap else "agents"})
 
     marks = set(notify.deadline_days(settings))
     for exam in syllabus.upcoming_exams(ctx.db, ctx.today):
         days = exam["days_away"]
         if days in marks:
             name = f"{exam['subject']}{' ' + exam['paper'] if exam['paper'] else ''}"
-            wanted.append({"kind": "deadline", "title": "Exam countdown",
+            wanted.append({"kind": "deadline", "title": "Exam countdown", "target": "syllabus",
                            "body": f"{name} exam {_days(days)} ({_short_date(exam['exam_date'])}).",
                            "dedupe_key": f"deadline:exam:{exam['subject_code']}:{exam['paper'] or ''}:{days}"})
+
+    # Tasks with a date: a reminder at each mark (7, 3 and 1 days out by default).
+    for todo in ctx.db.query(models.Todo).filter(models.Todo.done.is_(False), models.Todo.due_date.isnot(None)).all():
+        days = (todo.due_date - ctx.today).days
+        if days in marks and days > 0:
+            wanted.append({"kind": "deadline", "title": "Deadline", "target": "home",
+                           "body": f"{todo.text} is due {_days(days)} ({_short_date(todo.due_date.isoformat())}).",
+                           "dedupe_key": f"deadline:todo:{todo.id}:{days}"})
+
+    # Client payments that fall due today.
+    for payment in ctx.db.query(models.Payment).filter(models.Payment.status == "due",
+                                                        models.Payment.due_date == ctx.today).all():
+        client = ctx.db.query(models.Client).filter(models.Client.id == payment.client_id).first()
+        who = f" from {client.name}" if client is not None else ""
+        wanted.append({"kind": "alert", "title": "Payment due today", "target": "business:clients",
+                       "body": f"Payment{who} of {crm.money_label(payment.amount, payment.currency)} is due today.",
+                       "dedupe_key": f"payment_due:{payment.id}"})
 
     for event in ctx.events:
         try:
@@ -146,8 +175,8 @@ def run(ctx) -> AgentResult:
 
 SPEC = agents.register(AgentSpec(
     key="alert_courier", name="Alert courier",
-    description="Sends an alert to Telegram when something crosses a threshold: an off-track rule, "
-                "an overdue payment, a deadline or an exam coming up. Once each.",
+    description="Sends an alert when something crosses a threshold: an off-track rule, a payment due or "
+                "overdue, a deadline or an exam 7, 3 and 1 days out, the AI spend cap. Once each.",
     schedule=Schedule(interval_minutes=15), events=EVENTS,
     permissions=Permissions(tools=[], tables_write=[], may_notify=True, max_llm_calls=0),
     run=run, phase="6",

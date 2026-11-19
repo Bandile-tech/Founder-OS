@@ -1404,3 +1404,171 @@ service after deployment.
   works in Kwacha; consider adding ZMW totals to the summary and leading with them.
 
 - `tests/test_market_intel.py` uses the deprecated `Query.get()` in three places.
+
+# Phase 7 — model switching, money ledger, live vault, proactive delivery (19 November 2026)
+
+Branch `phase-7`, from `main` at `fa68406`. One commit per stage, each with the suite green.
+975 backend tests on SQLite. The suite and the startup chain run on SQLite and PostgreSQL 16
+in `.github/workflows/tests.yml` (this machine has no PostgreSQL, Docker or WSL).
+
+## Stage 0 — documents
+`docs/FOUNDER_OS_2_SPEC.md` has a status line under each section, sections 7 and 9 describe
+what exists, and sections 14 to 17 are new. `ROADMAP.md` has Phases 7 and 8.
+
+## Stage 1 — model router
+- `llm.complete(task, …)` and `llm.stream(task, …)` are the only way to a model. Two adapters
+  (`llm_adapters/openai_adapter.py`, `anthropic_adapter.py`) are the only files that import an
+  SDK; `tests/test_openai_request_params.py::test_no_provider_sdk_outside_the_adapters` is
+  the grep, as a test.
+- m026: `model_routes` (task, provider, model, params) and `model_prices` (the models Founder
+  OS knows, their prices, their counterpart, the parameters a route to them starts with).
+  Seeded from the environment; after that the tables decide.
+- Fallback once to the other provider on an error, a timeout or a refusal, and when the
+  route's provider has no key. Logged (`llm_usage.fallback_from`).
+- `set_model_route` tool, `GET /models/routes`, `PATCH /models/routes/{task}`. Change-logged.
+- `MONTHLY_LLM_CAP_USD`: past 80 percent the dearer routes run on the cheapest configured
+  model; one alert in the briefing. `/usage/summary` by provider and by task. Models card.
+- `openai` 1.30.1 → 3.55.1, `anthropic` 2.10.0 added. The whole suite passed on 3.55.1 before
+  any code changed, so nothing outside the adapter needed changing for the upgrade.
+
+Decisions:
+- A task is the unit of routing: assistant, parser, conversation_summary, briefing_summary,
+  market_intel, agents, analysis, and five that are OpenAI only (embedding, transcribe,
+  speech, realtime, realtime_transcribe). `purpose` stays on `llm_usage` for detail.
+- Market intelligence no longer passes `temperature`. A parameter reaches a provider only
+  when the route's `params` lists it.
+- Claude routes start with thinking off. `claude-haiku-5-5` takes `{"type": "disabled"}`;
+  `claude-sonnet-5-5` has no such setting, so its default is `{"type": "between_tools"}`,
+  which is how Anthropic's documentation says to switch it off. `claude-opus-5-5` cannot
+  switch it off and has no default. No thinking-block column: when a route turns thinking
+  on, a turn's thinking blocks are handed back within that turn from memory, and not stored.
+- A stream that has already sent text is not retried on the other provider.
+- The cap changes who serves a route, not the route: the row is left as Bandile set it.
+- Routes and prices are cached in the process and reloaded by every write (and by undo).
+
+Prices seeded (USD per million tokens, read from the providers' pages on 19 November 2026):
+`gpt-5.4-mini` 0.75 in / 0.075 cached / 4.50 out; `gpt-5.4` 2.50 / 0.25 / 15.00;
+`claude-haiku-5-5` 0.10 / 0.01 / 0.50 (cache write 0.125); `claude-sonnet-5-5` 2 / 0.10 / 10
+(2.50); `claude-opus-5-5` 4 / 0.20 / 20 (5); `text-embedding-3-small` 0.02.
+Not confirmed, so no cost is estimated: `whisper-1` (billed per minute) and `tts-1` (per
+character). Real-time voice sessions are not metered by Founder OS at all.
+The estimate in the code before this phase had `gpt-5.4-mini` at 0.25 / 2.00: a third of the
+input price on OpenAI's page. Earlier `llm_usage` cost figures are therefore low.
+Model ids: both Claude ids are on Anthropic's models page. `gpt-realtime-2.1-mini` is on
+OpenAI's models page; the other OpenAI ids were found on its pricing page, not on the
+(partial) models listing that could be fetched.
+
+## Stage 2 — personal finance ledger
+- m027: `buckets`, `ledger_transactions`, `allocation_rules`. `finance.py`.
+- Tools: `log_transactions` (a list, one batch), `set_allocation_rules`, `get_finance`
+  (balances, spending, summary, transactions: one read tool instead of two).
+- `GET /finance/summary`, `GET /finance/transactions`, `PATCH` and `DELETE` on a transaction,
+  `POST /finance/buckets/{id}/default`. The Budget page, the `budget` stage view, and the
+  month's money in and out on the home screen's status line.
+- A client payment that becomes paid writes its income in the same batch
+  (`crm.mark_paid` → `finance.on_payment_paid`), linked by `payment_id`.
+
+Decisions:
+- Amounts are whole minor units parsed with `Decimal` from the words he used. A tool takes
+  amounts as text. Percentages are basis points. Nothing in the money path is a float; the
+  CRM's own amounts are floats and are rounded to the ngwee once, where they enter the ledger.
+- A split income is one row per bucket, sharing `entry_id`. "One ledger entry" for a client
+  payment means one `entry_id` whose rows add up to the payment.
+- The remainder bucket is the one with the largest share unless he names one.
+- With no rules, income waits in Unallocated and he is asked once. When he sets rules and
+  money is waiting there, he is offered the split; it is recorded as a move, which counts as
+  neither income nor spending.
+- The same money said twice in one turn (to the ledger and to the CRM, or to a brain dump) is
+  one record: the second mention links to the first.
+- Money the business earned from someone not on file (`income_type` business) also writes a
+  revenue row, as the brain dump always did.
+- Payments recorded before this phase are not copied into the ledger.
+- Two extra columns beyond the brief: `entry_id`, and `revenue_id` for revenue logged outside
+  the CRM.
+- Tool count is 66; the ceiling in `CONVENTIONS.md` §7 is now 66.
+
+## Stage 3 — live vault
+- `POST /vault/webhook`: HMAC-SHA256 under `GITHUB_WEBHOOK_SECRET`, no session. Only the files
+  a push added, changed or removed are read again; only text that is new is embedded. A forced
+  push, or a push with 20 or more commits, reads the whole vault.
+- Every sync records when it ran on the `vault` integration row: Settings shows "Vault synced
+  X ago". `POST /vault/sync` stays as the fallback.
+- A `vault_export` agent (daily, 19:30) writes the notes the assistant created or changed into
+  `Founder OS/` through the GitHub contents API. m028 `vault_exports` remembers what was
+  written. Skipped until `VAULT_REPO` and `VAULT_WRITE_TOKEN` are set.
+
+Decisions:
+- `Founder OS/` is never indexed, and a push that only touches it is ignored: the assistant
+  already has those notes.
+- The webhook answers 202 and does the work on a thread. A push that arrives while Render is
+  asleep wakes it; if GitHub gives up on that delivery, the startup sync reads the vault anyway.
+- The full index now removes the chunks of files that are gone from the vault.
+- A file edited by hand inside `Founder OS/` is overwritten at the next export.
+
+## Stage 4 — proactive delivery
+- The two approval-gate items listed in the Phase 5 and 6 review are closed.
+  Voice: the browser numbers his spoken turns; an action proposed by voice remembers its turn;
+  confirming it by voice needs a later turn, and for a send the words of that turn must be a
+  plain yes said after the request existed (`voice_realtime.spoken_refusal`).
+  Dock: `GET /actions/pending` carries the recipient and whole text of every pending send, and
+  the dock shows a card for each with Confirm.
+- `jobs-tick.yml` runs at 05:45, 12:30 and 19:45 Lusaka time, with the existing `JOBS_TOKEN`.
+- Web Push: m029 `push_subscriptions`, `push.py`, `frontend/sw.js`, the switch in Settings.
+- Pushed, all from queries: the morning briefing (greeting line and the top three items), the
+  evening check (still open, carried over), reminders 7, 3 and 1 days before a task, an exam or
+  an application, a payment due today or overdue, the cost-cap alert (once a month), a stopped
+  schedule. Each opens its view (`notifications.target`). The only model call is the day's one
+  briefing summary.
+- `QUIET_HOURS`. "Last scheduled run" in the briefing, with an alert past 26 hours.
+
+Decisions:
+- The channel is chosen when a message is queued: push when a device is on, else Telegram
+  when paired. Telegram is not extended.
+- `QUIET_HOURS` replaces the window in Settings and holds everything, reminders included.
+- m029 moved the morning briefing to 05:45, turned the evening check on at 19:45, and set the
+  reminder marks to 7, 3 and 1 days, each only where the shipped value was still in place.
+- A spoken confirmation from a browser tab that predates this change (it reports no turn) is
+  refused for a send; the tap works.
+- Events raised during a tick are handed to agents later in the same tick.
+
+## Environment variables added in Phase 7
+
+| Var | Default | Purpose |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | unset | Claude |
+| `FALLBACK_MAP` | the seeded pairs | Counterpart models across providers |
+| `MONTHLY_LLM_CAP_USD` | unset | Monthly spend cap |
+| `LLM_TIMEOUT_SECONDS` | `90` | Provider call timeout |
+| `GITHUB_WEBHOOK_SECRET` | unset | Vault push webhook |
+| `VAULT_REPO` | unset | `owner/name` of the vault repository |
+| `VAULT_WRITE_TOKEN` | unset | Fine-grained token, Contents read and write, that repository only |
+| `VAULT_BRANCH` | `main` | Vault branch |
+| `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | unset | Web Push keys (`python tools/vapid_keys.py`) |
+| `VAPID_SUBJECT` | see `push.subject` | Contact for the push service |
+| `QUIET_HOURS` | unset | e.g. `22:00-05:30` |
+
+Repository secrets for the schedule: `FOUNDER_OS_URL`, `JOBS_TOKEN`. Setup steps:
+`docs/DEPLOY.md`, "Phase 7".
+
+## Not verified, and known issues
+
+- Nothing was run against a live provider, GitHub, a push service or a phone. The adapters are
+  tested against the real SDKs with a fake transport; pywebpush's encryption and signing were
+  run offline with a generated key pair.
+- The Confirm card and the Budget, Models and notification screens were checked in a browser
+  by hand. `tests/e2e/smoke.js` was not extended or run: Playwright is not installed here.
+- VERIFY after deploy: GitHub's cron delay; that the webhook's first delivery to a sleeping
+  Render instance is retried or covered by the startup sync; Web Push on iPhone from the Home
+  Screen app; the real-time API's `response.created` and `input_audio_buffer.speech_started`
+  events, which the spoken-turn count relies on.
+- A reminder set for a clock time goes out at that time only while the app is open; otherwise
+  at the next of the three wakes.
+- With three wakes a day the agents that use a model (lead qualifier, application watch,
+  research objectives) now run without the app being open. Each has its own cap.
+- `claude-haiku-5-5` costs five times as much for prompts over 100,000 tokens; the estimate
+  uses the lower price. The assistant's prompt is about 16,000 tokens.
+- Routes are cached in the process: a row edited directly in the database is picked up at the
+  next restart.
+- A payment recorded before Phase 7 and marked paid afterwards enters the ledger at that
+  moment, as it should; payments already paid before the deploy never do.
+- The `revenue` form (`POST /revenue`) now also writes ledger income, in a batch of its own.

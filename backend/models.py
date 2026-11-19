@@ -1364,7 +1364,7 @@ class Notification(Base):
 
     id                = Column(Integer, primary_key=True, index=True)
     created_at        = Column(DateTime, default=datetime.utcnow)
-    channel           = Column(String, nullable=False, default="telegram")
+    channel           = Column(String, nullable=False, default="telegram")   # push | telegram, chosen when it is queued
     kind              = Column(String, nullable=False)     # briefing|evening|alert|deadline|reminder|reply|test
     title             = Column(String, nullable=True)
     body              = Column(Text, nullable=False)       # plain text
@@ -1376,7 +1376,8 @@ class Notification(Base):
     external_id       = Column(String, nullable=True)
     agent_run_id      = Column(Integer, nullable=True)
     source            = Column(String, nullable=True)
-    suppressed_reason = Column(String, nullable=True)      # quiet_hours|daily_cap|channel_disabled|not_paired
+    suppressed_reason = Column(String, nullable=True)      # quiet_hours|daily_cap|channel_disabled|not_paired|no_device
+    target            = Column(String, nullable=True)      # the view a tap opens: home, applications, business:clients, …
 
 
 class NotificationSettings(Base):
@@ -1385,14 +1386,14 @@ class NotificationSettings(Base):
 
     id                 = Column(Integer, primary_key=True)
     enabled            = Column(Boolean, default=True)
-    morning_time       = Column(String, default="06:00")
-    evening_time       = Column(String, nullable=True)     # null = no evening review
+    morning_time       = Column(String, default="05:45")
+    evening_time       = Column(String, nullable=True)     # null = no evening check
     quiet_start        = Column(String, default="22:00")
     quiet_end          = Column(String, default="05:00")
     alert_min_severity = Column(String, default="warn")    # info|warn|critical
     daily_cap          = Column(Integer, default=12)
-    channels_json      = Column(Text, nullable=True)       # {"telegram": true}
-    deadline_days_json = Column(Text, nullable=True)       # [30, 14, 7, 3, 1]
+    channels_json      = Column(Text, nullable=True)       # {"telegram": true, "push": true}
+    deadline_days_json = Column(Text, nullable=True)       # [7, 3, 1]
     muted_until        = Column(DateTime, nullable=True)   # naive UTC; /mute sets it
     updated_at         = Column(DateTime, default=datetime.utcnow)
 
@@ -1500,4 +1501,22 @@ class VaultExport(Base):
     content_hash = Column(String, nullable=False)
     sha          = Column(String, nullable=True)          # the file's blob sha on GitHub
     exported_at  = Column(DateTime, nullable=True)
+
+
+# ── PHASE 7, STAGE 4: WEB PUSH ───────────────────────────────
+
+class PushSubscription(Base):
+    """A device that turned notifications on: where its browser's push service takes
+    messages, and the keys a message for it is encrypted with."""
+    __tablename__ = "push_subscriptions"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    endpoint        = Column(String, nullable=False, unique=True)
+    p256dh          = Column(String, nullable=False)
+    auth            = Column(String, nullable=False)
+    user_agent      = Column(String, nullable=True)
+    created_at      = Column(DateTime, default=datetime.utcnow)
+    last_success_at = Column(DateTime, nullable=True)
+    last_error      = Column(String, nullable=True)
+    failures        = Column(Integer, default=0)
 
