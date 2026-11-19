@@ -101,14 +101,17 @@ class TestChangeLogAndUndo:
             revenue_updates=[{"amount": 150, "source": "Wamu's", "client": None}],
         ))
         changes = data["updates"]["changes"]
-        assert {c["table"] for c in changes} == {"todos", "habits", "revenue"}
+        # Revenue logged here is also income in the personal ledger (Phase 7): one entry, in
+        # Unallocated while no split is set.
+        assert {c["table"] for c in changes} == {"todos", "habits", "revenue", "ledger_transactions", "buckets"}
         assert {c["action"] for c in changes} == {"create", "update"}
         assert len({c["batch_id"] for c in changes}) == 1
         assert data["updates"]["batch_id"] == changes[0]["batch_id"]
         db = _db()
         rows = db.query(models.ChangeLog).all()
         db.close()
-        assert len(rows) == 3 and all(r.source == "parser" for r in rows)
+        # todo, habit, revenue; and for the ledger: the Unallocated bucket and the income row
+        assert len(rows) == 5 and all(r.source == "parser" for r in rows)
 
     def test_undo_create_removes_row(self):
         data = _parse(_parsed(todos_add=[{"text": "Email the CEO"}]))

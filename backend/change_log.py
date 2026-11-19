@@ -255,6 +255,10 @@ def _after_undo_hook(db: Session, table_name: str, row: models.ChangeLog | None 
     if table_name == "kpi_snapshots":
         import main
         main.load_kpi_state(db)
+    elif table_name == "payments" and row is not None:
+        import finance
+        db.flush()
+        finance.sync_payment(db, row.record_id)
     elif table_name == "model_routes":
         # The gateway keeps the routes in memory: read them again from this session.
         import llm

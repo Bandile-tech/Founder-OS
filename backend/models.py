@@ -1,4 +1,5 @@
-from sqlalchemy import Column, Integer, String, Date, Float, Text, DateTime, ForeignKey, Boolean, Index
+from sqlalchemy import (Column, Integer, BigInteger, String, Date, Float, Text, DateTime, ForeignKey,
+                        Boolean, Index)
 from sqlalchemy.orm import relationship
 from datetime import datetime
 import os
@@ -1431,3 +1432,57 @@ class ModelPrice(Base):
     confirmed             = Column(Boolean, default=False)  # checked against the provider's price page
     note                  = Column(String, nullable=True)
     updated_at            = Column(DateTime, default=datetime.utcnow)
+
+
+# ── PHASE 7, STAGE 2: PERSONAL FINANCE LEDGER ────────────────
+
+class Bucket(Base):
+    """A pot of Bandile's own money (tithe, business, save, …). A bucket has no balance
+    column: its balance is always the sum of its transactions."""
+    __tablename__ = "buckets"
+
+    id             = Column(Integer, primary_key=True, index=True)
+    name           = Column(String, nullable=False)
+    key            = Column(String, nullable=False, unique=True)   # the name, lower-cased: what a spoken name matches
+    is_default     = Column(Boolean, default=False)   # spending with no bucket named comes out of this one
+    is_remainder   = Column(Boolean, default=False)   # takes the ngwee a split leaves over
+    is_unallocated = Column(Boolean, default=False)   # where income waits while no rules are set
+    created_at     = Column(DateTime, default=datetime.utcnow)
+    updated_at     = Column(DateTime, default=datetime.utcnow)
+
+
+class LedgerTransaction(Base):
+    """One movement of money into or out of one bucket. Amounts are whole minor units
+    (ngwee for ZMW, cents for USD): never a float. Income split across buckets is one row
+    per bucket, all sharing ``entry_id``; the rows of an entry add up to exactly what was
+    received."""
+    __tablename__ = "ledger_transactions"
+
+    id           = Column(Integer, primary_key=True, index=True)
+    entry_id     = Column(String, nullable=False, index=True)   # one thing that happened (a payment, a purchase)
+    created_at   = Column(DateTime, default=datetime.utcnow)
+    occurred_at  = Column(Date, nullable=False, index=True)     # the day it happened, as he said it
+    direction    = Column(String, nullable=False)               # in | out
+    amount_minor = Column(BigInteger, nullable=False)           # always positive
+    currency     = Column(String, nullable=False, default="ZMW")
+    bucket_id    = Column(Integer, ForeignKey("buckets.id"), nullable=False, index=True)
+    category     = Column(String, nullable=True)                # food, data, transport, …; "transfer" between buckets
+    note         = Column(String, nullable=True)
+    income_type  = Column(String, nullable=True)                # which allocation rules split it (client, gift, …)
+    payment_id   = Column(Integer, nullable=True, index=True)   # the CRM payment this money is
+    revenue_id   = Column(Integer, nullable=True, index=True)   # the revenue row this money is
+    batch_id     = Column(String, nullable=True, index=True)    # the change-log batch that wrote it
+
+
+class AllocationRule(Base):
+    """How income of one type is split: this bucket gets ``pct`` of it. ``pct`` is in
+    basis points (1000 = 10%), so there is no float here either. The rules of one income
+    type add up to 10000."""
+    __tablename__ = "allocation_rules"
+
+    id          = Column(Integer, primary_key=True, index=True)
+    income_type = Column(String, nullable=False, index=True)    # "default" covers every type with no rules of its own
+    bucket_id   = Column(Integer, ForeignKey("buckets.id"), nullable=False)
+    pct         = Column(Integer, nullable=False)               # basis points
+    created_at  = Column(DateTime, default=datetime.utcnow)
+

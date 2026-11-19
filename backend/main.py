@@ -59,6 +59,7 @@ app.include_router(_auth.router)
 # ── Routers (rebuild modules) ────────────────────────────────
 import usage as _usage
 import model_routes as _model_routes
+import finance as _finance
 import change_log as _change_log
 import actions as _actions
 import notes as _notes
@@ -67,6 +68,7 @@ import briefing as _briefing
 import voice_realtime as _voice_realtime
 app.include_router(_usage.router)
 app.include_router(_model_routes.router)
+app.include_router(_finance.router)
 app.include_router(_change_log.router)
 app.include_router(_actions.router)
 app.include_router(_notes.router)
@@ -223,6 +225,8 @@ async def startup():
         from migrations.m026_model_router import run as run_m026
         run_m026(db)        # m026 — model_routes, model_prices, llm_usage.provider/task/fallback_from
         llm.reset_routes()  # read the routes the migration just seeded, not an earlier copy
+        from migrations.m027_finance_ledger import run as run_m027
+        run_m027(db)        # m027 — buckets, ledger_transactions, allocation_rules
         _validate_schema(engine)   # raises if any ORM column is absent from the live DB
         _seed_non_negotiables_if_empty(db)
         _verify_seed_integrity(db)
@@ -1638,6 +1642,8 @@ def _apply_parse_updates_inner(db: Session, parsed: dict, today: date) -> dict:
         )
         db.add(rev)
         change_log.record_create(db, rev, f"Revenue {currency} {float(amount):g} from {source or 'unknown'}")
+        import finance
+        finance.on_revenue_logged(db, rev)        # the same money, once, in the personal ledger
         result["revenue_logged"].append({"amount": float(amount), "currency": currency, "source": source})
 
     # ── Project status changes (accepted suggestions only; not in the parser schema) ──
@@ -2744,6 +2750,10 @@ def add_revenue(payload: schemas.RevenueCreate, db: Session = Depends(get_db)):
     data["currency"] = _normalise_currency(data.get("currency"))
     record = Revenue(**data)
     db.add(record)
+    db.flush()
+    import finance
+    with _change_log.batch_scope(db, "ui"):
+        finance.on_revenue_logged(db, record)     # the same money, once, in the personal ledger
     db.commit()
     db.refresh(record)
     return {"id": record.id, "amount": record.amount, "currency": record.currency}

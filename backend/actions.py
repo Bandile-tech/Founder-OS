@@ -57,6 +57,7 @@ DELETABLE = {
     "applications": (models.Application, "name"),
     "application_requirements": (models.ApplicationRequirement, "title"),
     "content_ideas": (models.ContentIdea, "title"),
+    "ledger_transactions": (models.LedgerTransaction, "note"),
 }
 
 

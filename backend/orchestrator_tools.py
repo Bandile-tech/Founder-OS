@@ -698,12 +698,14 @@ SHOW_VIEWS = {
     "changes":   {"limit"},
     "progress":  set(),
     "history":   {"q"},
+    "budget":    {"period"},
     "close":     set(),
 }
 _VIEW_ALIASES = {"home": "close", "todays_brief": "brief", "today": "brief", "tasks": "brief",
                  "notes": "note", "recent_changes": "changes", "undo": "changes", "exams": "deadlines",
                  "conversations": "history", "conversation": "history", "chat_history": "history",
-                 "past_conversations": "history", "chats": "history"}
+                 "past_conversations": "history", "chats": "history", "money": "budget", "finance": "budget",
+                 "finances": "budget", "buckets": "budget", "balances": "budget", "spending": "budget"}
 
 
 def show_view(db, view: str, params: dict | None = None):
@@ -758,6 +760,13 @@ def show_view(db, view: str, params: dict | None = None):
             clean["limit"] = 30
     elif name == "history":
         label = "past conversations" + (f" matching '{clean['q']}'" if clean.get("q") else "")
+    elif name == "budget":
+        import finance
+        try:
+            clean["period"] = str(clean.get("period") or "this_month")
+            label = f"the budget for {finance.period_range(clean['period'])[2]}"
+        except ValueError:
+            clean["period"], label = "this_month", "the budget for this month"
 
     directive = {"view": name, "params": clean}
     result = {"ui_directive": directive, "view": name, "params": clean,
@@ -1410,13 +1419,13 @@ TOOL_SCHEMAS = [
                 "subject and paper, e.g. 'Show me my S1 topics' → view syllabus, paper S1), "
                 "'brief' (today's brief), 'deadlines' (optional days), 'note' (by title), "
                 "'changes' (recent changes with undo), 'progress', 'history' (past conversations, "
-                "optional search q). Use view 'close' when he says "
+                "optional search q), 'budget' (his buckets, money in and out, spending). Use view 'close' when he says "
                 "close, go back or home. Send only the view name and parameters — never HTML."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "view": {"type": "string", "enum": ["syllabus", "brief", "deadlines", "note", "changes", "progress", "history", "close"]},
+                    "view": {"type": "string", "enum": ["syllabus", "brief", "deadlines", "note", "changes", "progress", "history", "budget", "close"]},
                     "params": {
                         "type": "object",
                         "properties": {
@@ -1426,6 +1435,7 @@ TOOL_SCHEMAS = [
                             "title": {"type": "string", "description": "Note title (note)."},
                             "limit": {"type": "integer", "description": "How many changes (changes)."},
                             "q": {"type": "string", "description": "Search words (history)."},
+                            "period": {"type": "string", "description": "this_month, last_month or a month like 2026-11 (budget)."},
                         },
                     },
                 },
@@ -1795,6 +1805,15 @@ def record_payment(db, client: str, amount: float, currency: str | None = None, 
     cur = main._normalise_currency(currency) if currency else (owner.currency or models.default_currency())
     with change_log.batch_scope(db, "assistant"):
         try:
+            if status == "paid":
+                # The same money said twice in one turn (once here, once to the ledger) is
+                # one payment: hand back the one already written.
+                import finance
+                minor = finance.float_to_minor(amount or 0)
+                same = finance._same_batch_payment(db, owner.id, minor, cur) if minor > 0 else None
+                if same is not None:
+                    result = {**crm.serialize_payment(db, same), "already_recorded": True, "client_name": owner.name}
+                    return result, f"{crm.money_label(same.amount, same.currency)} from {owner.name} was already recorded this turn"
             # A payment recorded earlier in this same turn is a separate statement, not an
             # invoice this one settles.
             this_turn = {c["record_id"] for c in change_log.current_batch_changes(db)
@@ -3302,4 +3321,95 @@ _register(
                    "agents", "analysis", "all"]),
      "provider": _str("The provider he named.", ["openai", "claude"]),
      "model": _str("The exact model id, only if he named one.")},
+)
+
+
+# ── Phase 7, Stage 2: the personal finance ledger ────────────
+
+def log_transactions(db, items):
+    import finance
+    return finance.log_transactions(db, items)
+
+
+def set_allocation_rules(db, rules=None, income_type=None, remainder_bucket=None, default_bucket=None,
+                         split_unallocated=False):
+    import finance
+    return finance.set_allocation_rules(db, rules, income_type=income_type, remainder_bucket=remainder_bucket,
+                                        default_bucket_name=default_bucket, split_unallocated=bool(split_unallocated))
+
+
+def get_finance(db, view="balances", period=None, category=None, bucket=None):
+    import finance
+    return finance.get_finance(db, view=view or "balances", period=period, category=category, bucket=bucket)
+
+
+_register(
+    "log_transactions",
+    lambda db, a: log_transactions(db, a.get("items") or a.get("transactions") or []),
+    "Log money Bandile says he spent or received, in his personal ledger. Put EVERYTHING he "
+    "mentioned in one call: 'spent K50 on lunch and K120 on data, got K800 from Bel' is one "
+    "call with three items. Copy each amount exactly as he said it, as text ('K50', "
+    "'1,250.50', '$20'): never add, subtract, convert or split amounts yourself. Income is "
+    "split across his buckets by his own rules; the tool does that. For money received, put "
+    "who it came from in 'from': if that is a client on file, the client payment is recorded "
+    "as well, so do NOT also call record_payment or route_brain_dump for the same money. "
+    "Give a bucket for spending only when he named one. If the result holds a question, ask "
+    "him exactly that and write nothing else. Otherwise reply in one line with the balances "
+    "the result gives.",
+    {"items": {"type": "array", "description": "Every amount he mentioned, in the order he said them.", "items": {
+        "type": "object",
+        "properties": {
+            "type": _str("spent for money out, received for money in.", ["spent", "received"]),
+            "amount": _str("The amount exactly as he said it, e.g. 'K50', '1,250.50', '$20'."),
+            "note": _str("What it was for or about, in a few of his words, e.g. 'lunch', 'data bundle'."),
+            "category": _str("One short word for spending, e.g. food, data, transport, church, school, business."),
+            "bucket": _str("The bucket it came out of, ONLY if he named one."),
+            "from": _str("For money received: who it came from, as he said it."),
+            "income_type": _str("For money received that is not from a client: business when the business "
+                                "earned it, else gift, allowance, salary or other."),
+            "date": _str("The day it happened as he said it, if not today ('yesterday', '12 May')."),
+        },
+        "required": ["type", "amount"]}}},
+    ["items"],
+)
+
+_register(
+    "set_allocation_rules",
+    lambda db, a: set_allocation_rules(db, rules=a.get("rules"), income_type=a.get("income_type"),
+                                       remainder_bucket=a.get("remainder_bucket"),
+                                       default_bucket=a.get("default_bucket"),
+                                       split_unallocated=a.get("split_unallocated")),
+    "Set how Bandile's income is split across his buckets, ONLY when he states it: 'split my "
+    "income 10 tithe, 40 business, 20 invest, 10 save, 20 personal'. Copy his percentages; "
+    "they must add up to 100. Buckets that do not exist are created. Give income_type only "
+    "when he says the split is for one kind of income ('split client money ...'). "
+    "default_bucket is the bucket spending comes out of when he names none; "
+    "remainder_bucket takes the ngwee a split leaves over; set either only when he says so. "
+    "split_unallocated true (with no rules) splits what is waiting in Unallocated, only "
+    "after he says yes to that.",
+    {"rules": {"type": "array", "description": "The split, one entry per bucket.", "items": {
+        "type": "object",
+        "properties": {"bucket": _str("Bucket name as he said it."),
+                       "pct": _str("Its percentage as he said it, e.g. '10' or '12.5'.")},
+        "required": ["bucket", "pct"]}},
+     "income_type": _str("Leave out for all income. Otherwise client, business, gift, allowance, salary."),
+     "remainder_bucket": _str("Bucket that takes leftover ngwee, only if he names it."),
+     "default_bucket": _str("Bucket spending comes out of by default, only if he names it."),
+     "split_unallocated": {"type": "boolean", "description": "True to split what waits in Unallocated, after his yes."}},
+)
+
+_register(
+    "get_finance",
+    lambda db, a: get_finance(db, view=a.get("view"), period=a.get("period"), category=a.get("category"),
+                              bucket=a.get("bucket")),
+    "Read Bandile's personal ledger. view balances: what is in each bucket now. view "
+    "spending: what he spent in a period, by category (give category for one). view "
+    "summary: balances, money in and out and spending for a period. view transactions: the "
+    "entries of a period (optionally one bucket or category). Every figure comes from here: "
+    "never add up or estimate money yourself. Read-only.",
+    {"view": _str("What to read (default balances).", ["balances", "spending", "summary", "transactions"]),
+     "period": _str("this_month (default), last_month, today, this_week, last_7_days, last_30_days, "
+                    "this_year, all, or a month like 2026-11."),
+     "category": _str("One spending category, e.g. food."),
+     "bucket": _str("One bucket (transactions view).")},
 )

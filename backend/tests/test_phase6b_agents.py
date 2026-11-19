@@ -486,7 +486,8 @@ def test_shipped_agents_have_the_documented_defaults():
     assert list(r) == ["crm_housekeeper", "lead_qualifier", "follow_up_sentinel", "portfolio_reviewer",
                        "brand_sync", "market_intel"]
     assert r["crm_housekeeper"].schedule.interval_minutes == 60 and r["crm_housekeeper"].permissions.max_llm_calls == 0
-    assert r["crm_housekeeper"].permissions.tables_write == ["payments", "recurring_revenue", "clients", "projects"]
+    assert r["crm_housekeeper"].permissions.tables_write == [
+        "payments", "recurring_revenue", "clients", "projects", "ledger_transactions", "buckets"]
     assert r["lead_qualifier"].schedule.interval_minutes == 180 and r["lead_qualifier"].permissions.max_llm_calls == 20
     assert r["lead_qualifier"].permissions.tables_write == ["leads"]
     assert r["follow_up_sentinel"].schedule.at_time == "05:30" and r["follow_up_sentinel"].events == ["lead.replied"]
