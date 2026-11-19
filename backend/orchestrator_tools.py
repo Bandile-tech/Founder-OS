@@ -2899,6 +2899,7 @@ def notification_settings(db, **fields):
     out = {"enabled": s["enabled"], "morning_time": s["morning_time"],
            "evening_time": s["evening_time"] or "off", "quiet_hours": f"{s['quiet_start']} to {s['quiet_end']}",
            "alert_min_severity": s["alert_min_severity"], "daily_cap": s["daily_cap"],
+           "exam_and_application_reminder_days": s["deadline_days"], "task_reminder_days": s["task_deadline_days"],
            "telegram_paired": s["paired"], "change": result["change"]}
     return out, result["summary"]
 
@@ -2918,15 +2919,19 @@ _register(
     lambda db, a: notification_settings(
         db, morning_time=a.get("morning_time"), evening_time=a.get("evening_time"),
         quiet_start=a.get("quiet_start"), quiet_end=a.get("quiet_end"),
-        alert_min_severity=a.get("alert_min_severity"), daily_cap=a.get("daily_cap"), enabled=a.get("enabled")),
+        alert_min_severity=a.get("alert_min_severity"), daily_cap=a.get("daily_cap"), enabled=a.get("enabled"),
+        deadline_days=a.get("deadline_days"), task_deadline_days=a.get("task_deadline_days")),
     "Read the notification settings, or change them when Bandile says to (\"send the briefing "
-    "at 5:45\", \"no messages after 9pm\"). With no arguments it only reads.",
+    "at 5:45\", \"no messages after 9pm\", \"remind me about tasks a week before too\"). With no "
+    "arguments it only reads.",
     {"morning_time": _str("When the morning briefing goes out, HH:MM."),
      "evening_time": _str("When the evening review goes out, HH:MM, or 'off'."),
      "quiet_start": _str("Start of quiet hours, HH:MM."), "quiet_end": _str("End of quiet hours, HH:MM."),
      "alert_min_severity": _str("The least serious alert worth a message.", ["info", "warn", "critical"]),
      "daily_cap": _int("The most messages in a day."),
-     "enabled": {"type": "boolean", "description": "Turn notifications on or off."}},
+     "enabled": {"type": "boolean", "description": "Turn notifications on or off."},
+     "deadline_days": _str("Days before an exam or an application deadline to remind him, e.g. '30, 14, 7, 3, 1'."),
+     "task_deadline_days": _str("Days before a task is due to remind him, e.g. '3, 1'.")},
 )
 
 

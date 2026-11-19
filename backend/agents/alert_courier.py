@@ -133,10 +133,12 @@ def run(ctx) -> AgentResult:
                            "body": f"{name} exam {_days(days)} ({_short_date(exam['exam_date'])}).",
                            "dedupe_key": f"deadline:exam:{exam['subject_code']}:{exam['paper'] or ''}:{days}"})
 
-    # Tasks with a date: a reminder at each mark (30, 14, 7, 3 and 1 days out by default).
+    # Tasks with a date have reminder days of their own (3 and 1 days out by default):
+    # a task is nearer and smaller than an exam, and a month's notice of it is noise.
+    task_marks = set(notify.task_deadline_days(settings))
     for todo in ctx.db.query(models.Todo).filter(models.Todo.done.is_(False), models.Todo.due_date.isnot(None)).all():
         days = (todo.due_date - ctx.today).days
-        if days in marks and days > 0:
+        if days in task_marks and days > 0:
             wanted.append({"kind": "deadline", "title": "Deadline", "target": "home",
                            "body": f"{todo.text} is due {_days(days)} ({_short_date(todo.due_date.isoformat())}).",
                            "dedupe_key": f"deadline:todo:{todo.id}:{days}"})
@@ -176,7 +178,8 @@ def run(ctx) -> AgentResult:
 SPEC = agents.register(AgentSpec(
     key="alert_courier", name="Alert courier",
     description="Sends an alert when something crosses a threshold: an off-track rule, a payment due or "
-                "overdue, a deadline or an exam 30, 14, 7, 3 and 1 days out, the AI spend cap. Once each.",
+                "overdue, an exam or an application deadline coming up, a task due in a few days, the AI "
+                "spend cap. Once each. The reminder days are in the notification settings.",
     schedule=Schedule(interval_minutes=15), events=EVENTS,
     permissions=Permissions(tools=[], tables_write=[], may_notify=True, max_llm_calls=0),
     run=run, phase="6",

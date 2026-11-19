@@ -1135,7 +1135,11 @@ All need a session except `POST /vault/webhook`. Money amounts are whole minor u
   503 with no VAPID keys.
 - `POST /push/unsubscribe` body `{endpoint}` → `{subscribed: false, …}`.
 - `GET /notifications/settings` (changed) → adds `channel` (`"push"`, `"telegram"` or null),
-  `push: {configured, public_key, subscriptions}`, `quiet_hours_env`.
+  `push: {configured, public_key, subscriptions}`, `quiet_hours_env`, and `task_deadline_days`
+  (days before a task is due; `deadline_days` is for exams and applications).
+- `PATCH /notifications/settings` (changed) also takes `deadline_days` and `task_deadline_days`:
+  a list of numbers or text such as `"3, 1"`. 422 for anything that is not one to ten numbers
+  between 0 and 365.
 - `GET /notifications` (changed): each row has `target`; `channel` may be `"push"`.
 - `GET /briefing/today` (changed) → adds `scheduler: {last_run_at, label, hours_ago,
   expected, stale}`; `delivery` gains `reachable`; `alerts` may hold `llm_cost_cap` and

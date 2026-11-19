@@ -7,7 +7,7 @@ The keys below are made for the test and sign nothing real.
   1. subscribing a device, and which endpoints the server will post to
   2. a notification leaves by push when a device is on, with a view to open
   3. what is pushed, all of it deterministic: the morning briefing (greeting line and the
-     top three items), the evening check, reminders 30, 14, 7, 3 and 1 days out, payments due,
+     top three items), the evening check, reminders before exams, applications and tasks, payments due,
      the cost-cap alert
   4. QUIET_HOURS: nothing at all inside the window
   5. the schedule: three wakes a day, "last scheduled run" in the briefing, an alert past 26 hours
@@ -259,33 +259,119 @@ def test_the_evening_check_says_what_is_still_open_and_what_carried_over(pushed)
     db.close()
 
 
-def test_reminders_go_out_on_each_mark_before_a_deadline_and_only_once(pushed):
-    _device()
-    db = _db()
+def _deadline_notes(pushed):
+    notes = {p["tag"]: p for p in pushed if p["tag"].startswith("deadline:")}
+    tasks = sorted(p["body"] for tag, p in notes.items() if tag.startswith("deadline:todo:"))
+    exams = sorted(p["body"] for tag, p in notes.items() if tag.startswith("deadline:exam:"))
+    return notes, tasks, exams
+
+
+def _seed_deadlines(db):
     for days, text in ((7, "Scholarship essay"), (3, "Renew the domain"), (1, "Pay the exam fee"),
-                       (5, "Not on a mark"), (0, "Due today"), (14, "Two weeks out"), (21, "Three weeks out")):
+                       (5, "Not on a mark"), (0, "Due today"), (14, "Two weeks out"), (30, "A month out")):
         db.add(models.Todo(text=text, done=False, due_date=TODAY + timedelta(days=days)))
     db.add(models.Todo(text="Already done", done=True, due_date=TODAY + timedelta(days=3)))
-    db.add(models.ExamDate(subject_code="9709", paper="P1", exam_date=TODAY + timedelta(days=3)))
-    db.add(models.ExamDate(subject_code="9708", paper="P2", exam_date=TODAY + timedelta(days=30)))
-    db.add(models.ExamDate(subject_code="9609", paper="P1", exam_date=TODAY + timedelta(days=10)))
+    for code, paper, days in (("9709", "P1", 3), ("9708", "P2", 30), ("9609", "P1", 10), ("9231", "P1", 14)):
+        db.add(models.ExamDate(subject_code=code, paper=paper, exam_date=TODAY + timedelta(days=days)))
     db.commit()
-    assert notify.deadline_days(notify.settings(db)) == [30, 14, 7, 3, 1]      # the marks Phase 6 shipped, untouched
+
+
+def test_reminder_days_are_two_settings_exams_get_the_long_run_up_and_tasks_three_and_one(pushed):
+    _device()
+    db = _db()
+    _seed_deadlines(db)
+    settings = notify.settings(db)
+    assert notify.deadline_days(settings) == [30, 14, 7, 3, 1]       # exams and applications: as Phase 6 shipped
+    assert notify.task_deadline_days(settings) == [3, 1]             # tasks with a due date
 
     _run(alert_courier.SPEC, utc(5, 47))
-    deadlines = {p["tag"]: p for p in pushed if p["tag"].startswith("deadline:")}
-    todo_notes = sorted(p["body"] for tag, p in deadlines.items() if tag.startswith("deadline:todo:"))
-    assert todo_notes == ["Pay the exam fee is due tomorrow (13 Nov).", "Renew the domain is due in 3 days (15 Nov).",
-                          "Scholarship essay is due in 7 days (19 Nov).", "Two weeks out is due in 14 days (26 Nov)."]
-    exams = sorted(p["body"] for tag, p in deadlines.items() if tag.startswith("deadline:exam:"))
-    assert exams == ["Economics 9708 P2 exam in 30 days (12 Dec).", "Maths 9709 P1 exam in 3 days (15 Nov)."]
-    assert all(p["url"] == "/app/#go=syllabus" for tag, p in deadlines.items() if tag.startswith("deadline:exam:"))
-    assert len(deadlines) == 6                               # nothing for 5, 10 or 21 days out, today, or a finished task
+    notes, tasks, exams = _deadline_notes(pushed)
+    # Tasks: 3 days and 1 day out only. Nothing at 7, 14 or 30 days, on the day, off a mark, or once done.
+    assert tasks == ["Pay the exam fee is due tomorrow (13 Nov).", "Renew the domain is due in 3 days (15 Nov)."]
+    # Exams: every one of the long marks that falls today (30, 14 and 3 days here; 10 is not a mark).
+    assert exams == ["Economics 9708 P2 exam in 30 days (12 Dec).", "Further Maths 9231 P1 exam in 14 days (26 Nov).",
+                     "Maths 9709 P1 exam in 3 days (15 Nov)."]
+    assert all(p["url"] == "/app/#go=syllabus" for tag, p in notes.items() if tag.startswith("deadline:exam:"))
+    assert len(notes) == 5
     count = len(pushed)
     _run(alert_courier.SPEC, utc(12, 31))
     _run(alert_courier.SPEC, utc(19, 47))
     assert len(pushed) == count                              # each reminder once, however often the schedule runs
     db.close()
+
+
+def test_each_reminder_setting_is_read_from_the_settings_row_and_changes_only_its_own_kind(pushed):
+    _device()
+    db = _db()
+    _seed_deadlines(db)
+    # "Remind me about tasks a week before too": the task days change, the exam days do not.
+    body = client.patch("/notifications/settings", json={"task_deadline_days": "7, 3 and 1"}).json()
+    assert body["task_deadline_days"] == [7, 3, 1] and body["deadline_days"] == [30, 14, 7, 3, 1]
+    assert body["change"]["summary"] == "Notifications: task reminders 7, 3, 1 days before"
+    # And the other way round: exams one week out only.
+    assert client.patch("/notifications/settings", json={"deadline_days": [7]}).json()["deadline_days"] == [7]
+    assert client.get("/notifications/settings").json()["task_deadline_days"] == [7, 3, 1]
+
+    _run(alert_courier.SPEC, utc(5, 47))
+    _notes, tasks, exams = _deadline_notes(pushed)
+    assert tasks == ["Pay the exam fee is due tomorrow (13 Nov).", "Renew the domain is due in 3 days (15 Nov).",
+                     "Scholarship essay is due in 7 days (19 Nov)."]
+    assert exams == []                                       # no exam is exactly 7 days out
+    db.close()
+
+    for bad in ({"task_deadline_days": "soon"}, {"task_deadline_days": []}, {"deadline_days": [400]},
+                {"task_deadline_days": "3, x"}, {"deadline_days": "-1"}):
+        assert client.patch("/notifications/settings", json=bad).status_code == 422, bad
+    assert client.get("/notifications/settings").json()["task_deadline_days"] == [7, 3, 1]       # a bad value changes nothing
+    # A change is logged like any other setting, and undone the same way.
+    assert client.post(f"/changes/{body['change']['id']}/undo").status_code == 200
+    assert client.get("/notifications/settings").json()["task_deadline_days"] == [3, 1]
+
+
+def test_the_settings_tool_reads_and_changes_both_reminder_settings():
+    import orchestrator_tools as ot
+    db = _db()
+    read, _summary = ot.run_tool("notification_settings", {}, db)
+    assert read["exam_and_application_reminder_days"] == [30, 14, 7, 3, 1] and read["task_reminder_days"] == [3, 1]
+    changed, summary = ot.run_tool("notification_settings", {"task_deadline_days": "14, 3, 1"}, db)
+    assert changed["task_reminder_days"] == [14, 3, 1] and changed["exam_and_application_reminder_days"] == [30, 14, 7, 3, 1]
+    assert summary == "Notifications: task reminders 14, 3, 1 days before"
+    bad, _summary = ot.run_tool("notification_settings", {"deadline_days": "whenever"}, db)
+    assert "error" in bad
+    # An empty or unreadable stored value falls back to the default for its own kind.
+    row = notify.settings(db)
+    row.task_deadline_days_json, row.deadline_days_json = None, "not json"
+    db.commit()
+    assert notify.task_deadline_days(row) == [3, 1] and notify.deadline_days(row) == [30, 14, 7, 3, 1]
+    db.close()
+
+
+def test_m029_sets_the_task_days_once_and_leaves_a_value_already_there():
+    """The same rule as the briefing times: only a value that is still the shipped one moves."""
+    from sqlalchemy import create_engine, text
+    from migrations import m029_web_push
+
+    def migrated(setup: str) -> tuple:
+        engine = create_engine("sqlite://")
+        with engine.begin() as conn:
+            conn.execute(text("CREATE TABLE notifications (id INTEGER PRIMARY KEY, body TEXT)"))
+            conn.execute(text(
+                "CREATE TABLE notification_settings (id INTEGER PRIMARY KEY, morning_time VARCHAR, evening_time VARCHAR, "
+                "channels_json TEXT, deadline_days_json TEXT)"))
+            conn.execute(text(setup))
+        for _ in range(2):                                   # it runs on every startup
+            with patch.object(m029_web_push, "engine", engine):
+                m029_web_push.run()
+        with engine.connect() as conn:
+            return tuple(conn.execute(text(
+                "SELECT morning_time, evening_time, deadline_days_json, task_deadline_days_json, channels_json "
+                "FROM notification_settings WHERE id = 1")).first())
+
+    shipped = migrated("INSERT INTO notification_settings VALUES (1, '06:00', NULL, '{\"telegram\": true}', '[30, 14, 7, 3, 1]')")
+    assert shipped == ("05:45", "19:45", "[30, 14, 7, 3, 1]", "[3, 1]", '{"telegram": true, "push": true}')
+    # Values he set himself are left alone, and so are the exam and application days whatever they hold.
+    own = migrated("INSERT INTO notification_settings VALUES (1, '06:30', '21:00', '{\"telegram\": false}', '[14, 2]')")
+    assert own == ("06:30", "21:00", "[14, 2]", "[3, 1]", '{"telegram": false}')
 
 
 def test_a_client_payment_due_today_and_one_overdue_are_pushed_to_the_clients_tab(pushed):

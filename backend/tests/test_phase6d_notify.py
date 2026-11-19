@@ -668,6 +668,7 @@ def test_settings_endpoint_returns_defaults_and_pairing_details(monkeypatch):
     assert (body["quiet_start"], body["quiet_end"]) == ("22:00", "05:00")
     assert body["alert_min_severity"] == "warn" and body["daily_cap"] == 12
     assert body["channels"] == {"telegram": True, "push": True} and body["deadline_days"] == [30, 14, 7, 3, 1]
+    assert body["task_deadline_days"] == [3, 1]             # tasks have reminder days of their own
     assert body["channel"] is None and body["push"] == {"configured": False, "public_key": None, "subscriptions": 0}
     assert body["paired"] is False and body["channel_configured"] is True
     assert body["bot_link"] == "https://t.me/FounderOsBot" and body["pair_code"] == tg.pair_code(_db())

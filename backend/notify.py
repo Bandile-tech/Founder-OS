@@ -50,7 +50,10 @@ API = "https://api.telegram.org"
 # 12:30 and 19:45 in FOUNDER_OS_TZ: .github/workflows/jobs-tick.yml).
 DEFAULTS = {"enabled": True, "morning_time": "05:45", "evening_time": "19:45", "quiet_start": "22:00",
             "quiet_end": "05:00", "alert_min_severity": "warn", "daily_cap": 12,
-            "channels_json": '{"telegram": true, "push": true}', "deadline_days_json": "[30, 14, 7, 3, 1]"}
+            "channels_json": '{"telegram": true, "push": true}',
+            # Reminder days are two settings: exams and applications, and tasks with a due date.
+            "deadline_days_json": "[30, 14, 7, 3, 1]", "task_deadline_days_json": "[3, 1]"}
+MAX_REMINDER_DAYS = 365
 PUSH_BODY_LIMIT = 500
 # The view a tap on a notification opens, by kind, when the sender names none.
 DEFAULT_TARGETS = {"briefing": "home", "evening": "home", "alert": "home", "deadline": "home",
@@ -87,12 +90,43 @@ def _channels(s) -> dict:
     return data if isinstance(data, dict) else {}
 
 
+def _days(stored, default_key: str) -> list[int]:
+    """A stored list of reminder days, newest mark last; the default when it is empty or unreadable."""
+    for text in (stored, DEFAULTS[default_key]):
+        try:
+            marks = sorted({int(d) for d in json.loads(text or "[]") if int(d) >= 0}, reverse=True)
+        except (ValueError, TypeError):
+            marks = []
+        if marks:
+            return marks
+    return []
+
+
 def deadline_days(s) -> list[int]:
+    """How many days before an EXAM or an APPLICATION deadline a reminder goes out."""
+    return _days(s.deadline_days_json, "deadline_days_json")
+
+
+def task_deadline_days(s) -> list[int]:
+    """How many days before a TASK is due a reminder goes out."""
+    return _days(getattr(s, "task_deadline_days_json", None), "task_deadline_days_json")
+
+
+def _clean_days(value) -> list[int]:
+    """Reminder days as he gave them ([3, 1], "3 and 1", "7, 3, 1") → [7, 3, 1]."""
+    if isinstance(value, (list, tuple)):
+        parts = list(value)
+    else:
+        parts = re.findall(r"-?\d+", str(value))
+        if not parts or re.sub(r"[\d\s,;&-]|and|days?|day", "", str(value).lower()).strip():
+            raise ValueError(f"'{value}' is not a list of days like 3, 1")
     try:
-        marks = [int(d) for d in json.loads(s.deadline_days_json or "[]")]
+        marks = sorted({int(d) for d in parts}, reverse=True)
     except (ValueError, TypeError):
-        marks = []
-    return sorted({m for m in marks if m >= 0}, reverse=True) or [30, 14, 7, 3, 1]
+        raise ValueError(f"'{value}' is not a list of days like 3, 1")
+    if not marks or len(marks) > 10 or marks[-1] < 0 or marks[0] > MAX_REMINDER_DAYS:
+        raise ValueError(f"reminder days must be one to ten numbers between 0 and {MAX_REMINDER_DAYS}")
+    return marks
 
 
 def serialize_settings(db: Session, s) -> dict:
@@ -100,6 +134,7 @@ def serialize_settings(db: Session, s) -> dict:
         "enabled": bool(s.enabled), "morning_time": s.morning_time, "evening_time": s.evening_time,
         "quiet_start": s.quiet_start, "quiet_end": s.quiet_end, "alert_min_severity": s.alert_min_severity,
         "daily_cap": s.daily_cap, "channels": _channels(s), "deadline_days": deadline_days(s),
+        "task_deadline_days": task_deadline_days(s),
         "muted_until": s.muted_until, "updated_at": s.updated_at,
         "paired": integrations_telegram.is_paired(db),
         # Which channel a message would leave by right now (push first; None when nothing can be reached).
@@ -159,6 +194,12 @@ def update_settings(db: Session, fields: dict, source: str | None = None) -> dic
             raise ValueError("the daily cap must be between 0 and 100")
         s.daily_cap = cap
         said.append(f"at most {cap} a day")
+    for key, column, label in (("deadline_days", "deadline_days_json", "exam and application reminders"),
+                               ("task_deadline_days", "task_deadline_days_json", "task reminders")):
+        if fields.get(key) is not None:
+            marks = _clean_days(fields[key])
+            setattr(s, column, json.dumps(marks))
+            said.append(f"{label} {', '.join(str(m) for m in marks)} day{'s' if marks != [1] else ''} before")
     if not said:
         return {"settings": serialize_settings(db, s), "change": None, "summary": "nothing changed"}
     s.updated_at = datetime.utcnow()

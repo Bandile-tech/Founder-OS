@@ -5,16 +5,20 @@ New table:
   push_subscriptions — one row per device that turned notifications on: the endpoint at
                        the browser's push service and the two keys a message is encrypted with
 
-Column added:
+Columns added:
   notifications.target — the view a tap on the notification opens ("home", "applications",
                          "business:clients", …)
+  notification_settings.task_deadline_days_json — how many days before a TASK is due a
+                         reminder goes out. Exams and applications keep their own setting,
+                         ``deadline_days_json``, which this migration does not touch.
 
 The notification settings row (id 1) is moved to the three daily wakes, once, and only
 where it still holds the value it shipped with (a value Bandile set himself is left alone):
   morning_time   06:00            → 05:45   (the morning wake; at 06:00 it would wait until 12:30)
   evening_time   not set          → 19:45   (the evening check, on the evening wake)
   channels       telegram         → telegram and push
-The reminder days (30, 14, 7, 3 and 1 days out) are not touched.
+  task reminder days  not set     → 3, 1    (the new column: tasks are reminded 3 days and 1 day out)
+The reminder days for exams and applications (30, 14, 7, 3 and 1 days out) are not touched.
 
 SQLite + Postgres. Idempotent. No drops. RLS enabled on the new table (Postgres).
 """
@@ -52,6 +56,7 @@ _SETTINGS = [
     ("morning_time", "06:00", "05:45"),
     ("evening_time", None, "19:45"),
     ("channels_json", '{"telegram": true}', '{"telegram": true, "push": true}'),
+    ("task_deadline_days_json", None, "[3, 1]"),
 ]
 
 
@@ -63,6 +68,7 @@ def run(db=None):
             for table, sql in _TABLES.items():
                 create_table_if_missing(conn, d, table, sql, TAG)
             add_column_if_missing(conn, d, "notifications", "target", "VARCHAR", TAG)
+            add_column_if_missing(conn, d, "notification_settings", "task_deadline_days_json", "TEXT", TAG)
             if table_exists(conn, d, "notification_settings") and claim_once(conn, d, "m029:notification_defaults", TAG):
                 for column, old, new in _SETTINGS:
                     where = f"{column} IS NULL" if old is None else f"{column} = :old"
