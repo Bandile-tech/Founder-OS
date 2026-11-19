@@ -137,9 +137,11 @@ class TestNoKey:
         assert [r.role for r in rows] == ["user", "assistant"]
         assert "not configured" in rows[-1].content
 
-    def test_lazy_client_raises_cleanly(self):
+    def test_a_call_with_no_key_raises_cleanly(self):
         with pytest.raises(llm.AIUnavailable):
-            llm.get_client()
+            llm.complete("assistant", [{"role": "user", "content": "hi"}])
+        with pytest.raises(llm.AIUnavailable):
+            llm.embed_texts(["hi"])
 
 
 # ════════════════════════════════════════════════════════════════
@@ -368,14 +370,22 @@ class TestModelConfigAndUsage:
     def test_default_model(self):
         assert llm.assistant_model() == "gpt-5.4-mini"
 
-    def test_env_override(self, monkeypatch):
+    def test_env_seeds_the_route(self, monkeypatch):
+        """ASSISTANT_MODEL names the model a new database starts with. After that the
+        table decides: changing the variable alone changes nothing."""
+        from tests.conftest import reseed_routes, reload_routes
         monkeypatch.setenv("ASSISTANT_MODEL", "gpt-5.4")
+        reload_routes()
+        assert llm.assistant_model() == "gpt-5.4-mini"          # already seeded: the table wins
+        reseed_routes()
         assert llm.assistant_model() == "gpt-5.4"
         import openai_client
         assert openai_client.orchestrator_model() == "gpt-5.4"
 
     def test_legacy_env_still_honoured(self, monkeypatch):
+        from tests.conftest import reseed_routes
         monkeypatch.setenv("ORCHESTRATOR_MODEL", "legacy-model")
+        reseed_routes()
         assert llm.assistant_model() == "legacy-model"
 
     def test_usage_logged_and_summarised(self):

@@ -10,10 +10,11 @@ Real-time voice (Rebuild Stage 5).
   POST /voice/realtime/transcript  save a user or assistant transcript line into the
                                    default conversation thread.
 
-Model: ``REALTIME_MODEL`` (default ``gpt-realtime-2.1-mini`` — the current mini realtime
-model on OpenAI's models page as of 2026-11-05; ``gpt-realtime-mini`` still exists). ``REALTIME_VOICE`` picks the
-output voice (default ``marin``). ``REALTIME_TRANSCRIBE_MODEL`` is the input transcription
-model (default ``gpt-4o-mini-transcribe``).
+Real-time voice stays on OpenAI. The model is the ``realtime`` route, the output voice is
+that route's ``voice`` parameter, and the input transcription model is the
+``realtime_transcribe`` route (all seeded by m026 from ``REALTIME_MODEL``, ``REALTIME_VOICE``
+and ``REALTIME_TRANSCRIBE_MODEL``). The tool calls the voice model makes run on this
+server, through the same registry as the typed assistant.
 
 The upstream request shapes follow OpenAI's Realtime WebRTC guide (checked 2026-11-05):
 ``POST /v1/realtime/client_secrets`` with ``{"session": {"type": "realtime", "model", "audio":
@@ -23,7 +24,6 @@ the session request, the 502 body carries its own error message.
 """
 
 import json
-import os
 import time
 import uuid
 from typing import Any, Optional
@@ -41,10 +41,9 @@ from database import get_db
 
 router = APIRouter()
 
-DEFAULT_REALTIME_MODEL = "gpt-realtime-2.1-mini"
-DEFAULT_REALTIME_VOICE = "marin"
-DEFAULT_TRANSCRIBE_MODEL = "gpt-4o-mini-transcribe"
-OPENAI_REALTIME_BASE = os.getenv("OPENAI_REALTIME_BASE", "https://api.openai.com/v1/realtime")
+from llm_adapters import openai_adapter
+
+OPENAI_REALTIME_BASE = openai_adapter.REALTIME_BASE
 CLIENT_SECRET_TTL_SECONDS = 600
 SILENCE_TIMEOUT_SECONDS = 120   # the browser ends the session after this much silence
 
@@ -62,15 +61,15 @@ VOICE_UNAVAILABLE = "Voice isn't available right now. Please try again in a mome
 
 
 def realtime_model() -> str:
-    return os.getenv("REALTIME_MODEL") or DEFAULT_REALTIME_MODEL
+    return llm.model_for("realtime")
 
 
 def realtime_voice() -> str:
-    return os.getenv("REALTIME_VOICE") or DEFAULT_REALTIME_VOICE
+    return llm.route("realtime").params.get("voice") or "alloy"
 
 
 def transcribe_model() -> str:
-    return os.getenv("REALTIME_TRANSCRIBE_MODEL") or DEFAULT_TRANSCRIBE_MODEL
+    return llm.model_for("realtime_transcribe")
 
 
 def realtime_tools() -> list[dict]:
@@ -128,11 +127,7 @@ def create_realtime_session(db: Session = Depends(get_db)):
     }
     started = time.monotonic()
     try:
-        resp = httpx.post(
-            f"{OPENAI_REALTIME_BASE}/client_secrets",
-            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-            json=body, timeout=20.0,
-        )
+        resp = openai_adapter.realtime_client_secret(body)
     except httpx.HTTPError as exc:
         print(f"[voice] could not reach OpenAI realtime: {exc}")
         raise HTTPException(502, VOICE_UNAVAILABLE)

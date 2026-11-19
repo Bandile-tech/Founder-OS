@@ -545,7 +545,7 @@ def qualify(db: Session, lead_ids: list[int]) -> list[dict]:
     ids = [int(i) for i in (lead_ids or [])]
     if len(ids) > QUALIFY_MAX:
         raise ValueError(f"max {QUALIFY_MAX} per call")
-    configured = llm.is_configured()
+    configured = llm.is_configured("agents")
     results = []
     for lead_id in ids:
         lead = db.query(models.Lead).filter(models.Lead.id == lead_id).first()
@@ -586,7 +586,7 @@ def qualify(db: Session, lead_ids: list[int]) -> list[dict]:
         lead.qualification_score = score
         lead.qualification_json = json.dumps({
             "fit": fit, "reasons": reasons, "disqualifiers": disqualifiers,
-            "suggested_angle": angle, "model": llm.assistant_model(),
+            "suggested_angle": angle, "model": llm.model_for("agents"),
             "scored_at": datetime.utcnow().isoformat(timespec="seconds")})
         # Only a lead that has not been contacted yet changes status on a score.
         if outcome != "below_threshold" and lead.status in ("new", "qualified", "disqualified"):

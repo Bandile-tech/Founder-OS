@@ -454,9 +454,9 @@ def review_gaps(db: Session, app: models.Application, *, refresh: bool = False) 
     The caller commits."""
     if review_is_fresh(app) and not refresh:
         return _gaps_result(db, app, cached=True)
-    if not llm.is_configured():
+    if not llm.is_configured("agents"):
         if refresh:
-            raise llm.AIUnavailable("OPENAI_API_KEY is not set — AI features are disabled.")
+            raise llm.AIUnavailable("No model provider key is set — AI features are disabled.")
         return _gaps_result(db, app, cached=True, stale=True)
 
     raw = llm.chat_text(

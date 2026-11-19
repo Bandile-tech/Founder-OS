@@ -179,7 +179,7 @@ class ConversationSummary(Base):
 
 
 class LLMUsage(Base):
-    """One row per OpenAI call — feeds GET /usage/summary."""
+    """One row per model call, whichever provider served it — feeds GET /usage/summary."""
     __tablename__ = "llm_usage"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -192,6 +192,9 @@ class LLMUsage(Base):
     estimated_cost_usd = Column(Float, default=0.0)
     duration_ms = Column(Integer, nullable=True)
     agent_run_id = Column(Integer, nullable=True, index=True)   # the agent run that made the call
+    provider = Column(String, nullable=True)                    # openai | anthropic
+    task = Column(String, nullable=True)                        # the route it went through (llm.TASKS)
+    fallback_from = Column(String, nullable=True)               # "provider:model" that failed first, when this call is the retry
 
 
 class BibleEntry(Base):
@@ -1391,3 +1394,40 @@ class NotificationSettings(Base):
     deadline_days_json = Column(Text, nullable=True)       # [30, 14, 7, 3, 1]
     muted_until        = Column(DateTime, nullable=True)   # naive UTC; /mute sets it
     updated_at         = Column(DateTime, default=datetime.utcnow)
+
+
+# ── PHASE 7, STAGE 1: MODEL ROUTER ───────────────────────────
+
+class ModelRoute(Base):
+    """Which provider and model a task uses. One row per task (``llm.TASKS``). Seeded by
+    m026 from the environment; after that this table is the source of truth, and every
+    change goes through the change log."""
+    __tablename__ = "model_routes"
+
+    id          = Column(Integer, primary_key=True, index=True)
+    task        = Column(String, nullable=False, unique=True)
+    provider    = Column(String, nullable=False)          # openai | anthropic
+    model       = Column(String, nullable=False)
+    params_json = Column(Text, nullable=True)             # only these are sent with a call
+    updated_at  = Column(DateTime, default=datetime.utcnow)
+
+
+class ModelPrice(Base):
+    """A model Founder OS knows: who serves it, what it costs (USD per million tokens),
+    its counterpart on the other provider and the parameters a route to it starts with.
+    Seeded by m026; nothing in the code names a model or a price."""
+    __tablename__ = "model_prices"
+
+    id                    = Column(Integer, primary_key=True, index=True)
+    model                 = Column(String, nullable=False, unique=True)
+    provider              = Column(String, nullable=False)
+    kind                  = Column(String, nullable=False, default="chat")   # chat|embedding|audio|realtime
+    input_per_mtok        = Column(Float, nullable=True)
+    cached_input_per_mtok = Column(Float, nullable=True)
+    cache_write_per_mtok  = Column(Float, nullable=True)
+    output_per_mtok       = Column(Float, nullable=True)
+    fallback_model        = Column(String, nullable=True)   # the matching tier on the other provider
+    default_params_json   = Column(Text, nullable=True)
+    confirmed             = Column(Boolean, default=False)  # checked against the provider's price page
+    note                  = Column(String, nullable=True)
+    updated_at            = Column(DateTime, default=datetime.utcnow)

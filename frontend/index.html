@@ -442,6 +442,7 @@ button.chip:active{transform:scale(0.97)}
 .input--file{padding:9px var(--sp-3);height:auto}
 .form-row .push{margin-left:auto}
 .row--wrap{flex-wrap:wrap;row-gap:var(--sp-2)}
+.row > .select{flex:0 1 260px;width:auto;min-width:0}
 .row--wrap .row-main{flex:1 1 220px}
 .toggle--sm{height:32px;min-width:84px;padding:0 var(--sp-3)}
 .dot.blue{--c:var(--blue)}
@@ -1300,6 +1301,7 @@ button.home-tile:active{transform:scale(0.98)}
           <div class="row"><div class="check checked" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5l3.2 3L13 4.5"/></svg></div><span class="dot dot--sm"></span><div class="row-main"><div class="row-title">A completed row</div></div><span class="row-meta overdue">Due Nov 7</span></div>
           <div class="row"><div class="check" aria-hidden="true"></div><span class="dot dot--sm"></span><div class="row-main"><div class="row-title">A row with a subtitle</div><div class="row-sub">Secondary line in --fs-xs</div></div><span class="row-meta">19:00</span></div>
           <div class="row is-now"><span class="dot glow"></span><div class="row-main"><div class="row-title">The current row</div></div><span class="row-meta">Now</span></div>
+          <div class="row row--wrap"><div class="row-main"><div class="row-title">A row with a choice</div><div class="row-sub wrap">One tap changes it; the change shows with Undo.</div></div><span class="row-meta">$0.42</span><select class="select" aria-label="Example choice"><option>First option</option><option>Second option</option></select></div>
         </div>
         <div class="section-label">Messages</div>
         <div class="list">
@@ -1351,6 +1353,12 @@ button.home-tile:active{transform:scale(0.98)}
         <div class="card">
           <div class="card-head"><div class="card-title"><span>Notifications</span></div><span class="badge badge--muted" id="set-notif-state">—</span></div>
           <div id="set-notifications"><div class="skel skel-row"></div><div class="skel skel-row"></div></div>
+        </div>
+      </div>
+      <div class="grid">
+        <div class="card">
+          <div class="card-head"><div class="card-title"><span>Models</span></div><span class="badge badge--muted" id="set-models-spend">—</span></div>
+          <div id="set-models"><div class="skel skel-row"></div><div class="skel skel-row"></div><div class="skel skel-row"></div></div>
         </div>
       </div>
       <div class="grid">
@@ -3187,7 +3195,7 @@ function mdHtml(text){
    SETTINGS
 ═══════════════════════════════════════════════════ */
 /* ── Settings: integrations and notifications ── */
-const SET={integrations:[],notif:null,recent:[],pairOpen:false};
+const SET={integrations:[],notif:null,recent:[],pairOpen:false,models:null};
 const INTEG_NEEDS={google_calendar:"Needs GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and FOUNDER_OS_API_URL on the server.",
   email:"Needs EMAIL_ADDRESS and EMAIL_APP_PASSWORD on the server.",telegram:"Needs TELEGRAM_BOT_TOKEN on the server.",
   youtube:"Needs YOUTUBE_API_KEY on the server."};
@@ -3203,6 +3211,54 @@ async function loadSettingsCards(){
   }catch(e){
     box.innerHTML=nbox.innerHTML=`<div class="empty">Could not load — the backend is not reachable.</div>`;
   }
+}
+
+// ── Settings: which model each task uses, and what it has cost this month ──
+function _usdEst(n){
+  const v=Number(n||0);
+  return "$"+(v>0&&v<0.01?v.toFixed(4):v.toFixed(2));
+}
+async function loadModels(){
+  const box=document.getElementById("set-models");
+  if(!box)return;
+  try{SET.models=await _bizGet("/models/routes");}
+  catch(e){SET.models=null;box.innerHTML=`<div class="empty">Could not load the models — the backend is not reachable.</div>`;return;}
+  renderModels();
+}
+function renderModels(){
+  const box=document.getElementById("set-models"), m=SET.models;
+  if(!box||!m)return;
+  const cap=m.cap||{};
+  safeUpdate("set-models-spend",cap.monthly_cap_usd?`${_usdEst(cap.month_to_date_usd)} of ${_usdEst(cap.monthly_cap_usd)} this month`:`${_usdEst(cap.month_to_date_usd)} this month`);
+  const chat=m.models.filter(x=>x.kind==="chat");
+  const rows=m.routes.map(r=>{
+    const notes=[r.key_set?r.provider_label:`${r.provider_label} · its key is not set on the server`];
+    if(r.serving_model&&r.serving_model!==r.model)notes.push(`over the cap, so running on ${r.serving_model}`);
+    else if(r.fallback_model)notes.push(r.fallback_ready?`falls back to ${r.fallback_model}`:`no fallback until the other provider's key is set`);
+    let control=`<span class="row-meta">${escHtml(r.model)}</span>`;
+    if(!r.openai_only){
+      const options=chat.some(c=>c.model===r.model)?chat:[{model:r.model,provider_label:r.provider_label},...chat];
+      control=`<select class="select" aria-label="Model for ${escHtml(r.label)}" data-task="${escHtml(r.task)}" onchange="modelRouteSet(this)">${options.map(c=>`<option value="${escHtml(c.model)}"${c.model===r.model?" selected":""}>${escHtml(c.provider_label)} · ${escHtml(c.model)}</option>`).join("")}</select>`;
+    }
+    return `<div class="row row--wrap">
+      <div class="row-main"><div class="row-title">${escHtml(r.label)}</div><div class="row-sub wrap">${escHtml(notes.join(" · "))}</div></div>
+      <span class="row-meta" title="${r.calls_this_month} call${r.calls_this_month===1?"":"s"} this month">${_usdEst(r.month_to_date_usd)}</span>
+      ${control}
+    </div>`;
+  }).join("");
+  const capLine=cap.monthly_cap_usd
+    ?(cap.over_threshold?`Spend has passed 80% of the cap, so the dearer tasks run on ${cap.cheapest_model||"the cheapest model"} until next month.`:`At 80% of the cap the dearer tasks move to the cheapest model.`)
+    :`No monthly cap is set (MONTHLY_LLM_CAP_USD on the server).`;
+  box.innerHTML=`<div class="list">${rows}</div>
+    <div class="hint mt-3">Amounts are estimates for this month. You can also say it: "use Claude for chat". ${escHtml(capLine)} Voice, search and transcription run on OpenAI only.</div>`;
+}
+async function modelRouteSet(sel){
+  const d=await _setTap(null,"PATCH",`/models/routes/${encodeURIComponent(sel.dataset.task)}`,{model:sel.value});
+  if(d){
+    if(d.change)showChanges([d.change]);
+    if(d.warning)showToast(d.warning,"info");
+  }
+  loadModels();
 }
 
 function _integBadge(status){
@@ -3346,6 +3402,7 @@ function handleReturnHash(){
 
 function renderSettings(){
   loadSettingsCards();
+  loadModels();
   const ss=document.getElementById("social-score-slider");
   const sv=document.getElementById("social-score-val");
   if(ss){ss.value=S.social;sv.textContent=S.social;ss.style.setProperty("--pct",S.social+"%");}

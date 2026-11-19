@@ -4,11 +4,13 @@ What actually goes over the wire to OpenAI, for every call path.
 The rest of the suite patches ``llm.chat_text`` and friends, so it never sees the request
 the SDK builds. That is how ``max_tokens`` reached production: the GPT-5 family rejects it
 with a 400 ("Use 'max_completion_tokens' instead"). Here the real ``openai.OpenAI`` client
-is used with its HTTP transport replaced, so each test reads the JSON body the SDK would
-send and fails if ``max_tokens`` is in it.
+is handed to the OpenAI adapter with its HTTP transport replaced, so each test reads the
+JSON body the SDK would send and fails if ``max_tokens`` is in it. The default routes all
+point at OpenAI, so every call path lands here.
 
 ``test_every_call_site_is_covered`` scans the backend for call sites; a new one fails it
-until a test below exercises it.
+until a test below exercises it. ``test_no_provider_sdk_outside_the_adapters`` is the proof
+that nothing reaches a provider except through ``llm_adapters``.
 """
 
 import ast
@@ -75,7 +77,8 @@ def wire(monkeypatch):
     recorder = Recorder()
     fake = OpenAI(api_key="sk-test", max_retries=0,
                   http_client=httpx.Client(transport=httpx.MockTransport(recorder)))
-    monkeypatch.setattr(llm, "_client", fake)
+    from llm_adapters import openai_adapter
+    monkeypatch.setattr(openai_adapter, "_client", fake)
     yield recorder
     llm.reset_client()
 
@@ -199,7 +202,22 @@ def test_market_intelligence(wire):
     from market_intel import agent
     out = agent._llm_json("system", "user", purpose="market_intel_test")
     assert out, "the call failed and was swallowed"
-    _check(wire, "market_intel", expect_cap=False)
+    body = _check(wire, "market_intel", expect_cap=False)
+    # Some models reject temperature: it is sent only when the route's params list it.
+    assert "temperature" not in body and body["response_format"] == {"type": "json_object"}
+
+
+def test_a_route_parameter_is_sent_and_nothing_else(wire):
+    """Per-route parameters: what the route lists reaches the provider, and a parameter the
+    provider does not know is left out."""
+    import model_routes
+    db = _db()
+    model_routes.set_route(db, "market_intel", params={"temperature": 0.2, "made_up": 1})
+    db.close()
+    from market_intel import agent
+    agent._llm_json("system", "user", purpose="market_intel_test")
+    body = _check(wire, "market_intel", expect_cap=False)
+    assert body["temperature"] == 0.2 and "made_up" not in body
 
 
 def test_orchestrator_stream(wire):
@@ -223,8 +241,9 @@ def test_gateway_renames_a_stray_max_tokens(wire):
 
 # ── Every call site has a test above ─────────────────────────
 
-# (file, enclosing function) for every place that sends a request to OpenAI's chat or
-# embeddings API. Audio (transcription, speech) takes no token cap and is not listed.
+# (file, enclosing function) for every place that asks for a chat completion or an
+# embedding: through the gateway, or (inside the adapters only) from an SDK. Audio
+# (transcription, speech) takes no token cap and is not listed.
 COVERED = {
     ("applications.py", "import_requirements"),     # test_application_parse
     ("applications.py", "review_gaps"),             # test_application_gap_review
@@ -239,25 +258,31 @@ COVERED = {
     ("openai_client.py", "get_proactive_brief"),    # test_proactive_brief
     ("openai_client.py", "_stream_completion"),     # test_orchestrator_stream
     ("market_intel/agent.py", "_llm_json"),         # test_market_intelligence
-    ("llm.py", "chat_completion"),                  # every chat test goes through it
-    ("llm.py", "chat_text"),
-    ("llm.py", "embed_texts"),                      # test_embeddings
-    ("retrieval.py", "index_items"),                # through embed_texts
+    ("retrieval.py", "index_items"),                # test_embeddings (through embed_texts)
     ("retrieval.py", "index_one"),
     ("retrieval.py", "search"),
+    ("llm_adapters/openai_adapter.py", "complete"),   # every chat test above goes through it
+    ("llm_adapters/openai_adapter.py", "stream"),     # test_orchestrator_stream
+    ("llm_adapters/openai_adapter.py", "embed"),      # test_embeddings
+    ("llm_adapters/anthropic_adapter.py", "complete"),  # tests/test_phase7_model_router.py
+    ("llm_adapters/anthropic_adapter.py", "stream"),
 }
 
-_CALLS = {"chat_text", "chat_completion", "embed_texts"}
+_GATEWAY_CALLS = {"chat_text", "complete", "stream", "embed_texts"}
+_SDK_OWNERS = {"completions", "embeddings", "messages"}
+_SKIP = {"tests", "migrations", "venv", ".venv", "__pycache__"}
+
+
+def _sources():
+    for path in BACKEND.rglob("*.py"):
+        rel = path.relative_to(BACKEND)
+        if not (_SKIP & set(rel.parts)):
+            yield rel, ast.parse(path.read_text(encoding="utf-8"))
 
 
 def _call_sites() -> set[tuple[str, str]]:
     found = set()
-    skip = {"tests", "migrations", "venv", ".venv", "__pycache__"}
-    for path in BACKEND.rglob("*.py"):
-        rel = path.relative_to(BACKEND)
-        if skip & set(rel.parts):
-            continue
-        tree = ast.parse(path.read_text(encoding="utf-8"))
+    for rel, tree in _sources():
 
         def visit(node, enclosing):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -265,8 +290,8 @@ def _call_sites() -> set[tuple[str, str]]:
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
                 attr, owner = node.func.attr, node.func.value
                 owner_name = owner.attr if isinstance(owner, ast.Attribute) else getattr(owner, "id", "")
-                via_gateway = attr in _CALLS and owner_name == "llm"
-                direct = attr == "create" and owner_name in {"completions", "embeddings"}
+                via_gateway = attr in _GATEWAY_CALLS and owner_name == "llm"
+                direct = attr == "create" and owner_name in _SDK_OWNERS
                 if via_gateway or direct:
                     found.add((rel.as_posix(), enclosing or "<module>"))
             for child in ast.iter_child_nodes(node):
@@ -279,16 +304,45 @@ def _call_sites() -> set[tuple[str, str]]:
 def test_every_call_site_is_covered():
     found = _call_sites()
     missing = {site for site in found if site not in COVERED}
-    assert not missing, (f"new OpenAI call site(s) {sorted(missing)}: add a test above that "
+    assert not missing, (f"new model call site(s) {sorted(missing)}: add a test above that "
                          f"checks the request it sends, then list it in COVERED")
 
 
-def test_no_source_passes_max_tokens():
-    """Belt and braces: no call site in the backend spells the old parameter."""
+def test_no_provider_sdk_outside_the_adapters():
+    """The grep, as a test. Outside ``llm_adapters`` nothing imports a provider SDK, calls
+    an SDK method, or names a provider API host."""
     offenders = []
+    for rel, tree in _sources():
+        if rel.parts[0] == "llm_adapters":
+            continue
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                names = [a.name.split(".")[0] for a in node.names]
+            elif isinstance(node, ast.ImportFrom):
+                names = [(node.module or "").split(".")[0]]
+            else:
+                names = []
+            if {"openai", "anthropic"} & set(names):
+                offenders.append(f"{rel.as_posix()}:{node.lineno} imports a provider SDK")
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "create"
+                    and isinstance(node.func.value, ast.Attribute)
+                    and node.func.value.attr in _SDK_OWNERS | {"transcriptions", "speech"}):
+                offenders.append(f"{rel.as_posix()}:{node.lineno} calls an SDK method")
+            if isinstance(node, ast.Constant) and isinstance(node.value, str) and (
+                    "api.openai.com" in node.value or "api.anthropic.com" in node.value):
+                offenders.append(f"{rel.as_posix()}:{node.lineno} names a provider host")
+    assert not offenders, offenders
+
+
+def test_no_source_passes_max_tokens():
+    """Belt and braces: no call site in the backend spells the old parameter. (The gateway
+    accepts it as an old spelling, and the Claude adapter has to send it: the Messages API
+    has no other name for the cap.)"""
+    offenders = []
+    allowed = {"llm.py", "llm_adapters/openai_adapter.py", "llm_adapters/anthropic_adapter.py"}
     for path in BACKEND.rglob("*.py"):
         rel = path.relative_to(BACKEND)
-        if {"tests", "venv", ".venv", "__pycache__"} & set(rel.parts) or rel.as_posix() == "llm.py":
+        if {"tests", "venv", ".venv", "__pycache__"} & set(rel.parts) or rel.as_posix() in allowed:
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):

@@ -20,7 +20,7 @@ def run(ctx) -> AgentResult:
     due = objectives.due_objectives(ctx.db, ctx.now)
     if not due:
         return AgentResult(status="skipped", summary="no research objective is due")
-    if not llm.is_configured():
+    if not llm.is_configured("market_intel"):
         return AgentResult(status="skipped", summary="no AI key configured",
                            result={"due": [o.id for o in due]})
     objective, deferred = due[0], due[1:]

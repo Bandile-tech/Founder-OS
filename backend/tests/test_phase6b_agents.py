@@ -309,7 +309,7 @@ def test_model_calls_are_attributed_to_the_run(monkeypatch):
         return AgentResult(summary=f"model said {text}")
 
     _spec("thinker", run, max_llm_calls=5)
-    with patch("llm.get_client", return_value=_fake_client()):
+    with patch("llm_adapters.openai_adapter.client", return_value=_fake_client()):
         runner.tick("manual")
     db = _db()
     run_row = db.query(models.AgentRun).one()
@@ -330,7 +330,7 @@ def test_the_call_cap_fails_the_run(monkeypatch):
         return AgentResult(summary="never reached")
 
     _spec("greedy", run, max_llm_calls=1)
-    with patch("llm.get_client", return_value=_fake_client()):
+    with patch("llm_adapters.openai_adapter.client", return_value=_fake_client()):
         out = runner.tick("manual")
     assert out["ran"][0]["status"] == "failed"
     db = _db()
@@ -344,7 +344,7 @@ def test_the_call_cap_fails_the_run(monkeypatch):
         return AgentResult(summary="never reached")
 
     _spec("deterministic", none_allowed, max_llm_calls=0)
-    with patch("llm.get_client", return_value=_fake_client()):
+    with patch("llm_adapters.openai_adapter.client", return_value=_fake_client()):
         result = runner.run_agent(agents.REGISTRY["deterministic"], "manual")
     assert result["status"] == "failed" and "BudgetExceeded" in result["error"]
 
@@ -352,7 +352,7 @@ def test_the_call_cap_fails_the_run(monkeypatch):
 def test_usage_outside_a_run_is_not_attributed(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test")
     db = _db()
-    with patch("llm.get_client", return_value=_fake_client()):
+    with patch("llm_adapters.openai_adapter.client", return_value=_fake_client()):
         llm.chat_text([{"role": "user", "content": "hi"}], db=db, purpose="assistant")
         llm.log_usage(db, model="gpt-5.4-mini", purpose="explicit", agent_run_id=42)
     rows = {u.purpose: u.agent_run_id for u in db.query(models.LLMUsage).all()}

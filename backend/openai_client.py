@@ -10,13 +10,6 @@ import llm
 load_dotenv()
 
 
-def __getattr__(name):
-    """Lazy ``client`` attribute for legacy ``from openai_client import client`` callers.
-    The client is only built on first use, so the module imports with no API key."""
-    if name == "client":
-        return llm.get_client()
-    raise AttributeError(name)
-
 SYSTEM_PROMPT = """
 You are Bandile's CEO-level personal AI operating system.
 
@@ -59,30 +52,17 @@ OPERATING RULES
 
 
 # ── Voice (STT + TTS) ────────────────────────────────────────
-STT_MODEL = "whisper-1"
-TTS_MODEL = "tts-1"
-# Placeholder voice — Bandile will pick one by ear later. Options:
-# alloy, echo, fable, onyx, nova, shimmer.
-TTS_VOICE = "onyx"
-
+# The models are the ``transcribe`` and ``speech`` routes; the voice is the speech route's
+# ``voice`` parameter (a placeholder until Bandile picks one by ear).
 
 def transcribe_audio(file_bytes: bytes, filename: str = "audio.webm") -> str:
-    """Transcribe recorded audio via OpenAI Whisper. Returns plain text."""
-    result = llm.get_client().audio.transcriptions.create(
-        model=STT_MODEL,
-        file=(filename, file_bytes),
-    )
-    return (result.text or "").strip()
+    """Transcribe recorded audio. Returns plain text."""
+    return llm.transcribe(file_bytes, filename)
 
 
 def synthesize_speech(text: str) -> bytes:
-    """Convert reply text to spoken audio (MP3 bytes) via OpenAI TTS."""
-    response = llm.get_client().audio.speech.create(
-        model=TTS_MODEL,
-        voice=TTS_VOICE,
-        input=text[:4000],
-    )
-    return response.content
+    """Convert reply text to spoken audio (MP3 bytes)."""
+    return llm.speech(text)
 
 
 def clean_ai_output(text: str) -> str:
@@ -374,8 +354,8 @@ _ORCH_PROMPT_PATH = (
 
 
 def orchestrator_model() -> str:
-    """The model the orchestrator runs on — ``ASSISTANT_MODEL`` (default gpt-5.4-mini)."""
-    return llm.assistant_model()
+    """The model the orchestrator runs on: the ``assistant`` route."""
+    return llm.model_for("assistant")
 
 
 def _load_orchestrator_prompt() -> str:
@@ -387,57 +367,24 @@ def _load_orchestrator_prompt() -> str:
 
 
 def _stream_completion(convo: list, tools: list):
-    """Thin wrapper over the OpenAI streaming SDK — the ONLY place the orchestrator
-    touches OpenAI. Yields normalized delta dicts so callers (and tests) never depend on
-    SDK chunk objects:
+    """The one place the orchestrator asks for a model reply: the ``assistant`` route,
+    streamed through the gateway, whichever provider serves it. Yields normalized delta
+    dicts so callers (and tests) never depend on a provider's chunk objects:
 
       {"content": "<text>"}                                  — assistant content delta
       {"tool_calls": [{"index","id","name","arguments"}...]} — tool-call fragment(s)
       {"finish_reason": "<reason>"}                           — end of this completion
+      {"provider_raw": {...}}                                 — the provider's own blocks for this
+                                                                turn, when it needs them back
 
-    Usage is requested on the final chunk and logged to llm_usage.
-    Tests patch this function to inject canned deltas.
+    Usage is logged to llm_usage by the gateway. Tests patch this function to inject
+    canned deltas.
     """
-    import time as _time
-    model = orchestrator_model()
-    started = _time.monotonic()
-    stream = llm.get_client().chat.completions.create(
-        model=model,
-        messages=convo,
-        tools=tools,
-        stream=True,
-        stream_options={"include_usage": True},
-    )
-    usage = None
-    for chunk in stream:
-        if getattr(chunk, "usage", None):
-            usage = chunk.usage
-        if not chunk.choices:
-            continue
-        choice = chunk.choices[0]
-        delta = choice.delta
-        if getattr(delta, "content", None):
-            yield {"content": delta.content}
-        if getattr(delta, "tool_calls", None):
-            frags = []
-            for tc in delta.tool_calls:
-                frags.append({
-                    "index": tc.index,
-                    "id": tc.id,
-                    "name": tc.function.name if tc.function else None,
-                    "arguments": tc.function.arguments if tc.function else None,
-                })
-            yield {"tool_calls": frags}
-        if choice.finish_reason:
-            yield {"finish_reason": choice.finish_reason}
-    inp, cached, out = llm.usage_from_response(usage)
-    llm.log_usage(None, model=model, purpose="assistant", input_tokens=inp,
-                  cached_input_tokens=cached, output_tokens=out,
-                  duration_ms=int((_time.monotonic() - started) * 1000))
+    yield from llm.stream("assistant", convo, tools, purpose="assistant")
 
 
 AI_UNAVAILABLE_REPLY = (
-    "AI is not configured on this server (OPENAI_API_KEY is missing). "
+    "AI is not configured on this server (no model provider key is set). "
     "Everything else keeps working; the assistant is offline."
 )
 AI_FAILED_REPLY = ("Something went wrong on my side and I couldn't finish that. "
@@ -482,6 +429,7 @@ def get_orchestrator_response(messages: list, db, max_rounds: int = 6,
         content_acc = ""
         # tool-call fragments accumulated by stream index
         calls: dict = {}
+        provider_raw = None      # the provider's own blocks for this round, if it wants them back
 
         # Whatever history we were handed, never send an invalid tool-call sequence.
         convo[:] = conversation.sanitize_history(convo)
@@ -490,6 +438,8 @@ def get_orchestrator_response(messages: list, db, max_rounds: int = 6,
                 if "content" in delta:
                     content_acc += delta["content"]
                     yield {"type": "reasoning", "content": delta["content"]}
+                if "provider_raw" in delta:
+                    provider_raw = delta["provider_raw"]
                 if "tool_calls" in delta:
                     for frag in delta["tool_calls"]:
                         slot = calls.setdefault(
@@ -534,7 +484,9 @@ def get_orchestrator_response(messages: list, db, max_rounds: int = 6,
             "content": content_acc or None,
             "tool_calls": assistant_tool_calls,
         }
-        convo.append(assistant_msg)
+        # In memory only, for the rest of this turn: it is neither stored nor sent to the
+        # other provider.
+        convo.append({**assistant_msg, "provider_raw": provider_raw} if provider_raw else assistant_msg)
         if on_message:
             on_message(assistant_msg)
 

@@ -18,7 +18,7 @@ evidence-backed opportunities:
 The agent SURFACES findings (status='surfaced'). It never writes to the
 opportunity pipeline — promotion is an explicit, separate action.
 
-Every model call goes through ``llm.chat_completion`` with a ``market_intel_<role>``
+Every model call goes through the gateway's ``market_intel`` route with a ``market_intel_<role>``
 purpose, so each run's calls and cost are logged. A finding that repeats one already on
 file is not inserted again: the existing row's ``times_seen`` goes up and the run reports
 it under ``repeated``. Surfacing, dismissing and repeating are recorded in the change log.
@@ -76,23 +76,24 @@ def _load_founder_profile() -> str:
     return _DEFAULT_PROFILE
 
 
-def _llm_json(system: str, user: str, temperature: float = 0.4,
-              purpose: str = "market_intel") -> dict:
-    """One JSON-mode completion through the gateway (logged under ``purpose``). Returns {}
-    on any failure so a single bad call degrades the run instead of crashing it."""
+def _llm_json(system: str, user: str, purpose: str = "market_intel") -> dict:
+    """One JSON-mode call through the gateway's ``market_intel`` route (logged under
+    ``purpose``). Returns {} on any failure so a single bad call degrades the run instead of
+    crashing it.
+
+    No sampling parameter is passed from here. Some models reject ``temperature`` outright,
+    so it is sent only when the route's own parameters list it (``model_routes.params``)."""
     try:
-        resp = llm.chat_completion(
+        result = llm.complete(
+            "market_intel",
             [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
-            db=None,
             purpose=purpose,
-            model=llm.research_model(),
-            response_format={"type": "json_object"},
-            temperature=temperature,
+            json_mode=True,
         )
-        return json.loads(resp.choices[0].message.content or "{}")
+        return json.loads(result.text or "{}")
     except Exception as e:                  # noqa: BLE001
         print(f"[market_intel] LLM call failed: {e}")
         return {}
@@ -221,7 +222,7 @@ def _analyze(objective: str, candidates: list) -> list:
         "Score honestly against the evidence — unsupported claims score low."
     )
     user = f"OBJECTIVE:\n{objective}\n\nCANDIDATES:\n{_candidates_block(candidates)}"
-    out = _llm_json(system, user, temperature=0.2, purpose="market_intel_analyst")
+    out = _llm_json(system, user, purpose="market_intel_analyst")
 
     by_id = {c["id"]: c for c in candidates}
     analyzed = []
@@ -257,7 +258,7 @@ def _advise(profile: str, candidates: list) -> list:
         '"scores": {"founder_fit": 0-10, "speed_to_mvp": 0-10}}]}'
     )
     user = f"FOUNDER PROFILE:\n{profile}\n\nCANDIDATES:\n{_candidates_block(candidates)}"
-    out = _llm_json(system, user, temperature=0.2, purpose="market_intel_advisor")
+    out = _llm_json(system, user, purpose="market_intel_advisor")
 
     by_id = {c["id"]: c for c in candidates}
     for a in out.get("assessments") or []:
@@ -285,7 +286,7 @@ def _verify(objective: str, candidates: list) -> tuple:
         '"verdict": "accept" or "reject", "reason": "one sentence"}]}'
     )
     user = f"OBJECTIVE:\n{objective}\n\nCANDIDATES:\n{_candidates_block(candidates)}"
-    out = _llm_json(system, user, temperature=0.0, purpose="market_intel_verifier")
+    out = _llm_json(system, user, purpose="market_intel_verifier")
 
     verdicts = {v.get("id"): v for v in out.get("verdicts") or []}
     accepted, rejected = [], []

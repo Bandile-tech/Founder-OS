@@ -35,7 +35,7 @@ def _cosine(a: list[float], b: list[float]) -> float:
 
 
 def available() -> bool:
-    return llm.is_configured()
+    return llm.is_configured("embedding")
 
 
 # ── Indexing ─────────────────────────────────────────────────

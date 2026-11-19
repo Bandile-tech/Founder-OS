@@ -19,7 +19,7 @@ def run(ctx) -> AgentResult:
         import models
     except ImportError:
         return AgentResult(status="skipped", summary="leads not built")
-    if not llm.is_configured():
+    if not llm.is_configured("agents"):
         return AgentResult(status="skipped", summary="no AI key configured")
     rows = ctx.db.query(models.Lead).filter(
         models.Lead.status == "new", models.Lead.qualification_score.is_(None),

@@ -128,6 +128,7 @@ def _run_every_tool(db) -> dict:
          patch("market_intel.agent.run_market_research", return_value=fake_research):
         calls = [
             ("route_brain_dump", {"text": "ironed my clothes"}),
+            ("set_model_route", {"task": "assistant", "provider": "openai"}),
             ("get_dashboard_state", {}),
             ("detect_off_track", {}),
             ("synthesize_weekly_review", {}),

@@ -58,6 +58,7 @@ app.include_router(_auth.router)
 
 # ── Routers (rebuild modules) ────────────────────────────────
 import usage as _usage
+import model_routes as _model_routes
 import change_log as _change_log
 import actions as _actions
 import notes as _notes
@@ -65,6 +66,7 @@ import syllabus as _syllabus
 import briefing as _briefing
 import voice_realtime as _voice_realtime
 app.include_router(_usage.router)
+app.include_router(_model_routes.router)
 app.include_router(_change_log.router)
 app.include_router(_actions.router)
 app.include_router(_notes.router)
@@ -218,6 +220,9 @@ async def startup():
         run_m024(db)        # m024 — briefing_summaries.failed_at, last_error
         from migrations.m025_payment_triggers import run as run_m025
         run_m025(db)        # m025 — payments.due_trigger, recurring_revenue.start_trigger
+        from migrations.m026_model_router import run as run_m026
+        run_m026(db)        # m026 — model_routes, model_prices, llm_usage.provider/task/fallback_from
+        llm.reset_routes()  # read the routes the migration just seeded, not an earlier copy
         _validate_schema(engine)   # raises if any ORM column is absent from the live DB
         _seed_non_negotiables_if_empty(db)
         _verify_seed_integrity(db)
@@ -432,7 +437,11 @@ def _seed_roadmap_tasks_if_empty(db: Session):
 
 @app.get("/health")
 def health():
-    return {"ok": True, "ai_configured": llm.is_configured(), "assistant_model": llm.assistant_model()}
+    try:
+        model = llm.model_for("assistant")
+    except Exception:  # noqa: BLE001 — health must answer even when the routes cannot be read
+        model = None
+    return {"ok": True, "ai_configured": llm.is_configured(), "assistant_model": model}
 
 
 @app.get("/ping")

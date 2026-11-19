@@ -210,9 +210,28 @@ def _target_items(db: Session, today: date) -> tuple[list, int | None]:
     return items, (round(sum(pcts) / len(pcts)) if pcts else None)
 
 
+def system_alerts(db: Session) -> list[dict]:
+    """Alerts about Founder OS itself, in the same shape as the off-track rules' alerts.
+    Deterministic, and never raises: a failed check is simply not an alert."""
+    out = []
+    try:
+        state = llm.cap_state(db)
+        if state["over_threshold"]:
+            moved = state["downgraded_tasks"]
+            tail = (f"{len(moved)} task{'s' if len(moved) != 1 else ''} now run on {state['cheapest_model']} "
+                    f"until next month." if moved else "Every task is already on the cheapest model.")
+            out.append({"rule_id": "llm_cost_cap", "check": "llm_cost_cap", "severity": "warn",
+                        "message": f"AI spend is at {state['pct']:.0f}% of this month's "
+                                   f"${state['monthly_cap_usd']:,.2f} cap. {tail}"})
+    except Exception as exc:  # noqa: BLE001
+        print(f"[briefing] cost-cap check failed: {type(exc).__name__}")
+    return out
+
+
 def _alert_items(db: Session, today: date) -> tuple[list, list]:
     import orchestrator_tools
     alerts, _ = orchestrator_tools.detect_off_track(db)
+    alerts = alerts + system_alerts(db)
     items = []
     for a in alerts:
         sev = a.get("severity", "info")
@@ -257,7 +276,7 @@ def _opportunity_items(db: Session, today: date) -> tuple[list, int]:
     # Once the market-intelligence agent can run them itself (enabled, with an AI key), due
     # objectives are its job and need no tap.
     agent = db.query(models.Agent).filter(models.Agent.key == "market_intel").first()
-    agent_runs_them = llm.is_configured() and (agent is None or bool(agent.enabled))
+    agent_runs_them = llm.is_configured("agents") and (agent is None or bool(agent.enabled))
     for o in ([] if agent_runs_them else objectives.due_objectives(db, now)):
         items.append(_item(title=f"Research due: {o.objective[:70]}", category="opportunity", today=today,
                            due_label="", reason=f"Runs every {o.cadence_days} days and is due",
@@ -555,7 +574,7 @@ def _summary(db: Session, core: dict, refresh: bool) -> tuple[str | None, str | 
     if have and not refresh:
         return row.summary, row.greeting_line, True
     fallback = (row.summary, row.greeting_line, True) if have else (None, None, False)
-    if not llm.is_configured():
+    if not llm.is_configured("briefing_summary"):
         return fallback
     if row is not None and row.failed_at is not None and datetime.utcnow() - row.failed_at < SUMMARY_RETRY_AFTER:
         return fallback
@@ -580,7 +599,7 @@ def _summary(db: Session, core: dict, refresh: bool) -> tuple[str | None, str | 
         return fallback
     first = text.split(". ")[0].strip()
     greeting_line = first if first.endswith((".", "!", "?")) else first + "."
-    row.summary, row.greeting_line, row.model, row.created_at = text, greeting_line, llm.assistant_model(), datetime.utcnow()
+    row.summary, row.greeting_line, row.model, row.created_at = text, greeting_line, llm.model_for("briefing_summary"), datetime.utcnow()
     row.failed_at = row.last_error = None
     db.commit()
     return text, greeting_line, False

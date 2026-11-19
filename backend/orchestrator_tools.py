@@ -3277,3 +3277,29 @@ _register(
      "date": _str("When it happened, as he said it (default today).")},
     ["client", "milestone"],
 )
+
+
+# ── Phase 7, Stage 1: model routes ───────────────────────────
+
+def set_model_route(db, task: str = "assistant", provider: str | None = None, model: str | None = None):
+    """Change which provider and model a task uses. Logged, so it shows with Undo."""
+    import model_routes
+    return model_routes.set_routes(db, task, provider=provider, model=model)
+
+
+_register(
+    "set_model_route",
+    lambda db, a: set_model_route(db, task=a.get("task") or "assistant", provider=a.get("provider"),
+                                  model=a.get("model")),
+    "Change which AI provider or model Founder OS uses for a task. ONLY when Bandile asks "
+    "('use Claude for chat', 'switch the briefing to OpenAI', 'use the bigger model for "
+    "research'). Give the provider he named; give a model only when he names one. With a "
+    "provider and no model, the matching model on that provider is chosen. The change takes "
+    "effect on the next message and can be undone.",
+    {"task": _str("What to switch. 'assistant' is the chat he is talking to (also 'chat'). "
+                  "'all' switches every text task.",
+                  ["assistant", "parser", "conversation_summary", "briefing_summary", "market_intel",
+                   "agents", "analysis", "all"]),
+     "provider": _str("The provider he named.", ["openai", "claude"]),
+     "model": _str("The exact model id, only if he named one.")},
+)
