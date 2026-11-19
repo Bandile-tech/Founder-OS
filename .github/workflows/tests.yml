@@ -7,7 +7,9 @@ name: Tests
 on:
   pull_request:
   push:
-    branches: [main]
+    # main, and the phase branches the work is built on (so a phase is checked on
+    # PostgreSQL before its pull request is opened)
+    branches: [main, "phase-*"]
   workflow_dispatch: {}
 
 concurrency:
