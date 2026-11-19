@@ -481,8 +481,10 @@ def _in_period(query, start, end):
     return query
 
 
-def serialize(row: models.LedgerTransaction, names: dict, legs: int = 1) -> dict:
+def serialize(row: models.LedgerTransaction, names: dict, legs: int = 1, entry_minor: int | None = None) -> dict:
+    entry_minor = row.amount_minor if entry_minor is None else entry_minor
     return {
+        "entry_amount_minor": entry_minor, "entry_amount": fmt(entry_minor, row.currency),
         "id": row.id, "entry_id": row.entry_id, "occurred_at": row.occurred_at, "direction": row.direction,
         "amount_minor": row.amount_minor, "amount": fmt(row.amount_minor, row.currency), "currency": row.currency,
         "bucket_id": row.bucket_id, "bucket": names.get(row.bucket_id), "category": row.category, "note": row.note,
@@ -503,11 +505,18 @@ def transactions(db: Session, *, period=None, bucket_id: int | None = None, cate
         query = query.filter(models.LedgerTransaction.direction == direction)
     rows = query.order_by(models.LedgerTransaction.occurred_at.desc(), models.LedgerTransaction.id.desc()
                           ).offset(offset).limit(limit).all()
-    counts = dict(db.query(models.LedgerTransaction.entry_id, func.count(models.LedgerTransaction.id)).filter(
-        models.LedgerTransaction.entry_id.in_({r.entry_id for r in rows})).group_by(
-        models.LedgerTransaction.entry_id).all()) if rows else {}
+    # What the whole entry came to (a split income is several rows): worked out here, so the
+    # screen never adds money up. For a move between buckets it is what left the first one.
+    counts: dict = {}
+    totals: dict = {}
+    if rows:
+        for leg in db.query(models.LedgerTransaction).filter(
+                models.LedgerTransaction.entry_id.in_({r.entry_id for r in rows})).all():
+            counts[leg.entry_id] = counts.get(leg.entry_id, 0) + 1
+            if leg.category != TRANSFER or leg.direction == "out":
+                totals[leg.entry_id] = totals.get(leg.entry_id, 0) + leg.amount_minor
     names = _names(db)
-    return [serialize(r, names, counts.get(r.entry_id, 1)) for r in rows]
+    return [serialize(r, names, counts.get(r.entry_id, 1), totals.get(r.entry_id)) for r in rows]
 
 
 def rules_overview(db: Session) -> dict:

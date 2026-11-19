@@ -443,6 +443,8 @@ button.chip:active{transform:scale(0.97)}
 .form-row .push{margin-left:auto}
 .row--wrap{flex-wrap:wrap;row-gap:var(--sp-2)}
 .row > .select{flex:0 1 260px;width:auto;min-width:0}
+button.chip.is-on{border-color:rgba(167,235,242,0.6);color:var(--glow);background:rgba(167,235,242,0.08)}
+.bud-cats .meter + .meter{margin-top:var(--sp-4)}
 .row--wrap .row-main{flex:1 1 220px}
 .toggle--sm{height:32px;min-width:84px;padding:0 var(--sp-3)}
 .dot.blue{--c:var(--blue)}
@@ -930,6 +932,10 @@ button.home-tile:active{transform:scale(0.98)}
       <span class="ni"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4.8" width="12" height="8.6" rx="1.7"/><path d="M5.6 4.8V3.9a1.1 1.1 0 0 1 1.1-1.1h2.6a1.1 1.1 0 0 1 1.1 1.1v.9M2 8.4h12"/></svg></span>
       <span class="nav-label">Business</span>
     </button>
+    <button class="nav-item" onclick="nav('budget',this)" title="Budget">
+      <span class="ni"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="1.8" y="4" width="12.4" height="9" rx="1.6"/><path d="M1.8 6.8h12.4M10.6 10h1.6M4 4V2.8h8V4"/></svg></span>
+      <span class="nav-label">Budget</span>
+    </button>
     <button class="nav-item" onclick="nav('warroom',this)" title="War Room">
       <span class="ni"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.6 13.6 4.8v6.4L8 14.4 2.4 11.2V4.8Z"/><circle cx="8" cy="8" r="1.1" fill="currentColor" stroke="none"/></svg></span>
       <span class="nav-label">War Room</span>
@@ -1241,6 +1247,14 @@ button.home-tile:active{transform:scale(0.98)}
     </section>
 
     <!-- ── APPLICATIONS — deadlines, requirements, gaps ── -->
+    <section class="page" id="p-budget">
+      <div class="page-head">
+        <div><div class="page-eyebrow">Personal</div><h1 class="page-title">Budget</h1><div class="page-sub">What each bucket holds and this month's money in and out. Say what you spent or received and it updates. Tap an entry to move it.</div></div>
+        <div class="page-actions"><span class="badge badge--glow" id="bud-period">—</span></div>
+      </div>
+      <div id="bud-body"><div class="skel skel-row"></div><div class="skel skel-row"></div><div class="skel skel-row"></div></div>
+    </section>
+
     <section class="page" id="p-applications">
       <div class="page-head">
         <div><div class="page-eyebrow">System</div><h1 class="page-title">Applications</h1><div class="page-sub">What each application needs, what is missing and when it is due. Tap a requirement to move it on.</div></div>
@@ -1301,6 +1315,7 @@ button.home-tile:active{transform:scale(0.98)}
           <div class="row"><div class="check checked" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5l3.2 3L13 4.5"/></svg></div><span class="dot dot--sm"></span><div class="row-main"><div class="row-title">A completed row</div></div><span class="row-meta overdue">Due Nov 7</span></div>
           <div class="row"><div class="check" aria-hidden="true"></div><span class="dot dot--sm"></span><div class="row-main"><div class="row-title">A row with a subtitle</div><div class="row-sub">Secondary line in --fs-xs</div></div><span class="row-meta">19:00</span></div>
           <div class="row is-now"><span class="dot glow"></span><div class="row-main"><div class="row-title">The current row</div></div><span class="row-meta">Now</span></div>
+          <div class="row row--wrap"><div class="row-main"><div class="section-label">One tap to choose</div><div class="chips"><button class="chip is-on">Selected</button><button class="chip">Another</button><button class="chip">A third</button></div></div></div>
           <div class="row row--wrap"><div class="row-main"><div class="row-title">A row with a choice</div><div class="row-sub wrap">One tap changes it; the change shows with Undo.</div></div><span class="row-meta">$0.42</span><select class="select" aria-label="Example choice"><option>First option</option><option>Second option</option></select></div>
         </div>
         <div class="section-label">Messages</div>
@@ -2034,6 +2049,9 @@ function renderHomeNote(b){
   const broken=["google_calendar","email"].some(k=>integ[k]==="error");
   if(broken)parts.push(`<a class="is-warn" role="button" tabindex="0" onclick="openSettings()" onkeydown="if(event.key==='Enter')openSettings()">An integration needs attention</a>`);
   else if(integ.telegram===false)parts.push(`<a role="button" tabindex="0" onclick="openSettings()" onkeydown="if(event.key==='Enter')openSettings()">Telegram is not paired</a>`);
+  // The way into the Budget from the command centre: this month's money in and out.
+  const money=HOME_MONEY.line?`${escHtml(HOME_MONEY.line)} this month`:"Budget";
+  parts.push(`<a id="cc-money" role="button" tabindex="0" onclick="openBudgetTile()" onkeydown="if(event.key==='Enter')openBudgetTile()">${money}</a>`);
   el.hidden=!parts.length;
   el.innerHTML=parts.join(" &nbsp;·&nbsp; ");
   el.title=el.textContent;
@@ -2214,7 +2232,7 @@ function closeSidebar(){_setSidebar(false);}
 document.addEventListener("keydown",e=>{if(e.key==="Escape"&&document.body.classList.contains("nav-open"))closeSidebar();});
 
 function renderPage(page){
-  if(page==="home"){renderHome();loadBriefing();}
+  if(page==="home"){renderHome();loadBriefing();loadHomeMoney();}
   else if(page==="syllabus"){renderSyllabus()}
   else if(page==="history"){const h=document.getElementById("hist-body");if(h&&!h.dataset.ready){h.dataset.ready="1";historyView(h,"");}}
   else if(page==="health"){renderHealth()}
@@ -2223,6 +2241,7 @@ function renderPage(page){
   else if(page==="warroom"){renderWarRoom()}
   else if(page==="agents"){renderAgents()}
   else if(page==="business"){renderBusiness()}
+  else if(page==="budget"){renderBudget()}
   else if(page==="applications"){renderApplications()}
   else if(page==="settings"){renderSettings()}
   else if(page==="guide"){renderGuide()}
@@ -2941,6 +2960,9 @@ function _afterWriteRefresh(){
   try{if(document.getElementById("p-syllabus")&&document.getElementById("p-syllabus").classList.contains("active")&&typeof renderSyllabus==="function")renderSyllabus();}catch(_){}
   try{if(document.getElementById("p-business")&&document.getElementById("p-business").classList.contains("active"))renderBusiness();}catch(_){}
   try{if(document.getElementById("p-applications")&&document.getElementById("p-applications").classList.contains("active"))renderApplications();}catch(_){}
+  try{if(document.getElementById("p-budget")&&document.getElementById("p-budget").classList.contains("active"))renderBudget();}catch(_){}
+  try{if(typeof STAGE!=="undefined"&&STAGE.view==="budget")renderStageView();}catch(_){}
+  try{loadHomeMoney();}catch(_){}
 }
 
 function renderChangesStrip(changes,container){
@@ -3211,6 +3233,118 @@ async function loadSettingsCards(){
   }catch(e){
     box.innerHTML=nbox.innerHTML=`<div class="empty">Could not load — the backend is not reachable.</div>`;
   }
+}
+
+// ── Budget: buckets, the month's money in and out, spending by category, transactions ──
+// One renderer for the Budget page and the "budget" stage view. Every figure comes from the
+// server already formatted; nothing is added up here.
+const BUD={open:null,categories:["food","data","transport","church","school","business","health","other"]};
+function openBudgetTile(){nav("budget",document.querySelector(".nav-item[title='Budget']"));}
+function renderBudget(){
+  const host=document.getElementById("bud-body");
+  if(host)budgetView(host,"this_month");
+}
+const HOME_MONEY={line:null};
+async function loadHomeMoney(){
+  try{
+    const d=await _bizGet("/finance/summary");
+    const m=(d.money||[])[0];
+    HOME_MONEY.line=d.transactions_total&&m?`In ${m.in} · Out ${m.out}`:null;
+  }catch(_){HOME_MONEY.line=null;}
+  const link=document.getElementById("cc-money");
+  if(link)link.textContent=HOME_MONEY.line?`${HOME_MONEY.line} this month`:"Budget";
+}
+function _budDay(t){return new Date(t.occurred_at+"T00:00:00").toLocaleDateString("en-GB",{day:"numeric",month:"short"});}
+// One row per thing that happened. An income split across buckets is one row; a tap shows
+// where each part went. The totals come from the server.
+function _budEntry(legs,buckets){
+  const t=legs[0], many=legs.length>1, open=BUD.open===t.entry_id;
+  const sign=t.transfer?"":t.direction==="in"?"+":"−";
+  const title=t.transfer?"Moved between buckets":(t.note||_cap(t.category||(t.direction==="in"?"income":"spending")));
+  const where=t.transfer?null:many?`split across ${legs.length} buckets`:t.bucket;
+  const sub=[_budDay(t),where,t.transfer||t.direction==="in"?null:t.category,t.payment_id?"client payment":null].filter(Boolean).join(" · ");
+  let detail="";
+  if(open){
+    if(many){
+      detail=legs.map(l=>`<div class="row"><span class="dot dot--sm"></span><div class="row-main"><div class="row-sub">${escHtml(l.bucket||"")}</div></div><span class="row-meta">${l.direction==="in"?"+":"−"}${escHtml(l.amount)}</span></div>`).join("");
+      if(!t.payment_id&&!t.transfer)detail+=`<div class="row"><div class="row-main"><div class="row-sub wrap">To change the amount, remove this and say it again.</div></div><div class="row-actions"><button class="btn btn--sm btn--danger" data-id="${t.id}" data-legs="${legs.length}" onclick="budRemove(this)">Remove</button></div></div>`;
+    }else{
+      const bucketChips=buckets.map(b=>`<button class="chip${b.id===t.bucket_id?" is-on":""}" data-id="${t.id}" data-bucket="${b.id}" onclick="budMove(this)">${escHtml(b.name)}</button>`).join("");
+      const cats=t.direction==="out"?BUD.categories.map(c=>`<button class="chip${c===t.category?" is-on":""}" data-id="${t.id}" data-category="${escHtml(c)}" onclick="budCategory(this)">${escHtml(_cap(c))}</button>`).join(""):"";
+      detail=`<div class="row row--wrap">
+        <div class="row-main"><div class="section-label">Bucket</div><div class="chips">${bucketChips}</div>
+        ${cats?`<div class="section-label">Category</div><div class="chips">${cats}</div>`:""}</div>
+        ${t.payment_id?"":`<div class="row-actions"><button class="btn btn--sm btn--danger" data-id="${t.id}" data-legs="1" onclick="budRemove(this)">Remove</button></div>`}
+      </div>`;
+    }
+  }
+  return `<div class="row row--tap" data-entry="${escHtml(t.entry_id)}" aria-expanded="${open}" onclick="budToggle(this)">
+      <span class="dot dot--sm${t.direction==="in"&&!t.transfer?" glow":""}"></span>
+      <div class="row-main"><div class="row-title">${escHtml(title)}</div><div class="row-sub">${escHtml(sub)}</div></div>
+      <span class="row-meta">${sign}${escHtml(t.entry_amount)}</span>
+    </div>${detail}`;
+}
+function _budEntries(rows,buckets){
+  const order=[], groups={};
+  rows.forEach(t=>{if(!groups[t.entry_id]){groups[t.entry_id]=[];order.push(t.entry_id);}groups[t.entry_id].push(t);});
+  return order.map(id=>_budEntry(groups[id].slice().sort((a,b)=>a.id-b.id),buckets)).join("");
+}
+async function budgetView(host,period){
+  BUD.host=host;BUD.period=period||"this_month";
+  let d,rows;
+  try{[d,rows]=await Promise.all([_bizGet(`/finance/summary?period=${encodeURIComponent(BUD.period)}`),_bizGet(`/finance/transactions?limit=120`)]);}
+  catch(e){host.innerHTML=`<div class="empty">Could not load the budget — the backend is not reachable.</div>`;return;}
+  if(BUD.host!==host)return;
+  safeUpdate("bud-period",d.period.label);
+  if(!d.buckets.length&&!rows.length){
+    host.innerHTML=`<div class="card"><div class="empty">Nothing here yet. Tell Founder OS what you spent or received ("spent K50 on lunch, got K800 from Bel"), and how to split your income ("split my income 10 tithe, 40 business, 20 invest, 10 save, 20 personal").</div></div>`;
+    return;
+  }
+  const buckets=d.buckets.filter((b,i,all)=>all.findIndex(x=>x.id===b.id)===i&&!b.is_unallocated);
+  const kpis=d.buckets.map(b=>{
+    const tags=[b.is_default?"spending comes from here":null,b.is_remainder?"takes leftover ngwee":null,b.is_unallocated?"waiting for a split":null].filter(Boolean).join(" · ");
+    return `<div class="kpi"><div class="kpi-label">${escHtml(b.name)}</div><div class="kpi-value">${b.balance_minor<0?`<span class="red">${escHtml(b.balance)}</span>`:escHtml(b.balance)}</div><div class="kpi-sub">${escHtml(tags||" ")}</div></div>`;
+  }).join("");
+  const money=d.money.map(m=>`
+      <div class="row"><div class="row-main"><div class="row-title">Money in</div></div><span class="row-meta">${escHtml(m.in)}</span></div>
+      <div class="row"><div class="row-main"><div class="row-title">Money out</div></div><span class="row-meta">${escHtml(m.out)}</span></div>
+      <div class="row"><div class="row-main"><div class="row-title">Left from this period</div></div><span class="row-meta">${escHtml(m.net)}</span></div>`).join("");
+  const split=Object.keys(d.rules).map(k=>`<div class="row"><div class="row-main"><div class="row-title">${k==="default"?"Income split":escHtml(_cap(k))+" income"}</div><div class="row-sub wrap">${escHtml(d.rules[k].map(r=>`${r.pct} ${r.bucket}`).join(" · "))}</div></div></div>`).join("")
+    ||`<div class="row"><div class="row-main"><div class="row-title">Income split</div><div class="row-sub wrap">Not set. Say how to split your income and it will be.</div></div></div>`;
+  const top=Math.max(1,...d.by_category.map(c=>c.total_minor));
+  const cats=d.by_category.map(c=>`<div class="meter"><div class="meter-head"><span>${escHtml(_cap(c.category))}</span><span class="v">${escHtml(c.total)}</span></div><div class="bar"><div class="bar-fill" style="width:${Math.round(100*c.total_minor/top)}%"></div></div></div>`).join("")
+    ||`<div class="empty">Nothing spent in ${escHtml(d.period.label)}.</div>`;
+  host.innerHTML=`
+    <div class="kpis">${kpis}</div>
+    <div class="grid mt-5">
+      <div class="card"><div class="card-head"><div class="card-title"><span>${escHtml(_cap(d.period.label))}</span></div></div><div class="list">${money}${split}</div></div>
+      <div class="card"><div class="card-head"><div class="card-title"><span>Spending by category</span></div></div><div class="bud-cats">${cats}</div></div>
+    </div>
+    <div class="card mt-5"><div class="card-head"><div class="card-title"><span>Transactions</span></div><span class="badge badge--muted">${d.transactions_total} in all</span></div>
+      <div class="list">${_budEntries(rows,buckets)||`<div class="empty">No transactions yet.</div>`}</div></div>`;
+}
+function budToggle(el){
+  const id=el.dataset.entry;
+  BUD.open=BUD.open===id?null:id;
+  if(BUD.host)budgetView(BUD.host,BUD.period);
+}
+async function _budPatch(id,body){
+  const d=await _setTap(null,"PATCH",`/finance/transactions/${id}`,body);
+  if(d&&d.change)showChanges([d.change]);
+  if(BUD.host)budgetView(BUD.host,BUD.period);
+  loadHomeMoney();
+}
+function budMove(btn){event.stopPropagation();_budPatch(Number(btn.dataset.id),{bucket_id:Number(btn.dataset.bucket)});}
+function budCategory(btn){event.stopPropagation();_budPatch(Number(btn.dataset.id),{category:btn.dataset.category});}
+async function budRemove(btn){
+  event.stopPropagation();
+  const legs=Number(btn.dataset.legs||1);
+  if(!confirm(legs>1?"Remove this income from every bucket it was split into? You can undo it.":"Remove this entry? You can undo it."))return;
+  const d=await _setTap(btn,"DELETE",`/finance/transactions/${Number(btn.dataset.id)}`);
+  if(d&&d.changes)showChanges(d.changes);
+  BUD.open=null;
+  if(BUD.host)budgetView(BUD.host,BUD.period);
+  loadHomeMoney();
 }
 
 // ── Settings: which model each task uses, and what it has cost this month ──
@@ -3552,7 +3686,7 @@ async function speakText(text){
    STAGE — show_view directives from the orchestrator (view name + params only, never HTML)
 ═══════════════════════════════════════════════════ */
 const STAGE={open:false,view:null,params:null,voice:false};
-const STAGE_TITLES={syllabus:"Syllabus",brief:"Today's Brief",deadlines:"Deadlines",note:"Note",changes:"Recent changes",progress:"Progress",history:"Conversations"};
+const STAGE_TITLES={syllabus:"Syllabus",brief:"Today's Brief",deadlines:"Deadlines",note:"Note",changes:"Recent changes",progress:"Progress",history:"Conversations",budget:"Budget"};
 const STAGE_VIEWS=new Set(Object.keys(STAGE_TITLES));
 
 function _moveOrb(toStage){
@@ -3696,6 +3830,8 @@ async function renderStageView(){
       const r=await fetch(`${API_BASE}/changes?limit=${Number(p.limit||30)}`);const rows=await r.json();
       body.innerHTML=rows.length?`<div id="stage-changes"></div>`:`<div class="empty">No changes recorded yet.</div>`;
       if(rows.length)renderChangesStrip(rows,document.getElementById("stage-changes"));
+    }else if(v==="budget"){
+      await budgetView(body,p.period||"this_month");
     }else if(v==="history"){
       historyView(body,p.q||"");
     }else if(v==="progress"){
