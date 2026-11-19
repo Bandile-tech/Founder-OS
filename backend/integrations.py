@@ -4,7 +4,7 @@ Integrations — the external systems the day runs on (Phase 6C).
 Primitives: get_or_create, redact, serialize, configured, listing
 Endpoints:  GET /integrations
 
-One row per provider (google_calendar, email, telegram, youtube). Tokens that a provider
+One row per provider (google_calendar, email, telegram, youtube, vault). Tokens that a provider
 hands back at runtime live in ``secret_json``; static tokens stay in environment variables.
 **``secret_json`` is never serialised by any endpoint**, and every log line or stored error
 that could carry a credential goes through ``redact()`` first.
@@ -24,14 +24,16 @@ from database import get_db
 
 router = APIRouter()
 
-PROVIDERS = ("google_calendar", "email", "telegram", "youtube")
-LABELS = {"google_calendar": "Google Calendar", "email": "Email", "telegram": "Telegram", "youtube": "YouTube"}
+PROVIDERS = ("google_calendar", "email", "telegram", "youtube", "vault")
+LABELS = {"google_calendar": "Google Calendar", "email": "Email", "telegram": "Telegram", "youtube": "YouTube",
+          "vault": "Obsidian vault"}
 REDACTED = "***"
 
 # Env vars whose values must never appear in a log line or a stored error.
 SECRET_ENV = ("TELEGRAM_BOT_TOKEN", "EMAIL_APP_PASSWORD", "GOOGLE_CLIENT_SECRET", "JOBS_TOKEN",
               "YOUTUBE_API_KEY", "TELEGRAM_WEBHOOK_SECRET", "OPENAI_API_KEY", "FOUNDER_OS_SECRET",
-              "FOUNDER_OS_PASSWORD")
+              "FOUNDER_OS_PASSWORD", "ANTHROPIC_API_KEY", "GITHUB_WEBHOOK_SECRET", "VAULT_WRITE_TOKEN",
+              "VAPID_PRIVATE_KEY")
 _BOT_PATH = re.compile(r"bot[0-9]+:[A-Za-z0-9_-]+")
 _MIN_SECRET_LEN = 6            # shorter values are too likely to be ordinary words
 
@@ -139,6 +141,8 @@ def configured(provider: str) -> bool:
         return bool(env("TELEGRAM_BOT_TOKEN"))
     if provider == "youtube":
         return bool(env("YOUTUBE_API_KEY"))
+    if provider == "vault":
+        return True                              # the vault repository has a default; a sync either works or says why
     return False
 
 
@@ -174,6 +178,12 @@ def _effective(db: Session, row: models.Integration) -> tuple[str, str | None, l
         if account is not None:
             return ("error" if account.status == "error" else "connected"), account.handle, []
         return ("pending" if ready else "disconnected"), None, []
+    if provider == "vault":
+        live = len(os.getenv("GITHUB_WEBHOOK_SECRET") or "") >= 16
+        export = bool(os.getenv("VAULT_REPO") and os.getenv("VAULT_WRITE_TOKEN"))
+        label = ("updates on every push" if live else "manual sync only") + ("" if export else " · daily export off")
+        status = row.status if row.status in ("connected", "error") else "pending"
+        return status, label, ["sync"]
     return row.status, row.account_label, []
 
 

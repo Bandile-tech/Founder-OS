@@ -329,6 +329,8 @@ def tick(trigger: str = "manual", *, now: datetime | None = None) -> dict:
 
         pending = db.query(models.AgentEvent).filter(
             models.AgentEvent.consumed_at.is_(None)).order_by(models.AgentEvent.id).all()
+        newest = db.query(models.AgentEvent.id).order_by(models.AgentEvent.id.desc()).first()
+        newest_event_id = newest[0] if newest else 0          # anything above this was raised during this tick
         cutoff = now - timedelta(hours=EVENT_TTL_HOURS)
         fresh = [e for e in pending if e.created_at >= cutoff]
         stale = [e for e in pending if e.created_at < cutoff]
@@ -364,6 +366,15 @@ def tick(trigger: str = "manual", *, now: datetime | None = None) -> dict:
             how = why if why == "event" else ("in_process" if trigger == "in_process" else "schedule")
             if trigger == "manual" and why != "event":
                 how = "manual"
+            if spec.events:
+                # Events raised earlier in this same tick (the housekeeper finds a payment
+                # overdue; the alert courier runs last) are handed over now, not at the next
+                # tick: with three wakes a day the next one is hours away.
+                raised = db.query(models.AgentEvent.id).filter(
+                    models.AgentEvent.id > newest_event_id, models.AgentEvent.consumed_at.is_(None),
+                    models.AgentEvent.kind.in_(list(spec.events))).order_by(models.AgentEvent.id).all()
+                event_ids = list(event_ids) + [eid for (eid,) in raised if eid not in event_ids]
+                db.commit()                                   # end this read, so the next one sees later events
             def still_due(run_db, row, spec=spec, event_ids=event_ids, scheduled=(why != "event")):
                 """Looked at again with the claim held: another tick may have run it since
                 this one made its plan."""

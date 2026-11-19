@@ -71,7 +71,7 @@ SPEC = agents.register(AgentSpec(
     description="Raises recurring instalments as they fall due, marks late payments overdue, "
                 "matches logged revenue to open payments and keeps client health current.",
     schedule=Schedule(interval_minutes=60), events=[],
-    permissions=Permissions(tools=[], tables_write=["payments", "recurring_revenue", "clients", "projects"],
+    permissions=Permissions(tools=[], tables_write=["payments", "recurring_revenue", "clients", "projects", "ledger_transactions", "buckets"],
                             may_emit=["payment.overdue"], max_llm_calls=0),
     run=run, phase="5",
 ))

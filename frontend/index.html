@@ -338,6 +338,7 @@ mark.hl{background:rgba(167,235,242,0.18);color:#fff;border-radius:3px;padding:0
 @media(hover:hover) and (pointer:fine){.btn:hover{border-color:rgba(167,235,242,0.45);background:rgba(167,235,242,0.06)}}
 .btn:active{transform:scale(0.97)}
 .btn:disabled{opacity:0.45;cursor:not-allowed;transform:none}
+.toggle:disabled{opacity:0.45;cursor:not-allowed}
 .btn svg{width:1.1em;height:1.1em}
 .btn--primary{color:#E9FBFE;background:linear-gradient(160deg,rgba(167,235,242,0.2),rgba(26,143,191,0.42));border-color:rgba(167,235,242,0.5);box-shadow:inset 0 1px 0 rgba(255,255,255,0.1),0 0 22px -10px rgba(47,211,240,0.8)}
 @media(hover:hover) and (pointer:fine){.btn--primary:hover{border-color:var(--glow);box-shadow:inset 0 1px 0 rgba(255,255,255,0.1),0 0 26px -6px rgba(47,211,240,0.8)}}
@@ -442,6 +443,9 @@ button.chip:active{transform:scale(0.97)}
 .input--file{padding:9px var(--sp-3);height:auto}
 .form-row .push{margin-left:auto}
 .row--wrap{flex-wrap:wrap;row-gap:var(--sp-2)}
+.row > .select{flex:0 1 260px;width:auto;min-width:0}
+button.chip.is-on{border-color:rgba(167,235,242,0.6);color:var(--glow);background:rgba(167,235,242,0.08)}
+.bud-cats .meter + .meter{margin-top:var(--sp-4)}
 .row--wrap .row-main{flex:1 1 220px}
 .toggle--sm{height:32px;min-width:84px;padding:0 var(--sp-3)}
 .dot.blue{--c:var(--blue)}
@@ -684,6 +688,9 @@ button.home-tile:active{transform:scale(0.98)}
 .chg-text,.sug-text,.sug-reason{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .chg-text,.sug-text{color:var(--text)}
 .sug-reason{font-size:var(--fs-2xs);color:var(--muted);margin-top:1px}
+.sug-row--send{align-items:flex-start;background:rgba(167,235,242,0.06);border-color:rgba(167,235,242,0.28)}
+.sug-row--send .sug-reason{white-space:normal}
+.sug-body{margin:var(--sp-2) 0;padding:var(--sp-2) var(--sp-3);border-radius:var(--r-md);background:var(--well);color:var(--text);white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.5;max-height:26vh;overflow:auto}
 .chg-undo,.sug-btn{flex:none;height:28px;padding:0 var(--sp-3);border-radius:var(--r-pill);background:none;border:1px solid var(--line-2);color:var(--glow);cursor:pointer;
   font-size:var(--fs-2xs);letter-spacing:0.1em;text-transform:uppercase;transition:border-color var(--t-fast),background var(--t-fast)}
 .chg-undo:hover,.sug-btn:hover{border-color:var(--glow);background:rgba(167,235,242,0.08)}
@@ -928,6 +935,10 @@ button.home-tile:active{transform:scale(0.98)}
     <button class="nav-item" onclick="nav('business',this)" title="Business">
       <span class="ni"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4.8" width="12" height="8.6" rx="1.7"/><path d="M5.6 4.8V3.9a1.1 1.1 0 0 1 1.1-1.1h2.6a1.1 1.1 0 0 1 1.1 1.1v.9M2 8.4h12"/></svg></span>
       <span class="nav-label">Business</span>
+    </button>
+    <button class="nav-item" onclick="nav('budget',this)" title="Budget">
+      <span class="ni"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="1.8" y="4" width="12.4" height="9" rx="1.6"/><path d="M1.8 6.8h12.4M10.6 10h1.6M4 4V2.8h8V4"/></svg></span>
+      <span class="nav-label">Budget</span>
     </button>
     <button class="nav-item" onclick="nav('warroom',this)" title="War Room">
       <span class="ni"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.6 13.6 4.8v6.4L8 14.4 2.4 11.2V4.8Z"/><circle cx="8" cy="8" r="1.1" fill="currentColor" stroke="none"/></svg></span>
@@ -1240,6 +1251,14 @@ button.home-tile:active{transform:scale(0.98)}
     </section>
 
     <!-- ── APPLICATIONS — deadlines, requirements, gaps ── -->
+    <section class="page" id="p-budget">
+      <div class="page-head">
+        <div><div class="page-eyebrow">Personal</div><h1 class="page-title">Budget</h1><div class="page-sub">What each bucket holds and this month's money in and out. Say what you spent or received and it updates. Tap an entry to move it.</div></div>
+        <div class="page-actions"><span class="badge badge--glow" id="bud-period">—</span></div>
+      </div>
+      <div id="bud-body"><div class="skel skel-row"></div><div class="skel skel-row"></div><div class="skel skel-row"></div></div>
+    </section>
+
     <section class="page" id="p-applications">
       <div class="page-head">
         <div><div class="page-eyebrow">System</div><h1 class="page-title">Applications</h1><div class="page-sub">What each application needs, what is missing and when it is due. Tap a requirement to move it on.</div></div>
@@ -1300,6 +1319,8 @@ button.home-tile:active{transform:scale(0.98)}
           <div class="row"><div class="check checked" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5l3.2 3L13 4.5"/></svg></div><span class="dot dot--sm"></span><div class="row-main"><div class="row-title">A completed row</div></div><span class="row-meta overdue">Due Nov 7</span></div>
           <div class="row"><div class="check" aria-hidden="true"></div><span class="dot dot--sm"></span><div class="row-main"><div class="row-title">A row with a subtitle</div><div class="row-sub">Secondary line in --fs-xs</div></div><span class="row-meta">19:00</span></div>
           <div class="row is-now"><span class="dot glow"></span><div class="row-main"><div class="row-title">The current row</div></div><span class="row-meta">Now</span></div>
+          <div class="row row--wrap"><div class="row-main"><div class="section-label">One tap to choose</div><div class="chips"><button class="chip is-on">Selected</button><button class="chip">Another</button><button class="chip">A third</button></div></div></div>
+          <div class="row row--wrap"><div class="row-main"><div class="row-title">A row with a choice</div><div class="row-sub wrap">One tap changes it; the change shows with Undo.</div></div><span class="row-meta">$0.42</span><select class="select" aria-label="Example choice"><option>First option</option><option>Second option</option></select></div>
         </div>
         <div class="section-label">Messages</div>
         <div class="list">
@@ -1351,6 +1372,12 @@ button.home-tile:active{transform:scale(0.98)}
         <div class="card">
           <div class="card-head"><div class="card-title"><span>Notifications</span></div><span class="badge badge--muted" id="set-notif-state">—</span></div>
           <div id="set-notifications"><div class="skel skel-row"></div><div class="skel skel-row"></div></div>
+        </div>
+      </div>
+      <div class="grid">
+        <div class="card">
+          <div class="card-head"><div class="card-title"><span>Models</span></div><span class="badge badge--muted" id="set-models-spend">—</span></div>
+          <div id="set-models"><div class="skel skel-row"></div><div class="skel skel-row"></div><div class="skel skel-row"></div></div>
         </div>
       </div>
       <div class="grid">
@@ -2020,12 +2047,18 @@ function renderHomeNote(b){
     allDay.slice(0,2).forEach(e=>shown.push(`All day: ${escHtml(e.title||"")}`));
     parts.push(`<b>Today</b> ${shown.join(" · ")}`);
   }
-  const integ=b.integrations||{}, delivery=b.delivery||{};
+  const integ=b.integrations||{}, delivery=b.delivery||{}, sched=b.scheduler||{};
   const sent=_clockOf(delivery.last_sent_at);
-  if(sent)parts.push(`Sent to Telegram at ${escHtml(sent)}`);
+  if(sent)parts.push(`Briefing sent ${delivery.channel==="telegram"?"to Telegram":"to your phone"} at ${escHtml(sent)}`);
   const broken=["google_calendar","email"].some(k=>integ[k]==="error");
   if(broken)parts.push(`<a class="is-warn" role="button" tabindex="0" onclick="openSettings()" onkeydown="if(event.key==='Enter')openSettings()">An integration needs attention</a>`);
-  else if(integ.telegram===false)parts.push(`<a role="button" tabindex="0" onclick="openSettings()" onkeydown="if(event.key==='Enter')openSettings()">Telegram is not paired</a>`);
+  else if(delivery.reachable===false)parts.push(`<a role="button" tabindex="0" onclick="openSettings()" onkeydown="if(event.key==='Enter')openSettings()">Notifications are off</a>`);
+  // When the schedule (the three daily wakes) last ran. Past 26 hours it has stopped.
+  if(sched.stale)parts.push(`<a class="is-warn" role="button" tabindex="0" onclick="openAgentsTile()" onkeydown="if(event.key==='Enter')openAgentsTile()">Last scheduled run: ${escHtml(sched.label||"never")}</a>`);
+  else if(sched.label)parts.push(`Last scheduled run: ${escHtml(sched.label)}`);
+  // The way into the Budget from the command centre: this month's money in and out.
+  const money=HOME_MONEY.line?`${escHtml(HOME_MONEY.line)} this month`:"Budget";
+  parts.push(`<a id="cc-money" role="button" tabindex="0" onclick="openBudgetTile()" onkeydown="if(event.key==='Enter')openBudgetTile()">${money}</a>`);
   el.hidden=!parts.length;
   el.innerHTML=parts.join(" &nbsp;·&nbsp; ");
   el.title=el.textContent;
@@ -2206,7 +2239,7 @@ function closeSidebar(){_setSidebar(false);}
 document.addEventListener("keydown",e=>{if(e.key==="Escape"&&document.body.classList.contains("nav-open"))closeSidebar();});
 
 function renderPage(page){
-  if(page==="home"){renderHome();loadBriefing();}
+  if(page==="home"){renderHome();loadBriefing();loadHomeMoney();}
   else if(page==="syllabus"){renderSyllabus()}
   else if(page==="history"){const h=document.getElementById("hist-body");if(h&&!h.dataset.ready){h.dataset.ready="1";historyView(h,"");}}
   else if(page==="health"){renderHealth()}
@@ -2215,6 +2248,7 @@ function renderPage(page){
   else if(page==="warroom"){renderWarRoom()}
   else if(page==="agents"){renderAgents()}
   else if(page==="business"){renderBusiness()}
+  else if(page==="budget"){renderBudget()}
   else if(page==="applications"){renderApplications()}
   else if(page==="settings"){renderSettings()}
   else if(page==="guide"){renderGuide()}
@@ -2933,6 +2967,9 @@ function _afterWriteRefresh(){
   try{if(document.getElementById("p-syllabus")&&document.getElementById("p-syllabus").classList.contains("active")&&typeof renderSyllabus==="function")renderSyllabus();}catch(_){}
   try{if(document.getElementById("p-business")&&document.getElementById("p-business").classList.contains("active"))renderBusiness();}catch(_){}
   try{if(document.getElementById("p-applications")&&document.getElementById("p-applications").classList.contains("active"))renderApplications();}catch(_){}
+  try{if(document.getElementById("p-budget")&&document.getElementById("p-budget").classList.contains("active"))renderBudget();}catch(_){}
+  try{if(typeof STAGE!=="undefined"&&STAGE.view==="budget")renderStageView();}catch(_){}
+  try{loadHomeMoney();}catch(_){}
 }
 
 function renderChangesStrip(changes,container){
@@ -2988,21 +3025,70 @@ async function undoBatch(batchId,btn){
 
 let _suggestions=[];
 let _suggOpen=false;
+// Sends waiting for a yes. Each gets a card that shows who it goes to and the whole text,
+// with Confirm (the tap is the approval) and a way to drop it.
+let _pendingSends=[];
 function toggleSuggestions(force){
   _suggOpen=force!==undefined?force:!_suggOpen;
   const host=document.getElementById("ucmd-pending"), chip=document.getElementById("sugg-chip");
-  if(host)host.classList.toggle("show",_suggOpen&&_suggestions.length>0);
+  if(host)host.classList.toggle("show",_suggOpen&&(_suggestions.length+_pendingSends.length)>0);
   if(chip)chip.setAttribute("aria-expanded",String(_suggOpen));
+}
+async function loadPendingActions(open){
+  try{
+    const r=await fetch(`${API_BASE}/actions/pending`);
+    if(!r.ok)return;
+    const d=await r.json();
+    const had=_pendingSends.length;
+    _pendingSends=(Array.isArray(d)?d:[]).filter(a=>a.kind==="send_outreach"&&a.send);
+    if(_pendingSends.length&&(open||_pendingSends.length>had))_suggOpen=true;     // a new one opens itself
+    renderSuggestions();
+  }catch(_){}
+}
+function _sendCard(a){
+  const sd=a.send, channel={whatsapp:"WhatsApp",email:"Email",linkedin:"LinkedIn message"}[sd.channel]||_cap(sd.channel||"message");
+  const who=`${sd.to_name||"the lead"}${sd.to?` <${sd.to}>`:""}`;
+  return `<div class="sug-row sug-row--send" id="pend-${Number(a.id)}">
+      <span class="chg-act">Send</span>
+      <div class="sug-main"><div class="sug-text">${escHtml(channel)} to ${escHtml(who)}</div>
+        ${sd.subject?`<div class="sug-reason">Subject: ${escHtml(sd.subject)}</div>`:""}
+        <div class="sug-body">${escHtml(sd.body||"")}</div>
+        ${sd.recipient_changed?`<div class="sug-reason">The address changed after this was asked for. Ask for the send again.</div>`:`<div class="sug-reason">Nothing has been sent. A sent message cannot be undone.</div>`}</div>
+      <button class="sug-btn accept" onclick="confirmPending(${Number(a.id)},this)"${sd.recipient_changed?" disabled":""}>Confirm</button>
+      <button class="sug-btn dismiss" onclick="cancelPending(${Number(a.id)},this)" aria-label="Do not send">✕</button>
+    </div>`;
+}
+async function confirmPending(id,btn){
+  if(btn){btn.disabled=true;btn.textContent="…";}
+  try{
+    const r=await fetch(`${API_BASE}/actions/${id}/confirm`,{method:"POST"});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(d.detail||("HTTP "+r.status));
+    if(d.executed){
+      if(d.open_url){window.open(d.open_url,"_blank","noopener");showToast("WhatsApp is open: press send there","success");}
+      else showToast("Sent","success");
+    }else showToast(d.reason||d.error||"Not sent","error");
+  }catch(e){showToast("Could not send: "+e.message,"error");}
+  await loadPendingActions();
+  _afterWriteRefresh();
+}
+async function cancelPending(id,btn){
+  if(btn)btn.disabled=true;
+  try{await fetch(`${API_BASE}/actions/${id}/cancel`,{method:"POST"});showToast("Not sent. The draft is kept.","info");}catch(_){}
+  await loadPendingActions();
+  _afterWriteRefresh();
 }
 function renderSuggestions(){
   const host=document.getElementById("ucmd-pending"), chip=document.getElementById("sugg-chip"), chipText=document.getElementById("sugg-chip-text");
   if(!host)return;
-  if(!_suggestions.length){host.classList.remove("show");host.innerHTML="";if(chip)chip.style.display="none";_suggOpen=false;return;}
-  if(chip){chip.style.display="inline-flex";if(chipText)chipText.textContent=`${_suggestions.length} suggestion${_suggestions.length>1?"s":""}`;}
+  const sends=_pendingSends.length, sugg=_suggestions.length;
+  if(!sugg&&!sends){host.classList.remove("show");host.innerHTML="";if(chip)chip.style.display="none";_suggOpen=false;return;}
+  const waiting=[sends?`${sends} send${sends>1?"s":""} to confirm`:null,sugg?`${sugg} suggestion${sugg>1?"s":""}`:null].filter(Boolean).join(" · ");
+  if(chip){chip.style.display="inline-flex";if(chipText)chipText.textContent=waiting;chip.setAttribute("aria-expanded",String(_suggOpen));}
   host.classList.toggle("show",_suggOpen);
   const kindLabel=k=>k==="todo_add"?"Add task":k==="todo_complete"?"Complete":k==="inbox_add"?"Inbox idea":k==="project_pause"?"Pause project":k==="lead_reply"?"Mark replied":k==="client_add"?"Add client":k;
-  host.innerHTML=`<div class="chg-head"><span>${_suggestions.length} suggestion${_suggestions.length>1?"s":""} waiting</span><button class="sug-btn dismiss" onclick="toggleSuggestions(false)" aria-label="Hide">✕</button></div>
-    <div class="sug-strip">${_suggestions.map(sg=>`
+  host.innerHTML=`<div class="chg-head"><span>${escHtml(waiting)} waiting</span><button class="sug-btn dismiss" onclick="toggleSuggestions(false)" aria-label="Hide">✕</button></div>
+    <div class="sug-strip">${_pendingSends.map(_sendCard).join("")}${_suggestions.map(sg=>`
       <div class="sug-row" id="sug-${Number(sg.id)}">
         <span class="chg-act">${escHtml(kindLabel(sg.kind))}</span>
         <div class="sug-main"><div class="sug-text">${escHtml(sg.text||"")}</div><div class="sug-reason">${escHtml(sg.reason||"")}${sg.confidence!=null?` · ${Math.round(sg.confidence*100)}%`:""}</div></div>
@@ -3144,7 +3230,7 @@ async function submitUnifiedInput(){
     result.insertAdjacentHTML("beforeend",`<div id="ucmd-changes"></div>`);
     setOrbState("speaking",(finalText||loggedSummary||"").replace(/[*_#`>]/g,"").slice(0,140),6000);
     renderChangesStrip(finalChanges);
-    loadSuggestions();
+    loadSuggestions();loadPendingActions();
     saveState();
 
     // Voice loop: speak the reply if this input came from the mic.
@@ -3187,15 +3273,81 @@ function mdHtml(text){
    SETTINGS
 ═══════════════════════════════════════════════════ */
 /* ── Settings: integrations and notifications ── */
-const SET={integrations:[],notif:null,recent:[],pairOpen:false};
+const SET={integrations:[],notif:null,recent:[],pairOpen:false,models:null};
 const INTEG_NEEDS={google_calendar:"Needs GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and FOUNDER_OS_API_URL on the server.",
   email:"Needs EMAIL_ADDRESS and EMAIL_APP_PASSWORD on the server.",telegram:"Needs TELEGRAM_BOT_TOKEN on the server.",
+  vault:"The vault repository is not set on the server.",
   youtube:"Needs YOUTUBE_API_KEY on the server."};
 const INTEG_ACTIONS={connect:"Connect",sync:"Sync",disconnect:"Disconnect",pair:"Pair",set_webhook:"Set webhook"};
+
+// ── Web Push on this device ──
+const PUSH={supported:("serviceWorker" in navigator)&&("PushManager" in window)&&("Notification" in window),on:false};
+function _b64urlBytes(text){
+  const pad="=".repeat((4-text.length%4)%4), raw=atob((text+pad).replace(/-/g,"+").replace(/_/g,"/"));
+  return Uint8Array.from(raw,c=>c.charCodeAt(0));
+}
+async function _pushSubscription(){
+  if(!PUSH.supported)return null;
+  try{const reg=await navigator.serviceWorker.getRegistration("./");return reg?await reg.pushManager.getSubscription():null;}
+  catch(_){return null;}
+}
+async function pushRefresh(){PUSH.on=!!(await _pushSubscription());}
+async function pushToggle(btn){
+  if(btn)btn.disabled=true;
+  try{
+    const current=await _pushSubscription();
+    if(current){
+      await _setTap(null,"POST","/push/unsubscribe",{endpoint:current.endpoint});
+      await current.unsubscribe();
+      showToast("Notifications are off for this device","info");
+    }else{
+      const key=((SET.notif||{}).push||{}).public_key;
+      if(!key){showToast("The server has no push keys yet","error");return;}
+      if(await Notification.requestPermission()!=="granted"){showToast("Notifications are blocked for this site. Allow them in the browser's settings, then try again.","error");return;}
+      const reg=await navigator.serviceWorker.register("sw.js",{scope:"./"});
+      await navigator.serviceWorker.ready;
+      const made=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:_b64urlBytes(key)});
+      const j=made.toJSON();
+      const saved=await _setTap(null,"POST","/push/subscribe",{endpoint:j.endpoint,keys:j.keys});
+      if(!saved){await made.unsubscribe();return;}
+      showToast("Notifications are on for this device","success");
+    }
+  }catch(e){showToast("Could not change notifications: "+e.message,"error");}
+  finally{
+    await pushRefresh();
+    try{SET.notif=await _bizGet("/notifications/settings");}catch(_){}
+    renderNotifications();try{loadBriefing();}catch(_){}
+  }
+}
+
+// A tap on a notification opens the app at #go=<view>. An app that is already open is told
+// by the service worker instead. Either way: go to the view the notification is about.
+function goTarget(target){
+  const [page,tab]=String(target||"home").split(":");
+  const railItem=name=>document.querySelector(`.nav-item[onclick*="nav('${name}'"]`);
+  if(page==="business")openBusinessTile(tab||undefined);
+  else if(page==="settings")openSettings();
+  else if(page==="applications")openApplicationsTile();
+  else if(page==="syllabus")openAcademicsTile();
+  else if(page==="agents")openAgentsTile();
+  else if(page==="budget")openBudgetTile();
+  else if(page==="history")nav("history",railItem("history"));
+  else nav("home",railItem("home"));
+}
+function handleGoHash(href){
+  const hash=href?(new URL(href,location.href).hash):location.hash;
+  if(!hash||!hash.startsWith("#go="))return false;
+  goTarget(decodeURIComponent(hash.slice(4)));
+  try{history.replaceState(null,"",location.pathname+location.search);}catch(_){}
+  return true;
+}
+window.addEventListener("hashchange",()=>handleGoHash());
+if("serviceWorker" in navigator)navigator.serviceWorker.addEventListener("message",ev=>{if(ev.data&&ev.data.type==="founder-os-go")handleGoHash(ev.data.url);});
 
 async function loadSettingsCards(){
   const box=document.getElementById("set-integrations"), nbox=document.getElementById("set-notifications");
   if(!box||!nbox)return;
+  await pushRefresh();
   try{
     const [integ,notif,recent]=await Promise.all([_bizGet("/integrations"),_bizGet("/notifications/settings"),_bizGet("/notifications?limit=10")]);
     SET.integrations=integ;SET.notif=notif;SET.recent=recent;
@@ -3203,6 +3355,166 @@ async function loadSettingsCards(){
   }catch(e){
     box.innerHTML=nbox.innerHTML=`<div class="empty">Could not load — the backend is not reachable.</div>`;
   }
+}
+
+// ── Budget: buckets, the month's money in and out, spending by category, transactions ──
+// One renderer for the Budget page and the "budget" stage view. Every figure comes from the
+// server already formatted; nothing is added up here.
+const BUD={open:null,categories:["food","data","transport","church","school","business","health","other"]};
+function openBudgetTile(){nav("budget",document.querySelector(".nav-item[title='Budget']"));}
+function renderBudget(){
+  const host=document.getElementById("bud-body");
+  if(host)budgetView(host,"this_month");
+}
+const HOME_MONEY={line:null};
+async function loadHomeMoney(){
+  try{
+    const d=await _bizGet("/finance/summary");
+    const m=(d.money||[])[0];
+    HOME_MONEY.line=d.transactions_total&&m?`In ${m.in} · Out ${m.out}`:null;
+  }catch(_){HOME_MONEY.line=null;}
+  const link=document.getElementById("cc-money");
+  if(link)link.textContent=HOME_MONEY.line?`${HOME_MONEY.line} this month`:"Budget";
+}
+function _budDay(t){return new Date(t.occurred_at+"T00:00:00").toLocaleDateString("en-GB",{day:"numeric",month:"short"});}
+// One row per thing that happened. An income split across buckets is one row; a tap shows
+// where each part went. The totals come from the server.
+function _budEntry(legs,buckets){
+  const t=legs[0], many=legs.length>1, open=BUD.open===t.entry_id;
+  const sign=t.transfer?"":t.direction==="in"?"+":"−";
+  const title=t.transfer?"Moved between buckets":(t.note||_cap(t.category||(t.direction==="in"?"income":"spending")));
+  const where=t.transfer?null:many?`split across ${legs.length} buckets`:t.bucket;
+  const sub=[_budDay(t),where,t.transfer||t.direction==="in"?null:t.category,t.payment_id?"client payment":null].filter(Boolean).join(" · ");
+  let detail="";
+  if(open){
+    if(many){
+      detail=legs.map(l=>`<div class="row"><span class="dot dot--sm"></span><div class="row-main"><div class="row-sub">${escHtml(l.bucket||"")}</div></div><span class="row-meta">${l.direction==="in"?"+":"−"}${escHtml(l.amount)}</span></div>`).join("");
+      if(!t.payment_id&&!t.transfer)detail+=`<div class="row"><div class="row-main"><div class="row-sub wrap">To change the amount, remove this and say it again.</div></div><div class="row-actions"><button class="btn btn--sm btn--danger" data-id="${t.id}" data-legs="${legs.length}" onclick="budRemove(this)">Remove</button></div></div>`;
+    }else{
+      const bucketChips=buckets.map(b=>`<button class="chip${b.id===t.bucket_id?" is-on":""}" data-id="${t.id}" data-bucket="${b.id}" onclick="budMove(this)">${escHtml(b.name)}</button>`).join("");
+      const cats=t.direction==="out"?BUD.categories.map(c=>`<button class="chip${c===t.category?" is-on":""}" data-id="${t.id}" data-category="${escHtml(c)}" onclick="budCategory(this)">${escHtml(_cap(c))}</button>`).join(""):"";
+      detail=`<div class="row row--wrap">
+        <div class="row-main"><div class="section-label">Bucket</div><div class="chips">${bucketChips}</div>
+        ${cats?`<div class="section-label">Category</div><div class="chips">${cats}</div>`:""}</div>
+        ${t.payment_id?"":`<div class="row-actions"><button class="btn btn--sm btn--danger" data-id="${t.id}" data-legs="1" onclick="budRemove(this)">Remove</button></div>`}
+      </div>`;
+    }
+  }
+  return `<div class="row row--tap" data-entry="${escHtml(t.entry_id)}" aria-expanded="${open}" onclick="budToggle(this)">
+      <span class="dot dot--sm${t.direction==="in"&&!t.transfer?" glow":""}"></span>
+      <div class="row-main"><div class="row-title">${escHtml(title)}</div><div class="row-sub">${escHtml(sub)}</div></div>
+      <span class="row-meta">${sign}${escHtml(t.entry_amount)}</span>
+    </div>${detail}`;
+}
+function _budEntries(rows,buckets){
+  const order=[], groups={};
+  rows.forEach(t=>{if(!groups[t.entry_id]){groups[t.entry_id]=[];order.push(t.entry_id);}groups[t.entry_id].push(t);});
+  return order.map(id=>_budEntry(groups[id].slice().sort((a,b)=>a.id-b.id),buckets)).join("");
+}
+async function budgetView(host,period){
+  BUD.host=host;BUD.period=period||"this_month";
+  let d,rows;
+  try{[d,rows]=await Promise.all([_bizGet(`/finance/summary?period=${encodeURIComponent(BUD.period)}`),_bizGet(`/finance/transactions?limit=120`)]);}
+  catch(e){host.innerHTML=`<div class="empty">Could not load the budget — the backend is not reachable.</div>`;return;}
+  if(BUD.host!==host)return;
+  safeUpdate("bud-period",d.period.label);
+  if(!d.buckets.length&&!rows.length){
+    host.innerHTML=`<div class="card"><div class="empty">Nothing here yet. Tell Founder OS what you spent or received ("spent K50 on lunch, got K800 from Bel"), and how to split your income ("split my income 10 tithe, 40 business, 20 invest, 10 save, 20 personal").</div></div>`;
+    return;
+  }
+  const buckets=d.buckets.filter((b,i,all)=>all.findIndex(x=>x.id===b.id)===i&&!b.is_unallocated);
+  const kpis=d.buckets.map(b=>{
+    const tags=[b.is_default?"spending comes from here":null,b.is_remainder?"takes leftover ngwee":null,b.is_unallocated?"waiting for a split":null].filter(Boolean).join(" · ");
+    return `<div class="kpi"><div class="kpi-label">${escHtml(b.name)}</div><div class="kpi-value">${b.balance_minor<0?`<span class="red">${escHtml(b.balance)}</span>`:escHtml(b.balance)}</div><div class="kpi-sub">${escHtml(tags||" ")}</div></div>`;
+  }).join("");
+  const money=d.money.map(m=>`
+      <div class="row"><div class="row-main"><div class="row-title">Money in</div></div><span class="row-meta">${escHtml(m.in)}</span></div>
+      <div class="row"><div class="row-main"><div class="row-title">Money out</div></div><span class="row-meta">${escHtml(m.out)}</span></div>
+      <div class="row"><div class="row-main"><div class="row-title">Left from this period</div></div><span class="row-meta">${escHtml(m.net)}</span></div>`).join("");
+  const split=Object.keys(d.rules).map(k=>`<div class="row"><div class="row-main"><div class="row-title">${k==="default"?"Income split":escHtml(_cap(k))+" income"}</div><div class="row-sub wrap">${escHtml(d.rules[k].map(r=>`${r.pct} ${r.bucket}`).join(" · "))}</div></div></div>`).join("")
+    ||`<div class="row"><div class="row-main"><div class="row-title">Income split</div><div class="row-sub wrap">Not set. Say how to split your income and it will be.</div></div></div>`;
+  const top=Math.max(1,...d.by_category.map(c=>c.total_minor));
+  const cats=d.by_category.map(c=>`<div class="meter"><div class="meter-head"><span>${escHtml(_cap(c.category))}</span><span class="v">${escHtml(c.total)}</span></div><div class="bar"><div class="bar-fill" style="width:${Math.round(100*c.total_minor/top)}%"></div></div></div>`).join("")
+    ||`<div class="empty">Nothing spent in ${escHtml(d.period.label)}.</div>`;
+  host.innerHTML=`
+    <div class="kpis">${kpis}</div>
+    <div class="grid mt-5">
+      <div class="card"><div class="card-head"><div class="card-title"><span>${escHtml(_cap(d.period.label))}</span></div></div><div class="list">${money}${split}</div></div>
+      <div class="card"><div class="card-head"><div class="card-title"><span>Spending by category</span></div></div><div class="bud-cats">${cats}</div></div>
+    </div>
+    <div class="card mt-5"><div class="card-head"><div class="card-title"><span>Transactions</span></div><span class="badge badge--muted">${d.transactions_total} in all</span></div>
+      <div class="list">${_budEntries(rows,buckets)||`<div class="empty">No transactions yet.</div>`}</div></div>`;
+}
+function budToggle(el){
+  const id=el.dataset.entry;
+  BUD.open=BUD.open===id?null:id;
+  if(BUD.host)budgetView(BUD.host,BUD.period);
+}
+async function _budPatch(id,body){
+  const d=await _setTap(null,"PATCH",`/finance/transactions/${id}`,body);
+  if(d&&d.change)showChanges([d.change]);
+  if(BUD.host)budgetView(BUD.host,BUD.period);
+  loadHomeMoney();
+}
+function budMove(btn){event.stopPropagation();_budPatch(Number(btn.dataset.id),{bucket_id:Number(btn.dataset.bucket)});}
+function budCategory(btn){event.stopPropagation();_budPatch(Number(btn.dataset.id),{category:btn.dataset.category});}
+async function budRemove(btn){
+  event.stopPropagation();
+  const legs=Number(btn.dataset.legs||1);
+  if(!confirm(legs>1?"Remove this income from every bucket it was split into? You can undo it.":"Remove this entry? You can undo it."))return;
+  const d=await _setTap(btn,"DELETE",`/finance/transactions/${Number(btn.dataset.id)}`);
+  if(d&&d.changes)showChanges(d.changes);
+  BUD.open=null;
+  if(BUD.host)budgetView(BUD.host,BUD.period);
+  loadHomeMoney();
+}
+
+// ── Settings: which model each task uses, and what it has cost this month ──
+function _usdEst(n){
+  const v=Number(n||0);
+  return "$"+(v>0&&v<0.01?v.toFixed(4):v.toFixed(2));
+}
+async function loadModels(){
+  const box=document.getElementById("set-models");
+  if(!box)return;
+  try{SET.models=await _bizGet("/models/routes");}
+  catch(e){SET.models=null;box.innerHTML=`<div class="empty">Could not load the models — the backend is not reachable.</div>`;return;}
+  renderModels();
+}
+function renderModels(){
+  const box=document.getElementById("set-models"), m=SET.models;
+  if(!box||!m)return;
+  const cap=m.cap||{};
+  safeUpdate("set-models-spend",cap.monthly_cap_usd?`${_usdEst(cap.month_to_date_usd)} of ${_usdEst(cap.monthly_cap_usd)} this month`:`${_usdEst(cap.month_to_date_usd)} this month`);
+  const chat=m.models.filter(x=>x.kind==="chat");
+  const rows=m.routes.map(r=>{
+    const notes=[r.key_set?r.provider_label:`${r.provider_label} · its key is not set on the server`];
+    if(r.serving_model&&r.serving_model!==r.model)notes.push(`over the cap, so running on ${r.serving_model}`);
+    else if(r.fallback_model)notes.push(r.fallback_ready?`falls back to ${r.fallback_model}`:`no fallback until the other provider's key is set`);
+    let control=`<span class="row-meta">${escHtml(r.model)}</span>`;
+    if(!r.openai_only){
+      const options=chat.some(c=>c.model===r.model)?chat:[{model:r.model,provider_label:r.provider_label},...chat];
+      control=`<select class="select" aria-label="Model for ${escHtml(r.label)}" data-task="${escHtml(r.task)}" onchange="modelRouteSet(this)">${options.map(c=>`<option value="${escHtml(c.model)}"${c.model===r.model?" selected":""}>${escHtml(c.provider_label)} · ${escHtml(c.model)}</option>`).join("")}</select>`;
+    }
+    return `<div class="row row--wrap">
+      <div class="row-main"><div class="row-title">${escHtml(r.label)}</div><div class="row-sub wrap">${escHtml(notes.join(" · "))}</div></div>
+      <span class="row-meta" title="${r.calls_this_month} call${r.calls_this_month===1?"":"s"} this month">${_usdEst(r.month_to_date_usd)}</span>
+      ${control}
+    </div>`;
+  }).join("");
+  const capLine=cap.monthly_cap_usd
+    ?(cap.over_threshold?`Spend has passed 80% of the cap, so the dearer tasks run on ${cap.cheapest_model||"the cheapest model"} until next month.`:`At 80% of the cap the dearer tasks move to the cheapest model.`)
+    :`No monthly cap is set (MONTHLY_LLM_CAP_USD on the server).`;
+  box.innerHTML=`<div class="list">${rows}</div>
+    <div class="hint mt-3">Amounts are estimates for this month. You can also say it: "use Claude for chat". ${escHtml(capLine)} Voice, search and transcription run on OpenAI only.</div>`;
+}
+async function modelRouteSet(sel){
+  const d=await _setTap(null,"PATCH",`/models/routes/${encodeURIComponent(sel.dataset.task)}`,{model:sel.value});
+  if(d){
+    if(d.change)showChanges([d.change]);
+    if(d.warning)showToast(d.warning,"info");
+  }
+  loadModels();
 }
 
 function _integBadge(status){
@@ -3213,6 +3525,7 @@ function _integBadge(status){
 function _integSub(i){
   if(i.status==="error")return i.last_error||"Needs attention.";
   if(i.status==="connected")return [i.account_label,i.last_sync_at?`synced ${_ago(i.last_sync_at)}`:null].filter(Boolean).join(" · ")||"Connected.";
+  if(i.provider==="vault"&&i.status!=="error")return i.last_sync_at?`Vault synced ${_ago(i.last_sync_at)} · ${i.account_label||""}`:`Not synced yet · ${i.account_label||""}`;
   if(i.status==="pending"){
     if(i.provider==="telegram")return "Send the code below to the bot to pair your phone.";
     if(i.provider==="email")return `${i.account_label||"Email"} · not checked yet. Tap Sync.`;
@@ -3275,6 +3588,15 @@ async function integAction(btn){
     return;
   }
   if(action==="sync"){
+    if(provider==="vault"){
+      const v=await _setTap(btn,"POST","/vault/sync");
+      if(v){
+        if((v.errors||[]).length)showToast("The vault could not be synced: "+v.errors[0],"error");
+        else showToast(`Vault synced: ${v.files_processed} note${v.files_processed===1?"":"s"} read`,"success");
+        loadSettingsCards();
+      }
+      return;
+    }
     const d=await _setTap(btn,"POST",provider==="email"?"/integrations/email/sync":"/integrations/google/sync");
     if(d){
       if(d.ok===false)showToast(d.error||"Sync failed","error");
@@ -3299,7 +3621,13 @@ function _notifBadge(n){
 function renderNotifications(){
   const box=document.getElementById("set-notifications"), s=SET.notif;
   if(!box||!s)return;
-  safeUpdate("set-notif-state",!s.enabled?"Off":s.paired?"Telegram":"Not paired");
+  safeUpdate("set-notif-state",!s.enabled?"Off":s.channel==="push"?"This device and others":s.channel==="telegram"?"Telegram":"No device yet");
+  const pushCfg=s.push||{};
+  const deviceHint=!PUSH.supported?"This browser cannot receive notifications."
+    :!pushCfg.configured?"Needs VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY on the server."
+    :`On iPhone, notifications only work from the app added to the Home Screen (Share, then Add to Home Screen). ${pushCfg.subscriptions} device${pushCfg.subscriptions===1?"":"s"} on.`;
+  const deviceRow=`<div class="field"><div class="field-label">This device</div><div class="field-control"><button class="toggle ${PUSH.on?"is-on":"is-off"}" aria-pressed="${!!PUSH.on}" onclick="pushToggle(this)"${PUSH.supported&&pushCfg.configured?"":" disabled"}>${PUSH.on?"On":"Off"}</button><span class="hint">${escHtml(deviceHint)}</span></div></div>`;
+  const quietNote=s.quiet_hours_env?`<span class="hint">The server's QUIET_HOURS (${escHtml(s.quiet_hours_env)}) is in force: nothing at all is sent inside it.</span>`:"";
   const time=(key,value,label)=>`<input class="input input--narrow" type="time" value="${escHtml(value||"")}" aria-label="${escHtml(label)}" onchange="notifPatch('${key}',this.value)">`;
   const caps=[...new Set([4,6,8,12,16,24,Number(s.daily_cap)])].sort((a,b)=>a-b);
   const sev={info:"Everything",warn:"Warnings and critical",critical:"Critical only"};
@@ -3308,10 +3636,11 @@ function renderNotifications(){
       <span class="row-meta">${escHtml(_ago(n.sent_at||n.created_at))}</span>${_notifBadge(n)}
     </div>`).join("")||`<div class="empty">Nothing has been sent yet.</div>`;
   box.innerHTML=`
-    <div class="field"><div class="field-label">Messages</div><div class="field-control"><button class="toggle ${s.enabled?"is-on":"is-off"}" aria-pressed="${!!s.enabled}" onclick="notifPatch('enabled',${!s.enabled})">${s.enabled?"On":"Off"}</button><span class="hint">${s.paired?"Sent to your Telegram.":"Pair Telegram under Integrations to receive them."}</span></div></div>
+    <div class="field"><div class="field-label">Messages</div><div class="field-control"><button class="toggle ${s.enabled?"is-on":"is-off"}" aria-pressed="${!!s.enabled}" onclick="notifPatch('enabled',${!s.enabled})">${s.enabled?"On":"Off"}</button><span class="hint">${s.channel==="push"?"Sent as notifications to the devices that are switched on.":s.channel==="telegram"?"Sent to your Telegram.":"Switch this device on below to receive them."}</span></div></div>
+    ${deviceRow}
     <div class="field"><div class="field-label">Morning briefing</div><div class="field-control">${time("morning_time",s.morning_time,"Morning briefing time")}</div></div>
-    <div class="field"><div class="field-label">Evening review</div><div class="field-control">${time("evening_time",s.evening_time,"Evening review time")}${s.evening_time?`<button class="btn btn--sm btn--ghost" onclick="notifPatch('evening_time','off')">Turn off</button>`:`<span class="hint">Off. Pick a time to turn it on.</span>`}</div></div>
-    <div class="field"><div class="field-label">Quiet hours</div><div class="field-control">${time("quiet_start",s.quiet_start,"Quiet hours start")}<span class="hint">to</span>${time("quiet_end",s.quiet_end,"Quiet hours end")}</div></div>
+    <div class="field"><div class="field-label">Evening check</div><div class="field-control">${time("evening_time",s.evening_time,"Evening review time")}${s.evening_time?`<button class="btn btn--sm btn--ghost" onclick="notifPatch('evening_time','off')">Turn off</button>`:`<span class="hint">Off. Pick a time to turn it on.</span>`}</div></div>
+    <div class="field"><div class="field-label">Quiet hours</div><div class="field-control">${time("quiet_start",s.quiet_start,"Quiet hours start")}<span class="hint">to</span>${time("quiet_end",s.quiet_end,"Quiet hours end")}${quietNote}</div></div>
     <div class="field"><div class="field-label">Alerts</div><div class="field-control"><select class="select input--narrow" aria-label="Least serious alert to send" onchange="notifPatch('alert_min_severity',this.value)">${Object.keys(sev).map(k=>`<option value="${k}"${s.alert_min_severity===k?" selected":""}>${sev[k]}</option>`).join("")}</select></div></div>
     <div class="field"><div class="field-label">Daily cap</div><div class="field-control"><select class="select input--narrow" aria-label="Most messages in a day" onchange="notifPatch('daily_cap',Number(this.value))">${caps.map(c=>`<option value="${c}"${Number(s.daily_cap)===c?" selected":""}>${c} a day</option>`).join("")}</select></div></div>
     <div class="cluster mt-3"><button class="btn" onclick="notifSend(this,'/notifications/test')">Send test</button><button class="btn" onclick="notifSend(this,'/notifications/brief-now')">Brief now</button></div>
@@ -3327,7 +3656,7 @@ async function notifPatch(key,value){
 async function notifSend(btn,path){
   const d=await _setTap(btn,"POST",path);
   if(!d)return;
-  if(d.status==="sent")showToast("Sent to Telegram","success");
+  if(d.status==="sent")showToast("Sent","success");
   else showToast(d.error||`Not sent (${d.status})`,"error");
   try{SET.recent=await _bizGet("/notifications?limit=10");}catch(_){}
   renderNotifications();try{loadBriefing();}catch(_){}
@@ -3346,6 +3675,7 @@ function handleReturnHash(){
 
 function renderSettings(){
   loadSettingsCards();
+  loadModels();
   const ss=document.getElementById("social-score-slider");
   const sv=document.getElementById("social-score-val");
   if(ss){ss.value=S.social;sv.textContent=S.social;ss.style.setProperty("--pct",S.social+"%");}
@@ -3495,7 +3825,7 @@ async function speakText(text){
    STAGE — show_view directives from the orchestrator (view name + params only, never HTML)
 ═══════════════════════════════════════════════════ */
 const STAGE={open:false,view:null,params:null,voice:false};
-const STAGE_TITLES={syllabus:"Syllabus",brief:"Today's Brief",deadlines:"Deadlines",note:"Note",changes:"Recent changes",progress:"Progress",history:"Conversations"};
+const STAGE_TITLES={syllabus:"Syllabus",brief:"Today's Brief",deadlines:"Deadlines",note:"Note",changes:"Recent changes",progress:"Progress",history:"Conversations",budget:"Budget"};
 const STAGE_VIEWS=new Set(Object.keys(STAGE_TITLES));
 
 function _moveOrb(toStage){
@@ -3639,6 +3969,8 @@ async function renderStageView(){
       const r=await fetch(`${API_BASE}/changes?limit=${Number(p.limit||30)}`);const rows=await r.json();
       body.innerHTML=rows.length?`<div id="stage-changes"></div>`:`<div class="empty">No changes recorded yet.</div>`;
       if(rows.length)renderChangesStrip(rows,document.getElementById("stage-changes"));
+    }else if(v==="budget"){
+      await budgetView(body,p.period||"this_month");
     }else if(v==="history"){
       historyView(body,p.q||"");
     }else if(v==="progress"){
@@ -3771,10 +4103,16 @@ function _liveSend(event){
   if(LIVE.dc&&LIVE.dc.readyState==="open")LIVE.dc.send(JSON.stringify(event));
 }
 
-async function _liveSaveTranscript(role,text,changes){
+// The server needs to know which of his spoken turns a tool call follows, and which turn a
+// transcript line is the words of: a spoken yes only approves what was put to him before he
+// said it. A turn starts when he starts speaking; a response belongs to the turn that was
+// current when it was created (so a call from a response he has since talked over keeps its
+// own, earlier, turn).
+async function _liveSaveTranscript(role,text,changes,userTurn){
   try{
     await fetch(`${API_BASE}/voice/realtime/transcript`,{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({role,text,voice_session_id:LIVE.session?.voice_session_id,changes:changes&&changes.length?changes:null})});
+      body:JSON.stringify({role,text,voice_session_id:LIVE.session?.voice_session_id,changes:changes&&changes.length?changes:null,
+        user_turn:role==="user"?(userTurn??LIVE.userTurn??0):null})});
   }catch(_){}
 }
 
@@ -3784,9 +4122,11 @@ async function _liveRunTool(call){
   let payload={call_id:call.call_id,name:call.name,result:{error:"tool bridge failed"},output:JSON.stringify({error:"tool bridge failed"}),changes:[]};
   try{
     const r=await fetch(`${API_BASE}/voice/realtime/tool`,{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({name:call.name,arguments:call.arguments,call_id:call.call_id,voice_session_id:LIVE.session?.voice_session_id})});
+      body:JSON.stringify({name:call.name,arguments:call.arguments,call_id:call.call_id,voice_session_id:LIVE.session?.voice_session_id,
+        user_turn:call.userTurn??LIVE.userTurn??0})});
     if(r.ok)payload=await r.json();
   }catch(_){}
+  if(call.name==="request_send"||call.name==="confirm_action"||call.name==="cancel_action"||call.name==="propose_delete"){try{loadPendingActions(call.name==="request_send");}catch(_){}}
   _liveLine("act",`${call.name}: ${payload.summary||payload.result?.error||"done"}`);
   if(payload.ui_directive)handleUiDirective(payload.ui_directive);
   if(payload.changes&&payload.changes.length)LIVE.pendingChanges.push(...payload.changes);
@@ -3800,7 +4140,12 @@ function _liveHandleEvent(ev){
   const t=ev.type||"";
   if(t==="session.started"||t==="session.created"){
     _liveTouch();_liveSetState("listening","listening");
+    LIVE.userTurn=0;LIVE.respTurn=null;LIVE.turnOf={};
+  }else if(t==="response.created"){
+    LIVE.respTurn=LIVE.userTurn||0;
   }else if(t==="input_audio_buffer.speech_started"){
+    LIVE.userTurn=(LIVE.userTurn||0)+1;
+    if(ev.item_id){LIVE.turnOf=LIVE.turnOf||{};LIVE.turnOf[ev.item_id]=LIVE.userTurn;}
     _liveTouch();
     // Barge-in: server VAD cancels the response; the remote audio stops on its own.
     if(LIVE.partialEl){LIVE.partialEl.remove();LIVE.partialEl=null;LIVE.partial="";}
@@ -3809,7 +4154,7 @@ function _liveHandleEvent(ev){
     _liveTouch();_liveSetState("thinking","thinking");
   }else if(t==="conversation.item.input_audio_transcription.completed"){
     const text=(ev.transcript||"").trim();
-    if(text){_liveLine("you",text);_liveSaveTranscript("user",text);}
+    if(text){_liveLine("you",text);_liveSaveTranscript("user",text,null,(LIVE.turnOf||{})[ev.item_id]);}
   }else if(t==="response.output_audio_transcript.delta"||t==="response.audio_transcript.delta"){
     _liveTouch();
     if(LIVE.state!=="speaking")_liveSetState("speaking","speaking");
@@ -3823,7 +4168,7 @@ function _liveHandleEvent(ev){
     if(text)setOrbState("speaking",text.slice(0,140));   // the bubble shows what was said
     if(text){const ch=LIVE.pendingChanges.splice(0);_liveSaveTranscript("assistant",text,ch);}
   }else if(t==="response.function_call_arguments.done"){
-    _liveRunTool({call_id:ev.call_id,name:ev.name,arguments:ev.arguments});
+    _liveRunTool({call_id:ev.call_id,name:ev.name,arguments:ev.arguments,userTurn:LIVE.respTurn??LIVE.userTurn??0});
   }else if(t==="response.done"){
     _liveTouch();
     if(LIVE.state!=="acting")_liveSetState("listening","listening");
@@ -4772,7 +5117,7 @@ function renderGuide(){
    INIT
 ═══════════════════════════════════════════════════ */
 function initialRender(){
-  document.body.dataset.page=getActivePageName();placeDock();renderHome();loadBriefing();refreshAiPill();loadSuggestions();
+  document.body.dataset.page=getActivePageName();placeDock();renderHome();loadBriefing();refreshAiPill();loadSuggestions();loadPendingActions();
 }
 
 let _lastPingSuccess=0;
@@ -4801,6 +5146,7 @@ renderHeader();
   await Promise.race([syncPromise,fallback]);
   initialRender();
   handleReturnHash();
+  handleGoHash();
   syncPromise.then(()=>{try{renderPage(getActivePageName());}catch(_){}});
   // Entrance animations are scoped to .page.fade-up — drop the flag after boot
   // so the 30s background sync never replays them.

@@ -1,9 +1,11 @@
 # CLAUDE.md
 
 Guidance for Claude Code (claude.ai/code) when working in this repository. It describes the
-system as it is after the intelligence-layer rebuild and Phases 5 and 6 (branch `phase-5-6`).
+system as it is after the intelligence-layer rebuild, Phases 5 and 6, and Phase 7 (branch
+`phase-7`: model routing, the personal finance ledger, the live vault, Web Push).
+`docs/FOUNDER_OS_2_SPEC.md` is the product vision with what is built and what is missing;
 `docs/REBUILD_SPEC.md` is the spec that produced the rebuild; `docs/phases/` holds the Phase 5
-and 6 specs, the build order and `PROGRESS.md` (what was built and every decision);
+and 6 specs, the build order and `PROGRESS.md` (what was built and every decision, Phase 7 included);
 `docs/REBUILD_HANDOFF.md` has every endpoint shape; `docs/CONVENTIONS.md` has the patterns new
 code follows; `ROADMAP.md` has the phases.
 
@@ -35,18 +37,22 @@ Environment (`backend/.env` locally, Render env vars in production):
 
 | Var | Default | Purpose |
 |---|---|---|
-| `OPENAI_API_KEY` | unset | Without it everything non-AI works; AI endpoints return 503 |
+| `OPENAI_API_KEY` | unset | OpenAI's key. Each provider works with only its own key. With no key at all everything non-AI works and AI endpoints return 503. Embeddings, voice and transcription need this one |
+| `ANTHROPIC_API_KEY` | unset | Claude's key. Needed for a route that points at Claude, and for fallback from OpenAI |
+| `FALLBACK_MAP` | the seeded pairs | Which model stands in for which on the other provider (`a=b,c=d` or JSON). Seeded: `gpt-5.4-mini` and `claude-haiku-5-5`, `gpt-5.4` and `claude-sonnet-5-5` |
+| `MONTHLY_LLM_CAP_USD` | unset | Monthly spend cap. Past 80 percent the dearer routes run on the cheapest configured model and the briefing shows one alert |
+| `LLM_TIMEOUT_SECONDS` | `90` | How long a provider call may take before it counts as failed (and is retried on the other provider) |
 | `FOUNDER_OS_PASSWORD` | unset | **Set in production.** Gates every route except /health, /ping, /auth/* |
 | `FOUNDER_OS_ORIGINS` | local dev origins | Comma-separated CORS allow-list. Not needed in production: app and API share one origin |
-| `ASSISTANT_MODEL` | `gpt-5.4-mini` | Assistant, parser, summaries, briefing |
-| `EMBEDDING_MODEL` | `text-embedding-3-small` | Vault / notes / memory retrieval |
+| `ASSISTANT_MODEL` | `gpt-5.4-mini` | SEED ONLY: the model the text routes start with on a new database. After m026 has run, `model_routes` decides; change a route in Settings or by saying it |
+| `EMBEDDING_MODEL` | `text-embedding-3-small` | Seed for the embedding route (vault / notes / memory retrieval) |
 | `ZMW_PER_USD` | `27` | Kwacha → dollar for the revenue scoreboard |
 | `DEFAULT_CURRENCY` | `ZMW` | The currency of a client when none is given (`ZMW` or `USD`); also what m016 gives clients that predate the column |
 | `DEFAULT_COUNTRY_CODE` | `260` | Country code put on a local phone number (leading `0`, or no code at all) when a WhatsApp link is built |
-| `REALTIME_MODEL` | `gpt-realtime-2.1-mini` | Live voice (current mini realtime model, checked 2026-11-05) |
+| `REALTIME_MODEL` | `gpt-realtime-2.1-mini` | Seed for the real-time voice route (voice stays on OpenAI) |
 | `ASSISTANT_HISTORY_TURNS` / `ASSISTANT_SUMMARY_BATCH` | `20` / `10` | History budget |
 | `INTENT_CONFIDENCE_MIN` | `0.7` | Below this an extracted item becomes a suggestion |
-| `RESEARCH_MODEL` | the assistant model | Model for the market-intelligence roles |
+| `RESEARCH_MODEL` | the assistant model | Seed for the market-intelligence route |
 | `JOBS_TOKEN` | unset | Secret for `POST /jobs/tick` (the scheduler). Unset, or shorter than 16 characters: the endpoint answers 503. Use 32+ random characters |
 | `FOUNDER_OS_TZ` | `Africa/Lusaka` | The user's zone: "today" everywhere (briefing, tasks, habits, payments), agent schedules and notification times. Never the server's clock |
 | `JOBS_TICK_BUDGET` | `80` | Seconds a tick may spend starting agents; the rest run on the next tick |
@@ -61,6 +67,12 @@ Environment (`backend/.env` locally, Render env vars in production):
 | `EMAIL_ADDRESS` / `EMAIL_APP_PASSWORD` | unset | The Gmail address and its App Password. Unset: email shows "not connected" and outreach email cannot send |
 | `EMAIL_IMAP_HOST` / `EMAIL_SMTP_HOST` / `EMAIL_SMTP_PORT` | `imap.gmail.com` / `smtp.gmail.com` / `465` | Mail servers |
 | `EMAIL_FROM_NAME` | `Bandile Masocha` | The name on sent mail |
+| `GITHUB_WEBHOOK_SECRET` | unset | Secret of the vault repository's push webhook. 32+ random characters; under 16 the webhook refuses every push |
+| `VAULT_REPO` / `VAULT_WRITE_TOKEN` | unset | The vault repository (`owner/name`) and a fine-grained token with Contents read and write on it only. Both needed for the daily export to `Founder OS/`; unset means the export is skipped |
+| `VAULT_BRANCH` | `main` | The vault branch that is pulled, watched and written |
+| `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | unset | Web Push keys (`python tools/vapid_keys.py`). Unset: no device can subscribe and nothing is pushed |
+| `VAPID_SUBJECT` | `FOUNDER_OS_API_URL`, else a noreply address | The contact a push service may use (`mailto:` or `https:`) |
+| `QUIET_HOURS` | unset | e.g. `22:00-05:30`. When set it replaces the quiet window in Settings and nothing at all is sent inside it |
 | `EMAIL_AUTHSERV_ID` | `mx.google.com` for Gmail, else unset | The name the mail server signs `Authentication-Results` with. Only a message that header vouches for can move a lead; unset on a non-Gmail host means every reply becomes a suggestion |
 
 Tests (OpenAI is always mocked; the suite must pass with no key set):
@@ -73,7 +85,9 @@ by `test_startup_handler_runs_with_no_key`, which calls `main.startup()` directl
 migration change, also run `python -c "import asyncio, main; asyncio.run(main.startup())"`.
 
 The same suite runs on Postgres with `TEST_DATABASE_URL=postgresql://…` (throwaway database;
-every test drops and recreates the schema). Browser smoke tests (login, brief item complete +
+every test drops and recreates the schema). `.github/workflows/tests.yml` runs the suite and
+the startup chain (new database, second run, upgrade of a database built by `main`) on SQLite
+and on PostgreSQL 16 for every pull request and every push to `main` or a `phase-*` branch. Browser smoke tests (login, brief item complete +
 undo, syllabus tap-to-advance): `node tests/e2e/smoke.js` from the repo root. Layout checks
 and a contact sheet of every page at four sizes: `node tests/e2e/screens.js` (writes
 `tests/e2e/out/contact-sheet.jpg`; both accept `PW_CHANNEL=msedge` to use an installed
@@ -89,7 +103,8 @@ Pages: Command Centre (home, built on `GET /briefing/today`), Timetable, Health,
 Conversations (the server-side thread from `GET /conversation/history`, grouped by local day,
 newest day first, searchable), Agents (scheduler strip, registry, one agent's run log with
 Undo), Business (tabs: Pipeline, Clients, Portfolio, Brand), War Room, Annual Targets,
-Applications, Design Guide, Settings (Integrations and Notifications cards first). The home
+Applications, Budget (bucket balances, the month's money in and out, spending by category,
+transactions), Design Guide, Settings (Integrations, Notifications and Models cards first). The home
 screen's six tiles open Business, Academics, Projects, Content, Applications and Agents.
 (Dashboard and Academic Roadmap were removed from the frontend; their backend tables and
 endpoints remain.)
@@ -140,10 +155,12 @@ before markdown runs.
 | File | Role |
 |---|---|
 | `main.py` | App, startup (migrations → schema check → seeds), legacy endpoints, `apply_parse_updates` |
-| `llm.py` | The only OpenAI gateway: lazy client, model config, usage logging, cost estimates |
-| `openai_client.py` | Prompts: parser schema, orchestrator loop (`get_orchestrator_response`) |
+| `llm.py` | The model gateway: `complete(task, …)` and `stream(task, …)` look up the task's route, retry once on the other provider, apply the monthly cap, log usage with provider and task. No model id, price or key in it |
+| `llm_adapters/` | The only code that imports a provider SDK: `openai_adapter` (chat, embeddings, audio, the real-time secret) and `anthropic_adapter` (Claude: message and tool conversion, `cache_control`, thinking from the route's params) |
+| `model_routes.py` | `set_route` (the tool, Settings and undo all go through it), `GET /models/routes`, `PATCH /models/routes/{task}` |
+| `openai_client.py` | Prompts: parser schema, orchestrator loop (`get_orchestrator_response`). Provider-neutral despite the name |
 | `orchestrator.py` | `POST /orchestrator` SSE bridge: history budget, memory, persistence of tool calls |
-| `orchestrator_tools.py` | The tool registry (62 tools, incl. `show_view` UI directives; newer ones are added with `_register`), `run_tool` (never raises) and `for_model` (plain-language tool output) |
+| `orchestrator_tools.py` | The tool registry (66 tools, incl. `show_view` UI directives; newer ones are added with `_register`), `run_tool` (never raises) and `for_model` (plain-language tool output) |
 | `conversation.py` | One default thread, verbatim window + rolling summary, replay of tool results, `GET /conversation/history` |
 | `assistant_state.py` | Everything the assistant knows about Bandile's state, from the current sources only (see below) |
 | `memory_service.py` | Long-term memory (`remember` tool, recall) |
@@ -156,10 +173,13 @@ before markdown runs.
 | `auth.py` | Password login, HMAC session tokens, route protection, CORS origins |
 | `voice_realtime.py` | Client secret for WebRTC voice, server-side tool bridge, transcript save |
 | `usage.py` | `GET /usage/summary` from `llm_usage` |
-| `vault_sync.py` | Obsidian vault clone/index; semantic search when embedded |
+| `vault_sync.py` | Obsidian vault clone/index (full, or only the files a push changed); semantic search when embedded |
+| `vault_webhook.py` / `vault_export.py` | `POST /vault/webhook` (GitHub push, HMAC-checked); the daily export of the assistant's notes into the vault folder `Founder OS/` |
+| `finance.py` | The personal ledger: buckets, transactions in whole ngwee, allocation rules, `log_transactions` / `set_allocation_rules` / `get_finance`, `/finance/*` |
+| `push.py` | Web Push: device subscriptions, VAPID, `send` (called only by `notify.dispatch`) |
 | `user_clock.py` | The user's clock: `today()` and `now()` in `FOUNDER_OS_TZ`. No app code calls `date.today()` or `datetime.now()` |
 | `models.py` / `schemas.py` / `database.py` | ORM, Pydantic, engine (SQLite locally, Postgres on Supabase) |
-| `migrations/` | Hand-written, re-runnable, wired into startup (`m010`–`m013` are the rebuild, `m014`–`m022` Phases 5 and 6, `m023` the review round, `m025` milestone triggers on payments and recurring revenue). A data backfill that must run once uses `_helpers.claim_once` (`migration_marks`) |
+| `migrations/` | Hand-written, re-runnable, wired into startup (`m010`–`m013` are the rebuild, `m014`–`m022` Phases 5 and 6, `m023` the review round, `m025` milestone triggers on payments and recurring revenue, `m026` model routes and prices, `m027` the ledger, `m028` vault exports, `m029` Web Push). A data backfill that must run once uses `_helpers.claim_once` (`migration_marks`) |
 | `market_intel/` | Research agent: roles, weighted scoring (`scoring.py`), standing objectives (`objectives.py`) |
 | `business_common.py` | Shared helpers: fuzzy matching, money, `parse_day`, `parse_when` |
 | `leads.py` / `outreach.py` / `outreach_channels.py` | Leads, qualification, drafted messages, the approval gate, the channels (WhatsApp link, email, manual) |
@@ -170,7 +190,7 @@ before markdown runs.
 | `agents/` | The registry, schedule, runner (tick, permission audit, cost attribution), the API, and one module per agent |
 | `integrations.py` | The `integrations` table, `redact()`, `GET /integrations` |
 | `integrations_telegram.py` / `integrations_google.py` / `integrations_email.py` | Telegram pairing and webhook registration; Google Calendar OAuth, sync and events; IMAP fetch and SMTP send |
-| `notify.py` | The notification queue, dispatch (quiet hours, daily cap, retries), the Telegram channel, the briefing as text |
+| `notify.py` | The notification queue, dispatch (quiet hours, `QUIET_HOURS`, daily cap, retries), the channel choice (Web Push first, Telegram when paired), the briefing as a push and as text |
 | `telegram_inbound.py` | The Telegram webhook: pairing, commands, and a full assistant turn per message |
 
 ### How a message flows
@@ -215,9 +235,17 @@ on new tables. No destructive migrations.
   system message.
 - `briefing.build_briefing` ranking and `syllabus.weakest_topics` scoring — the home screen and
   the assistant's study advice depend on them.
-- `auth.AuthMiddleware` exemptions. Three routes take no session and check something else:
+- `auth.AuthMiddleware` exemptions. Four routes take no session and check something else:
   `/jobs/tick` (the `X-Jobs-Token` header), `/integrations/telegram/webhook` (Telegram's secret
-  header) and `/integrations/google/callback` (the signed, single-use OAuth state).
+  header), `/integrations/google/callback` (the signed, single-use OAuth state) and
+  `/vault/webhook` (GitHub's `X-Hub-Signature-256` under `GITHUB_WEBHOOK_SECRET`).
+- The money path in `finance.py`: whole minor units, `Decimal` at the edge, no stored balance,
+  the remainder rule in `split`, and the one-record rule (`on_payment_paid`, called by
+  `crm.mark_paid`; `on_revenue_logged`). The model never does money arithmetic.
+- `llm._plan` (route, cap, fallback) and the adapters' message conversion. Model ids and
+  prices live in `model_routes` / `model_prices` (seeded by m026), never in code;
+  `tests/test_openai_request_params.py` fails if an SDK is imported outside `llm_adapters`.
+- `voice_realtime.spoken_refusal`: a spoken yes cannot approve what its own turn proposed.
 - `agents/runner.py` (the permission audit that undoes a batch touching a table outside an
   agent's `tables_write`) and `notify.dispatch` (nothing sends except through it).
 - `integrations.redact` — every stored error and log line from an integration goes through it;
@@ -252,3 +280,17 @@ on new tables. No destructive migrations.
   content numbers only from what a platform reported.
 - **Trading** tables and `/trading/*` endpoints still exist but nothing in the UI or the
   assistant reads them.
+- **Model routes**: every model call names a task (`llm.TASKS`), and `model_routes` says which
+  provider and model serve it. "Use Claude for chat" takes the counterpart of the current
+  model. Claude routes start with thinking off (the route's `params`). Embeddings, voice and
+  transcription are OpenAI only.
+- **Ledger**: Bandile's own money, apart from the CRM. Buckets hold it; income is split by the
+  allocation rules for its type (else the default rules, else it waits in Unallocated);
+  spending comes out of the bucket he names or the default one. A client payment that becomes
+  paid is one ledger entry, linked by `payment_id`. A split income is several rows sharing
+  `entry_id`.
+- **Proactive delivery**: GitHub Actions wakes the backend at 05:45, 12:30 and 19:45 Lusaka
+  time. Web Push is the first channel; Telegram is paused (built, not extended). The briefing
+  shows when the schedule last ran and raises an alert past 26 hours.
+- **Live vault**: a push to the vault repository re-reads only the changed files; once a day
+  the assistant's notes are written to the vault folder `Founder OS/`, which is never indexed.

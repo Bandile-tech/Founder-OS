@@ -10,6 +10,17 @@
       ],
       "port": 8000,
       "autoPort": true
+    },
+    {
+      "name": "founder-os-preview",
+      "runtimeExecutable": "py",
+      "runtimeArgs": [
+        "-3.12",
+        "-c",
+        "import os, sys, tempfile; d = tempfile.mkdtemp(prefix='founder-os-preview-').replace(chr(92), '/'); os.environ.update(DATABASE_URL='sqlite:///' + d + '/preview.db', VAULT_REPO_URL='https://127.0.0.1/none.git', VAULT_LOCAL_PATH=d + '/vault', JOBS_IN_PROCESS='0', OPENAI_API_KEY='', ANTHROPIC_API_KEY='', FOUNDER_OS_PASSWORD='', DOTENV_DISABLED='1'); os.chdir('backend'); sys.path.insert(0, '.'); import uvicorn; uvicorn.run('main:app', host='127.0.0.1', port=int(os.environ.get('PORT', '8010')))"
+      ],
+      "port": 8010,
+      "autoPort": true
     }
   ]
 }

@@ -153,7 +153,7 @@ def insight(db, platform: str | None = None, week_start: date | None = None, ref
     row = cached_insight(db, platform, week_start)
     if row is not None and not refresh:
         return {"week_start": week_start, "platform": key, "text": row.text, "cached": True}
-    if not llm.is_configured():
+    if not llm.is_configured("agents"):
         return {"week_start": week_start, "platform": key, "text": row.text if row else None, "cached": row is not None}
     data = performance(db, platform)
     if not data["connected"] or not data["cadence"]["posts_in_window"]:
@@ -171,6 +171,6 @@ def insight(db, platform: str | None = None, week_start: date | None = None, ref
     if row is None:
         row = models.BrandInsight(week_start=week_start, platform=key)
         db.add(row)
-    row.text, row.model, row.created_at = text, llm.assistant_model(), datetime.utcnow()
+    row.text, row.model, row.created_at = text, llm.model_for("agents"), datetime.utcnow()
     db.commit()
     return {"week_start": week_start, "platform": key, "text": text, "cached": False}

@@ -241,7 +241,7 @@ def test_not_paired_is_suppressed(sends):
     assert notify.dispatch(db, NOON)["suppressed"] == 1 and sends == []
     row = _row(db, queued["id"])
     assert row.status == "suppressed" and row.suppressed_reason == "not_paired"
-    assert notify.send_test(db) == {"id": row.id + 1, "status": "suppressed", "error": "Telegram is not paired yet",
+    assert notify.send_test(db) == {"id": row.id + 1, "status": "suppressed", "error": "No device has notifications turned on, and Telegram is not paired",
                                     "suppressed_reason": "not_paired"}
     db.close()
 
@@ -406,13 +406,14 @@ def test_briefing_courier_sends_once_after_the_morning_time(sends):
     db = _db()
     _pair(db)
     db.add(models.Todo(text="Email the insurance CEO", done=False, due_date=date(2026, 11, 10), priority=2))
+    notify.settings(db).evening_time = None       # the evening check is on by default now; this test is the morning
     db.commit()
     spec = briefing_courier.SPEC
 
-    early = runner.run_agent(spec, "schedule", now=utc(5, 59))
+    early = runner.run_agent(spec, "schedule", now=utc(5, 44))       # the briefing is due from 05:45
     assert early["status"] == "skipped" and sends == []
 
-    first = runner.run_agent(spec, "schedule", now=utc(6, 1))
+    first = runner.run_agent(spec, "schedule", now=utc(5, 46))
     assert first["status"] == "completed" and "briefing queued" in first["summary"] and len(sends) == 1
     text = sends[0]["json"]["text"]
     assert text.startswith("Good morning. Thursday 12 November · EXECUTION DAY")
@@ -425,7 +426,7 @@ def test_briefing_courier_sends_once_after_the_morning_time(sends):
     assert [(n.kind, n.dedupe_key, n.status, n.source) for n in rows] == [
         ("briefing", "briefing:2026-11-12", "sent", "agent:briefing_courier")]
     assert rows[0].agent_run_id == first["id"]
-    # No evening review unless a time is set — even late in the day.
+    # No evening check when its time is switched off — even late in the day.
     late = runner.run_agent(spec, "schedule", now=utc(21))
     assert late["status"] == "skipped" and db.query(models.Notification).count() == 1
     assert first["changes_count"] == 0 and first["llm_calls"] == 0
@@ -458,7 +459,8 @@ def test_couriers_do_nothing_until_telegram_is_paired(sends):
     db = _db()
     for spec in (briefing_courier.SPEC, alert_courier.SPEC):
         out = runner.run_agent(spec, "schedule", now=utc(9))
-        assert out["status"] == "skipped" and out["summary"] == "Telegram is not paired"
+        assert out["status"] == "skipped"
+        assert out["summary"] == "no device has notifications on, and Telegram is not paired"
     assert db.query(models.Notification).count() == 0 and sends == []
     _pair(db)
     notify.settings(db).enabled = False
@@ -661,42 +663,45 @@ def test_parse_when_reads_the_documented_forms():
 def test_settings_endpoint_returns_defaults_and_pairing_details(monkeypatch):
     monkeypatch.setenv("TELEGRAM_BOT_USERNAME", "FounderOsBot")
     body = client.get("/notifications/settings").json()
-    assert body["enabled"] is True and body["morning_time"] == "06:00" and body["evening_time"] is None
+    # The briefing and the evening check sit on two of the three daily wakes; the reminder days are unchanged.
+    assert body["enabled"] is True and body["morning_time"] == "05:45" and body["evening_time"] == "19:45"
     assert (body["quiet_start"], body["quiet_end"]) == ("22:00", "05:00")
     assert body["alert_min_severity"] == "warn" and body["daily_cap"] == 12
-    assert body["channels"] == {"telegram": True} and body["deadline_days"] == [30, 14, 7, 3, 1]
+    assert body["channels"] == {"telegram": True, "push": True} and body["deadline_days"] == [30, 14, 7, 3, 1]
+    assert body["task_deadline_days"] == [3, 1]             # tasks have reminder days of their own
+    assert body["channel"] is None and body["push"] == {"configured": False, "public_key": None, "subscriptions": 0}
     assert body["paired"] is False and body["channel_configured"] is True
     assert body["bot_link"] == "https://t.me/FounderOsBot" and body["pair_code"] == tg.pair_code(_db())
     assert BOT_TOKEN not in json.dumps(body)
 
 
 def test_patch_settings_is_logged_and_undoable():
-    r = client.patch("/notifications/settings", json={"morning_time": "5:45", "evening_time": "20:30",
+    r = client.patch("/notifications/settings", json={"morning_time": "6:15", "evening_time": "20:30",
                                                       "alert_min_severity": "critical", "daily_cap": 6})
     assert r.status_code == 200
     body = r.json()
-    assert body["morning_time"] == "05:45" and body["evening_time"] == "20:30" and body["daily_cap"] == 6
+    assert body["morning_time"] == "06:15" and body["evening_time"] == "20:30" and body["daily_cap"] == 6
     assert body["change"]["table"] == "notification_settings"
-    assert "morning briefing at 05:45" in body["change"]["summary"]
+    assert "morning briefing at 06:15" in body["change"]["summary"]
 
     assert client.patch("/notifications/settings", json={"evening_time": "off"}).json()["evening_time"] is None
     for bad in ({"morning_time": "25:00"}, {"alert_min_severity": "loud"}, {"daily_cap": 500}, {"quiet_end": "soon"}):
         assert client.patch("/notifications/settings", json=bad).status_code == 422
-    assert client.get("/notifications/settings").json()["morning_time"] == "05:45"       # a bad value changes nothing
+    assert client.get("/notifications/settings").json()["morning_time"] == "06:15"       # a bad value changes nothing
 
     assert client.post(f"/changes/{body['change']['id']}/undo").status_code == 200
     restored = client.get("/notifications/settings").json()
-    assert restored["morning_time"] == "06:00" and restored["daily_cap"] == 12
+    assert restored["morning_time"] == "05:45" and restored["daily_cap"] == 12
 
 
 def test_notification_settings_tool_reads_and_changes():
     db = _db()
     read, summary = ot.run_tool("notification_settings", {}, db)
-    assert summary == "nothing changed" and read["morning_time"] == "06:00" and read["evening_time"] == "off"
+    assert summary == "nothing changed" and read["morning_time"] == "05:45" and read["evening_time"] == "19:45"
     assert read["quiet_hours"] == "22:00 to 05:00" and read["telegram_paired"] is False and read["change"] is None
-    changed, summary = ot.run_tool("notification_settings", {"morning_time": "5:45", "quiet_start": "21:00"}, db)
-    assert changed["morning_time"] == "05:45" and changed["quiet_hours"] == "21:00 to 05:00"
-    assert summary == "Notifications: morning briefing at 05:45, quiet hours from 21:00"
+    changed, summary = ot.run_tool("notification_settings", {"morning_time": "6:15", "quiet_start": "21:00"}, db)
+    assert changed["morning_time"] == "06:15" and changed["quiet_hours"] == "21:00 to 05:00"
+    assert summary == "Notifications: morning briefing at 06:15, quiet hours from 21:00"
     assert changed["change"]["table"] == "notification_settings"
     bad, summary = ot.run_tool("notification_settings", {"morning_time": "noonish"}, db)
     assert "error" in bad and "noonish" in summary
@@ -717,7 +722,8 @@ def test_list_cancel_test_and_brief_now_endpoints(sends):
     assert client.post(f"/notifications/{a['id']}/cancel").status_code == 409
     assert client.post("/notifications/99999/cancel").status_code == 404
 
-    assert client.post("/notifications/test").json() == {"status": "suppressed", "error": "Telegram is not paired yet"}
+    assert client.post("/notifications/test").json() == {
+        "status": "suppressed", "error": "No device has notifications turned on, and Telegram is not paired"}
     _pair(db)
     assert client.post("/notifications/test").json() == {"status": "sent", "error": None}
     assert sends[-1]["json"]["text"] == "Founder OS connected"
@@ -734,7 +740,7 @@ def test_list_cancel_test_and_brief_now_endpoints(sends):
 def test_briefing_reports_when_it_was_delivered(sends):
     db = _db()
     body = client.get("/briefing/today").json()
-    assert body["delivery"] == {"last_sent_at": None, "channel": "telegram", "paired": False}
+    assert body["delivery"] == {"last_sent_at": None, "channel": "telegram", "paired": False, "reachable": False}
     _pair(db)
     assert client.post("/notifications/brief-now").json()["status"] == "sent"
     delivery = client.get("/briefing/today").json()["delivery"]
@@ -879,7 +885,7 @@ def test_pairing_needs_the_right_code_and_a_second_chat_is_ignored(hook, sends):
     assert hook(tg.pair_code(_db()).lower()).status_code == 200                   # case does not matter
     db.expire_all()
     assert tg.is_paired(db) is True and tg.chat_id(db) == CHAT
-    assert _texts(sends)[0].startswith("Paired. You'll get your briefing at 06:00.")
+    assert _texts(sends)[0].startswith("Paired. You'll get your briefing at 05:45.")
     assert sends[0]["json"]["chat_id"] == CHAT
 
     assert notify.send_test(db)["status"] == "sent"

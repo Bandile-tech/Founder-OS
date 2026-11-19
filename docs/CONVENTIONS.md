@@ -416,10 +416,12 @@ def list_leads(status: str | None = None, db: Session = Depends(get_db)): ...
 - The realtime voice path converts `TOOL_SCHEMAS` automatically
   (`voice_realtime.realtime_tools`) and runs tools through `/voice/realtime/tool` with
   the same `run_tool`. Nothing extra to do for voice.
-- Tool count today: 23 including `show_view` (+1 legacy alias). Phases 5–6 take it to
-  roughly 58. Keep it under
-  ~60: fold near-identical verbs into one tool (e.g. `draft_outreach` also revises when
-  given a `message_id`), and never add a tool whose job an existing tool already does.
+- Tool count today: 66. The ceiling is 66: Phase 7 added four (`set_model_route`,
+  `log_transactions`, `set_allocation_rules`, `get_finance`), each for a job no existing tool
+  did, and folded the two finance reads into one. Do not go above it without retiring a
+  tool: fold near-identical verbs into one tool (e.g. `draft_outreach` also revises when
+  given a `message_id`, `get_finance` takes a `view`), and never add a tool whose job an
+  existing tool already does.
 
 ### 7.2 Example
 

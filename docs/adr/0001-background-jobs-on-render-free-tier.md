@@ -80,3 +80,22 @@ app offline. Free hosting matters more than overnight runs, so:
   current spin-down behaviour.
 - Supabase: `pg_cron` and `pg_net` availability on the free plan, if the fallback is ever
   needed.
+
+## Amendment — 2026-11-19: three wakes a day (Phase 7)
+
+The schedule is switched on, at the "cheaper middle path" named above: three fixed times a
+day instead of every 15 minutes.
+
+- `.github/workflows/jobs-tick.yml` runs at 03:45, 10:30 and 17:45 UTC, which is 05:45, 12:30
+  and 19:45 in Lusaka. Each run wakes the instance, `POST /jobs/tick` runs what is due, and
+  the instance sleeps again about 15 minutes later: roughly 45 minutes awake a day from the
+  schedule, far inside the free tier's monthly hours.
+- The morning briefing and the evening check moved to 05:45 and 19:45 so that they fall on
+  a wake (m029; a time Bandile set himself is left alone).
+- An event raised during a tick (a payment found overdue) is handed to the agents that run
+  later in the same tick. Before, it waited for the next tick, which is now hours away.
+- GitHub disables a schedule after 60 days with no activity in a public repository. The
+  briefing shows when the schedule last ran and raises an alert past 26 hours
+  (`briefing.scheduler_state`), so a silent stop is noticed.
+- What this does not give: anything timed to the minute. A reminder set for 15:00 goes out
+  at 15:00 only while the app is open (the in-process tick); otherwise at the next wake.

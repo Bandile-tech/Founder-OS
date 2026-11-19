@@ -118,3 +118,53 @@ installed browser instead of Playwright's Chromium.
 production-like rows, run the branch's startup chain on it, and check the backfills, the
 unchanged rows and row-level security. The same folder says how to run the whole suite on
 Postgres.
+
+## Phase 7 — what to set, and the one-time setup
+
+Nothing here is needed for the app to start. Each block switches one thing on.
+
+**Migrations.** m026 to m029 only add tables and columns. On the Render log after the deploy,
+look for `[m026] Model router ready on postgresql: 10 model(s) and 12 route(s) seeded.`,
+`[m027] Finance ledger tables ready`, `[m028] Vault export table ready`, `[m029] Web Push
+migration complete` and `Schema OK`. m026 fills `llm_usage.provider` with `openai` for rows
+that have none, once. m029 moves the notification settings to the three daily wakes, once,
+and only where a value is still the one it shipped with.
+
+**Models (optional).** `ANTHROPIC_API_KEY` to use Claude or to fall back to it.
+`MONTHLY_LLM_CAP_USD` for a monthly cap. `FALLBACK_MAP` only to change the seeded pairs.
+
+**The schedule.** In the repository: Settings → Secrets and variables → Actions → add
+`FOUNDER_OS_URL` (the Render URL, no trailing slash) and `JOBS_TOKEN` (the same value as on
+Render). The workflow `Founder OS jobs tick` then runs at 05:45, 12:30 and 19:45 Lusaka time.
+Run it once by hand (Actions → Founder OS jobs tick → Run workflow) and check that the home
+screen shows "Last scheduled run".
+
+**Notifications on your phone.**
+1. On any machine with the backend's Python environment: `python tools/vapid_keys.py`. Set the
+   two lines it prints on Render as `VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY`. Optionally set
+   `VAPID_SUBJECT` to `mailto:` your address, and `QUIET_HOURS` (for example `22:00-05:30`).
+2. On the phone, open the app. On iPhone: Share → Add to Home Screen, then open it from the
+   Home Screen (notifications do not work from a Safari tab).
+3. Settings → Notifications → This device → On, and allow notifications when asked.
+4. Tap Send test.
+
+**The live vault.**
+1. In Obsidian: install the community plugin "Git" (Obsidian Git). In its settings set
+   "Auto commit-and-sync interval" to 10 minutes and turn on "Pull on startup". The vault then
+   commits and pushes on its own every ten minutes.
+2. On Render set `GITHUB_WEBHOOK_SECRET` to 32 or more random characters, and `VAULT_REPO` to
+   the vault repository as `owner/name`.
+3. On GitHub, in the vault repository: Settings → Webhooks → Add webhook. Payload URL:
+   `https://<your Render host>/vault/webhook`. Content type: `application/json`. Secret: the
+   same value as `GITHUB_WEBHOOK_SECRET`. Events: "Just the push event". Save; GitHub sends a
+   ping, which should show a green tick (answer `{"ok": true, "pong": true}`).
+4. For the daily export into `Founder OS/`: GitHub → Settings → Developer settings →
+   Personal access tokens → Fine-grained tokens → Generate. Repository access: "Only select
+   repositories", the vault repository alone. Permissions: Contents, "Read and write". Nothing
+   else. Set it on Render as `VAULT_WRITE_TOKEN`.
+5. Settings → Integrations → Obsidian vault should read "Vault synced … · updates on every
+   push". The Sync button is the manual fallback.
+
+**Rollback.** Redeploying the previous commit is safe: the new tables and columns are left in
+place and the old code does not read them. The notification times m029 changed stay changed;
+set them back in Settings if wanted.

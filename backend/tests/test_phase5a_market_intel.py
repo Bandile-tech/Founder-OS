@@ -77,7 +77,7 @@ def test_every_llm_call_is_logged_and_costed(monkeypatch):
     db = _db()
     # Usage rows are written through database.SessionLocal (db=None in the agent): point it
     # at the test database. Embeddings are stubbed so only the six role calls are counted.
-    with patch("llm.get_client", return_value=fake_client), \
+    with patch("llm_adapters.openai_adapter.client", return_value=fake_client), \
          patch("database.SessionLocal", TestSessionLocal), \
          patch("llm.embed_texts", side_effect=lambda texts, **_: [[1.0, 0.0] for _t in texts]), \
          patch("market_intel.adapters.search_all", return_value=list(FAKE_EVIDENCE)):
@@ -101,9 +101,13 @@ def test_every_llm_call_is_logged_and_costed(monkeypatch):
 
 
 def test_research_model_follows_env(monkeypatch):
+    """The market_intel route is seeded from RESEARCH_MODEL, else from the assistant's model."""
+    from tests.conftest import reseed_routes
     assert llm.research_model() == llm.assistant_model()
     monkeypatch.setenv("RESEARCH_MODEL", "some-cheaper-model")
+    reseed_routes()
     assert llm.research_model() == "some-cheaper-model"
+    assert llm.assistant_model() != "some-cheaper-model"
 
 
 def test_no_model_literal_left_in_the_agent():

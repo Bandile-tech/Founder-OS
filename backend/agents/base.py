@@ -73,7 +73,8 @@ class AgentContext:
         import orchestrator_tools
         return orchestrator_tools.run_tool(name, args or {}, self.db)
 
-    def notify(self, *, kind: str, title: str, body: str, dedupe_key: str, send_at=None) -> dict:
+    def notify(self, *, kind: str, title: str, body: str, dedupe_key: str, send_at=None,
+               target: str | None = None) -> dict:
         """Queue a notification to Bandile. Refused unless the agent may notify."""
         if not self.spec.permissions.may_notify:
             msg = f"agent {self.spec.key} may not notify"
@@ -84,7 +85,7 @@ class AgentContext:
         except ImportError:
             return {"error": "6D not built"}
         return notify.queue(self.db, kind=kind, title=title, body=body, dedupe_key=dedupe_key,
-                            send_at=send_at, source=f"agent:{self.spec.key}")
+                            send_at=send_at, source=f"agent:{self.spec.key}", target=target)
 
     def emit(self, kind: str, payload: dict | None = None) -> bool:
         """Emit an event for other agents. Refused unless the kind is in may_emit."""

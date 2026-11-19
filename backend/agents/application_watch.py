@@ -86,7 +86,7 @@ def run(ctx) -> AgentResult:
     ctx.db.commit()
 
     reviewed = 0
-    if llm.is_configured():
+    if llm.is_configured("agents"):
         for app in apps:
             if reviewed >= MAX_REVIEWS:
                 break

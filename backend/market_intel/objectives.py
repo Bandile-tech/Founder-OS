@@ -171,7 +171,7 @@ def run_objective_endpoint(objective_id: int, db: Session = Depends(get_db)):
     import llm
     import main
     row = _get(db, objective_id)
-    if not llm.is_configured():
+    if not llm.is_configured("market_intel"):
         raise main._ai_http_error(llm.AIUnavailable("OPENAI_API_KEY is not set — AI features are disabled."))
     with change_log.batch_scope(db, "ui"):
         result = run_objective(db, row)

@@ -664,6 +664,10 @@ def mark_paid(db: Session, payment: models.Payment, paid_at: date | None = None,
     changes.append(change_log.record_update(
         db, payment, before, f"Paid: {money_label(payment.amount, payment.currency)} from {name[:40]}"))
     touch_projects(db, payment.client_id)
+    # The same money, once: this payment's income goes into the personal ledger in the same
+    # batch, linked by payment_id (or an entry already written for it is linked).
+    import finance
+    finance.on_payment_paid(db, payment)
     return {**serialize_payment(db, payment), "changes": [c for c in changes if c]}
 
 

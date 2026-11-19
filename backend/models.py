@@ -1,4 +1,5 @@
-from sqlalchemy import Column, Integer, String, Date, Float, Text, DateTime, ForeignKey, Boolean, Index
+from sqlalchemy import (Column, Integer, BigInteger, String, Date, Float, Text, DateTime, ForeignKey,
+                        Boolean, Index)
 from sqlalchemy.orm import relationship
 from datetime import datetime
 import os
@@ -179,7 +180,7 @@ class ConversationSummary(Base):
 
 
 class LLMUsage(Base):
-    """One row per OpenAI call — feeds GET /usage/summary."""
+    """One row per model call, whichever provider served it — feeds GET /usage/summary."""
     __tablename__ = "llm_usage"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -192,6 +193,9 @@ class LLMUsage(Base):
     estimated_cost_usd = Column(Float, default=0.0)
     duration_ms = Column(Integer, nullable=True)
     agent_run_id = Column(Integer, nullable=True, index=True)   # the agent run that made the call
+    provider = Column(String, nullable=True)                    # openai | anthropic
+    task = Column(String, nullable=True)                        # the route it went through (llm.TASKS)
+    fallback_from = Column(String, nullable=True)               # "provider:model" that failed first, when this call is the retry
 
 
 class BibleEntry(Base):
@@ -1360,7 +1364,7 @@ class Notification(Base):
 
     id                = Column(Integer, primary_key=True, index=True)
     created_at        = Column(DateTime, default=datetime.utcnow)
-    channel           = Column(String, nullable=False, default="telegram")
+    channel           = Column(String, nullable=False, default="telegram")   # push | telegram, chosen when it is queued
     kind              = Column(String, nullable=False)     # briefing|evening|alert|deadline|reminder|reply|test
     title             = Column(String, nullable=True)
     body              = Column(Text, nullable=False)       # plain text
@@ -1372,7 +1376,8 @@ class Notification(Base):
     external_id       = Column(String, nullable=True)
     agent_run_id      = Column(Integer, nullable=True)
     source            = Column(String, nullable=True)
-    suppressed_reason = Column(String, nullable=True)      # quiet_hours|daily_cap|channel_disabled|not_paired
+    suppressed_reason = Column(String, nullable=True)      # quiet_hours|daily_cap|channel_disabled|not_paired|no_device
+    target            = Column(String, nullable=True)      # the view a tap opens: home, applications, business:clients, …
 
 
 class NotificationSettings(Base):
@@ -1381,13 +1386,138 @@ class NotificationSettings(Base):
 
     id                 = Column(Integer, primary_key=True)
     enabled            = Column(Boolean, default=True)
-    morning_time       = Column(String, default="06:00")
-    evening_time       = Column(String, nullable=True)     # null = no evening review
+    morning_time       = Column(String, default="05:45")
+    evening_time       = Column(String, nullable=True)     # null = no evening check
     quiet_start        = Column(String, default="22:00")
     quiet_end          = Column(String, default="05:00")
     alert_min_severity = Column(String, default="warn")    # info|warn|critical
     daily_cap          = Column(Integer, default=12)
-    channels_json      = Column(Text, nullable=True)       # {"telegram": true}
-    deadline_days_json = Column(Text, nullable=True)       # [30, 14, 7, 3, 1]
+    channels_json      = Column(Text, nullable=True)       # {"telegram": true, "push": true}
+    deadline_days_json = Column(Text, nullable=True)       # [30, 14, 7, 3, 1]: exams and applications
+    task_deadline_days_json = Column(Text, nullable=True)  # [3, 1]: tasks with a due date
     muted_until        = Column(DateTime, nullable=True)   # naive UTC; /mute sets it
     updated_at         = Column(DateTime, default=datetime.utcnow)
+
+
+# ── PHASE 7, STAGE 1: MODEL ROUTER ───────────────────────────
+
+class ModelRoute(Base):
+    """Which provider and model a task uses. One row per task (``llm.TASKS``). Seeded by
+    m026 from the environment; after that this table is the source of truth, and every
+    change goes through the change log."""
+    __tablename__ = "model_routes"
+
+    id          = Column(Integer, primary_key=True, index=True)
+    task        = Column(String, nullable=False, unique=True)
+    provider    = Column(String, nullable=False)          # openai | anthropic
+    model       = Column(String, nullable=False)
+    params_json = Column(Text, nullable=True)             # only these are sent with a call
+    updated_at  = Column(DateTime, default=datetime.utcnow)
+
+
+class ModelPrice(Base):
+    """A model Founder OS knows: who serves it, what it costs (USD per million tokens),
+    its counterpart on the other provider and the parameters a route to it starts with.
+    Seeded by m026; nothing in the code names a model or a price."""
+    __tablename__ = "model_prices"
+
+    id                    = Column(Integer, primary_key=True, index=True)
+    model                 = Column(String, nullable=False, unique=True)
+    provider              = Column(String, nullable=False)
+    kind                  = Column(String, nullable=False, default="chat")   # chat|embedding|audio|realtime
+    input_per_mtok        = Column(Float, nullable=True)
+    cached_input_per_mtok = Column(Float, nullable=True)
+    cache_write_per_mtok  = Column(Float, nullable=True)
+    output_per_mtok       = Column(Float, nullable=True)
+    fallback_model        = Column(String, nullable=True)   # the matching tier on the other provider
+    default_params_json   = Column(Text, nullable=True)
+    confirmed             = Column(Boolean, default=False)  # checked against the provider's price page
+    note                  = Column(String, nullable=True)
+    updated_at            = Column(DateTime, default=datetime.utcnow)
+
+
+# ── PHASE 7, STAGE 2: PERSONAL FINANCE LEDGER ────────────────
+
+class Bucket(Base):
+    """A pot of Bandile's own money (tithe, business, save, …). A bucket has no balance
+    column: its balance is always the sum of its transactions."""
+    __tablename__ = "buckets"
+
+    id             = Column(Integer, primary_key=True, index=True)
+    name           = Column(String, nullable=False)
+    key            = Column(String, nullable=False, unique=True)   # the name, lower-cased: what a spoken name matches
+    is_default     = Column(Boolean, default=False)   # spending with no bucket named comes out of this one
+    is_remainder   = Column(Boolean, default=False)   # takes the ngwee a split leaves over
+    is_unallocated = Column(Boolean, default=False)   # where income waits while no rules are set
+    created_at     = Column(DateTime, default=datetime.utcnow)
+    updated_at     = Column(DateTime, default=datetime.utcnow)
+
+
+class LedgerTransaction(Base):
+    """One movement of money into or out of one bucket. Amounts are whole minor units
+    (ngwee for ZMW, cents for USD): never a float. Income split across buckets is one row
+    per bucket, all sharing ``entry_id``; the rows of an entry add up to exactly what was
+    received."""
+    __tablename__ = "ledger_transactions"
+
+    id           = Column(Integer, primary_key=True, index=True)
+    entry_id     = Column(String, nullable=False, index=True)   # one thing that happened (a payment, a purchase)
+    created_at   = Column(DateTime, default=datetime.utcnow)
+    occurred_at  = Column(Date, nullable=False, index=True)     # the day it happened, as he said it
+    direction    = Column(String, nullable=False)               # in | out
+    amount_minor = Column(BigInteger, nullable=False)           # always positive
+    currency     = Column(String, nullable=False, default="ZMW")
+    bucket_id    = Column(Integer, ForeignKey("buckets.id"), nullable=False, index=True)
+    category     = Column(String, nullable=True)                # food, data, transport, …; "transfer" between buckets
+    note         = Column(String, nullable=True)
+    income_type  = Column(String, nullable=True)                # which allocation rules split it (client, gift, …)
+    payment_id   = Column(Integer, nullable=True, index=True)   # the CRM payment this money is
+    revenue_id   = Column(Integer, nullable=True, index=True)   # the revenue row this money is
+    batch_id     = Column(String, nullable=True, index=True)    # the change-log batch that wrote it
+
+
+class AllocationRule(Base):
+    """How income of one type is split: this bucket gets ``pct`` of it. ``pct`` is in
+    basis points (1000 = 10%), so there is no float here either. The rules of one income
+    type add up to 10000."""
+    __tablename__ = "allocation_rules"
+
+    id          = Column(Integer, primary_key=True, index=True)
+    income_type = Column(String, nullable=False, index=True)    # "default" covers every type with no rules of its own
+    bucket_id   = Column(Integer, ForeignKey("buckets.id"), nullable=False)
+    pct         = Column(Integer, nullable=False)               # basis points
+    created_at  = Column(DateTime, default=datetime.utcnow)
+
+
+# ── PHASE 7, STAGE 3: LIVE VAULT ─────────────────────────────
+
+class VaultExport(Base):
+    """What the daily export last wrote to the vault folder ``Founder OS/`` for one note.
+    Bookkeeping, like a cache: it is not change-logged."""
+    __tablename__ = "vault_exports"
+
+    id           = Column(Integer, primary_key=True, index=True)
+    note_id      = Column(Integer, nullable=False, unique=True)
+    path         = Column(String, nullable=False)
+    content_hash = Column(String, nullable=False)
+    sha          = Column(String, nullable=True)          # the file's blob sha on GitHub
+    exported_at  = Column(DateTime, nullable=True)
+
+
+# ── PHASE 7, STAGE 4: WEB PUSH ───────────────────────────────
+
+class PushSubscription(Base):
+    """A device that turned notifications on: where its browser's push service takes
+    messages, and the keys a message for it is encrypted with."""
+    __tablename__ = "push_subscriptions"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    endpoint        = Column(String, nullable=False, unique=True)
+    p256dh          = Column(String, nullable=False)
+    auth            = Column(String, nullable=False)
+    user_agent      = Column(String, nullable=True)
+    created_at      = Column(DateTime, default=datetime.utcnow)
+    last_success_at = Column(DateTime, nullable=True)
+    last_error      = Column(String, nullable=True)
+    failures        = Column(Integer, default=0)
+

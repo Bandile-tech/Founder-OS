@@ -85,6 +85,8 @@ class TestSession:
     def test_model_env_override(self, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
         monkeypatch.setenv("REALTIME_MODEL", "gpt-realtime-mini")
+        from tests.conftest import reseed_routes
+        reseed_routes()                                   # the route is seeded from the variable
         with patch("voice_realtime.httpx.post", return_value=_Resp(200, {"value": "ek_x", "expires_at": 1})):
             r = client.post("/voice/realtime/session")
         assert r.json()["model"] == "gpt-realtime-mini"

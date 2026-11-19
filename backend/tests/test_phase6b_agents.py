@@ -309,7 +309,7 @@ def test_model_calls_are_attributed_to_the_run(monkeypatch):
         return AgentResult(summary=f"model said {text}")
 
     _spec("thinker", run, max_llm_calls=5)
-    with patch("llm.get_client", return_value=_fake_client()):
+    with patch("llm_adapters.openai_adapter.client", return_value=_fake_client()):
         runner.tick("manual")
     db = _db()
     run_row = db.query(models.AgentRun).one()
@@ -330,7 +330,7 @@ def test_the_call_cap_fails_the_run(monkeypatch):
         return AgentResult(summary="never reached")
 
     _spec("greedy", run, max_llm_calls=1)
-    with patch("llm.get_client", return_value=_fake_client()):
+    with patch("llm_adapters.openai_adapter.client", return_value=_fake_client()):
         out = runner.tick("manual")
     assert out["ran"][0]["status"] == "failed"
     db = _db()
@@ -344,7 +344,7 @@ def test_the_call_cap_fails_the_run(monkeypatch):
         return AgentResult(summary="never reached")
 
     _spec("deterministic", none_allowed, max_llm_calls=0)
-    with patch("llm.get_client", return_value=_fake_client()):
+    with patch("llm_adapters.openai_adapter.client", return_value=_fake_client()):
         result = runner.run_agent(agents.REGISTRY["deterministic"], "manual")
     assert result["status"] == "failed" and "BudgetExceeded" in result["error"]
 
@@ -352,7 +352,7 @@ def test_the_call_cap_fails_the_run(monkeypatch):
 def test_usage_outside_a_run_is_not_attributed(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test")
     db = _db()
-    with patch("llm.get_client", return_value=_fake_client()):
+    with patch("llm_adapters.openai_adapter.client", return_value=_fake_client()):
         llm.chat_text([{"role": "user", "content": "hi"}], db=db, purpose="assistant")
         llm.log_usage(db, model="gpt-5.4-mini", purpose="explicit", agent_run_id=42)
     rows = {u.purpose: u.agent_run_id for u in db.query(models.LLMUsage).all()}
@@ -486,7 +486,8 @@ def test_shipped_agents_have_the_documented_defaults():
     assert list(r) == ["crm_housekeeper", "lead_qualifier", "follow_up_sentinel", "portfolio_reviewer",
                        "brand_sync", "market_intel"]
     assert r["crm_housekeeper"].schedule.interval_minutes == 60 and r["crm_housekeeper"].permissions.max_llm_calls == 0
-    assert r["crm_housekeeper"].permissions.tables_write == ["payments", "recurring_revenue", "clients", "projects"]
+    assert r["crm_housekeeper"].permissions.tables_write == [
+        "payments", "recurring_revenue", "clients", "projects", "ledger_transactions", "buckets"]
     assert r["lead_qualifier"].schedule.interval_minutes == 180 and r["lead_qualifier"].permissions.max_llm_calls == 20
     assert r["lead_qualifier"].permissions.tables_write == ["leads"]
     assert r["follow_up_sentinel"].schedule.at_time == "05:30" and r["follow_up_sentinel"].events == ["lead.replied"]
@@ -750,15 +751,18 @@ def test_agent_tools_report_run_and_reschedule():
     db.close()
 
 
-def test_workflow_ships_with_the_schedule_switched_off():
+def test_workflow_wakes_the_backend_three_times_a_day_and_no_more():
+    """Phase 7 switched the schedule on: 05:45, 12:30 and 19:45 in Lusaka (UTC+2). Never the
+    every-15-minutes schedule, which would keep a free Render instance awake all month."""
     text = (Path(__file__).parent.parent.parent / ".github" / "workflows" / "jobs-tick.yml").read_text(encoding="utf-8")
-    assert "workflow_dispatch: {}" in text
-    assert '  # schedule:\n  #   - cron: "*/15 * * * *"' in text                      # present, commented out
-    active = [line for line in text.splitlines() if not line.lstrip().startswith("#")]
-    assert not any("cron" in line or line.strip() == "schedule:" for line in active)
-    assert "for i in 1 2 3" in text and "sleep 20" in text and "-m 120" in text
+    active = [line.strip() for line in text.splitlines() if not line.lstrip().startswith("#")]
+    crons = [line.split('"')[1] for line in active if line.startswith("- cron:")]
+    assert crons == ["45 3 * * *", "30 10 * * *", "45 17 * * *"]
+    assert "schedule:" in active and "workflow_dispatch: {}" in active and "*/15" not in "\n".join(active)
+    assert "for i in 1 2 3 4" in text and "sleep 25" in text and "-m 150" in text      # retries for a cold start
     assert "-o /dev/null" in text                 # the answer names projects and objectives: keep it out of the log
-    assert "secrets.FOUNDER_OS_URL" in text and "X-Jobs-Token: ${{ secrets.JOBS_TOKEN }}" in text
+    assert "secrets.FOUNDER_OS_URL" in text and "secrets.JOBS_TOKEN" in text and 'X-Jobs-Token: $JOBS_TOKEN' in text
+    assert "permissions: {}" in active            # the job needs nothing from the repository
 
 
 def test_in_process_tick_is_guarded_by_the_env_flag(monkeypatch):

@@ -29,7 +29,9 @@ def test_vault_status_contains_no_repo_url_or_credentials(monkeypatch):
 
     assert r.status_code == 200
     body = r.json()
-    assert set(body) == {"last_synced", "chunk_count", "file_count"}
+    assert set(body) == {"last_synced", "chunk_count", "file_count", "last_sync_at", "last_source", "last_error",
+                         "live", "export_configured"}
+    assert body["live"] is False and body["export_configured"] is False and body["last_sync_at"] is None
     assert FAKE_TOKEN not in r.text
     assert "x-access-token" not in r.text
     assert "github.com" not in r.text

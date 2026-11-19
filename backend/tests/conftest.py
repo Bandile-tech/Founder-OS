@@ -124,12 +124,43 @@ def _clear_stale_pg_connections():
         conn.commit()
 
 
+def reload_routes():
+    """Make the gateway read the routes and models from the test database (with no session
+    it would read the app's own throwaway database, which is a different one on SQLite)."""
+    import llm
+    llm.reset_routes()
+    db = TestSessionLocal()
+    try:
+        llm.load_routes(db)
+    finally:
+        db.close()
+
+
+def reseed_routes():
+    """Drop the routes and seed them again from the environment as it is now: what m026
+    does on a new database. For tests about the seed."""
+    from sqlalchemy import text
+    from migrations import m026_model_router
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM model_routes"))
+        m026_model_router.seed(conn)
+    reload_routes()
+
+
 @pytest.fixture(autouse=True)
 def fresh_db():
     """Drop and recreate all tables before each test for complete isolation."""
     _clear_stale_pg_connections()
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
+    # The model routes and the known models are data, seeded by m026: put them back, and
+    # make the gateway read them again.
+    from migrations import m026_model_router
+    import llm
+    with engine.begin() as conn:
+        m026_model_router.seed(conn)
+    reload_routes()
+    llm.reset_client()
     # Reset the 60s radar cache so a prior test's response can't leak across the
     # table reset.
     try:

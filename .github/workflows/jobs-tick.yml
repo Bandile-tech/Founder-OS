@@ -1,32 +1,49 @@
 name: Founder OS jobs tick
 
-# Calls POST /jobs/tick, which runs every agent that is due (ADR-0001).
+# Wakes the backend three times a day and runs every agent that is due (ADR-0001):
+# 05:45, 12:30 and 19:45 in Lusaka (UTC+2, no daylight saving), which is 03:45, 10:30 and
+# 17:45 UTC. Each call wakes the Render instance if it is asleep, POST /jobs/tick runs what
+# is due, and the instance goes back to sleep about 15 minutes later. Three wakes a day
+# leave the free tier's monthly instance hours almost untouched; a call every 15 minutes
+# would keep the instance awake around the clock and use them up (see the ADR's amendment).
 #
-# The schedule is OFF on purpose. While the backend is on Render's free tier, a call every
-# 15 minutes would keep the instance awake around the clock and use up the month's free
-# instance hours. Until the hosting changes, agents run from the in-process tick while the
-# app is in use, and this workflow can be started by hand (Actions → Founder OS jobs tick →
-# Run workflow).
+# GitHub starts a scheduled run late when it is busy (often 5 to 20 minutes). The morning
+# briefing is due from 05:45, so a late run still sends it.
 #
-# To turn the schedule on: uncomment the two `schedule` lines below and push. It needs the
-# repository secrets FOUNDER_OS_URL (the backend's base URL, no trailing slash) and
-# JOBS_TOKEN (the same value as the JOBS_TOKEN env var on Render).
+# GitHub switches a schedule off after 60 days with no activity in a public repository.
+# The app notices: when the last scheduled run is more than 26 hours old, the briefing
+# shows an alert. To switch it back on: Actions → Founder OS jobs tick → Enable workflow.
+#
+# Needs two repository secrets: FOUNDER_OS_URL (the backend's base URL, no trailing slash)
+# and JOBS_TOKEN (the same value as the JOBS_TOKEN env var on Render). It can also be
+# started by hand: Actions → Founder OS jobs tick → Run workflow.
 on:
-  # schedule:
-  #   - cron: "*/15 * * * *"
+  schedule:
+    - cron: "45 3 * * *"     # 05:45 Lusaka: the morning briefing
+    - cron: "30 10 * * *"    # 12:30 Lusaka: midday check
+    - cron: "45 17 * * *"    # 19:45 Lusaka: the evening check
   workflow_dispatch: {}
+
+permissions: {}
 
 jobs:
   tick:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     steps:
       - name: Tick (wakes Render if asleep)
+        env:
+          FOUNDER_OS_URL: ${{ secrets.FOUNDER_OS_URL }}
+          JOBS_TOKEN: ${{ secrets.JOBS_TOKEN }}
         run: |
-          for i in 1 2 3; do
+          if [ -z "$FOUNDER_OS_URL" ] || [ -z "$JOBS_TOKEN" ]; then
+            echo "FOUNDER_OS_URL and JOBS_TOKEN are not set as repository secrets: nothing to call."
+            exit 1
+          fi
+          for i in 1 2 3 4; do
             # The answer names agents, projects and research objectives: it is not printed.
-            curl -fsS -m 120 -o /dev/null -X POST "${{ secrets.FOUNDER_OS_URL }}/jobs/tick" \
-              -H "X-Jobs-Token: ${{ secrets.JOBS_TOKEN }}" && exit 0
-            sleep 20
+            curl -fsS -m 150 -o /dev/null -X POST "$FOUNDER_OS_URL/jobs/tick" \
+              -H "X-Jobs-Token: $JOBS_TOKEN" && exit 0
+            sleep 25
           done
           exit 1

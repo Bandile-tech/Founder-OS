@@ -58,6 +58,10 @@ app.include_router(_auth.router)
 
 # ── Routers (rebuild modules) ────────────────────────────────
 import usage as _usage
+import model_routes as _model_routes
+import finance as _finance
+import vault_webhook as _vault_webhook
+import push as _push
 import change_log as _change_log
 import actions as _actions
 import notes as _notes
@@ -65,6 +69,10 @@ import syllabus as _syllabus
 import briefing as _briefing
 import voice_realtime as _voice_realtime
 app.include_router(_usage.router)
+app.include_router(_model_routes.router)
+app.include_router(_finance.router)
+app.include_router(_vault_webhook.router)
+app.include_router(_push.router)
 app.include_router(_change_log.router)
 app.include_router(_actions.router)
 app.include_router(_notes.router)
@@ -163,6 +171,9 @@ async def startup():
     if os.getenv("JOBS_TOKEN") and len(os.getenv("JOBS_TOKEN")) < 32:
         print("[startup] WARNING: JOBS_TOKEN is shorter than 32 characters. Use a longer random value "
               "(under 16, POST /jobs/tick answers 503).")
+    if os.getenv("GITHUB_WEBHOOK_SECRET") and len(os.getenv("GITHUB_WEBHOOK_SECRET")) < 32:
+        print("[startup] WARNING: GITHUB_WEBHOOK_SECRET is shorter than 32 characters. Use a longer random value "
+              "(under 16, the vault webhook refuses every push).")
     if os.getenv("TELEGRAM_WEBHOOK_SECRET") and len(os.getenv("TELEGRAM_WEBHOOK_SECRET")) < 32:
         print("[startup] WARNING: TELEGRAM_WEBHOOK_SECRET is shorter than 32 characters. Use a longer random "
               "value (under 16, the webhook refuses every update).")
@@ -218,6 +229,15 @@ async def startup():
         run_m024(db)        # m024 — briefing_summaries.failed_at, last_error
         from migrations.m025_payment_triggers import run as run_m025
         run_m025(db)        # m025 — payments.due_trigger, recurring_revenue.start_trigger
+        from migrations.m026_model_router import run as run_m026
+        run_m026(db)        # m026 — model_routes, model_prices, llm_usage.provider/task/fallback_from
+        llm.reset_routes()  # read the routes the migration just seeded, not an earlier copy
+        from migrations.m027_finance_ledger import run as run_m027
+        run_m027(db)        # m027 — buckets, ledger_transactions, allocation_rules
+        from migrations.m028_vault_live import run as run_m028
+        run_m028(db)        # m028 — vault_exports
+        from migrations.m029_web_push import run as run_m029
+        run_m029(db)        # m029 — push_subscriptions, notifications.target, notification defaults
         _validate_schema(engine)   # raises if any ORM column is absent from the live DB
         _seed_non_negotiables_if_empty(db)
         _verify_seed_integrity(db)
@@ -318,11 +338,11 @@ async def run_freeze_on_startup():
 
 # ── VAULT SYNC — startup (non-blocking) + APScheduler ────────
 
-def _vault_sync_job():
+def _vault_sync_job(source: str = "scheduled"):
     from vault_sync import sync_vault as _sync, redact_credentials
     db = SessionLocal()
     try:
-        result = _sync(db)
+        result = _sync(db, source=source)
         print(f"[vault_scheduler] sync complete: {redact_credentials(result)}")
     except Exception as exc:
         print(f"[vault_scheduler] sync error: {redact_credentials(exc)}")
@@ -334,7 +354,7 @@ def _vault_sync_job():
 async def start_vault_scheduler():
     import threading
     # Non-blocking startup sync
-    t = threading.Thread(target=_vault_sync_job, daemon=True, name="vault-startup-sync")
+    t = threading.Thread(target=_vault_sync_job, args=("startup",), daemon=True, name="vault-startup-sync")
     t.start()
 
     # Scheduled recurring sync via APScheduler
@@ -432,7 +452,11 @@ def _seed_roadmap_tasks_if_empty(db: Session):
 
 @app.get("/health")
 def health():
-    return {"ok": True, "ai_configured": llm.is_configured(), "assistant_model": llm.assistant_model()}
+    try:
+        model = llm.model_for("assistant")
+    except Exception:  # noqa: BLE001 — health must answer even when the routes cannot be read
+        model = None
+    return {"ok": True, "ai_configured": llm.is_configured(), "assistant_model": model}
 
 
 @app.get("/ping")
@@ -1629,6 +1653,8 @@ def _apply_parse_updates_inner(db: Session, parsed: dict, today: date) -> dict:
         )
         db.add(rev)
         change_log.record_create(db, rev, f"Revenue {currency} {float(amount):g} from {source or 'unknown'}")
+        import finance
+        finance.on_revenue_logged(db, rev)        # the same money, once, in the personal ledger
         result["revenue_logged"].append({"amount": float(amount), "currency": currency, "source": source})
 
     # ── Project status changes (accepted suggestions only; not in the parser schema) ──
@@ -2373,7 +2399,7 @@ def search_context(q: str, db: Session = Depends(get_db)):
 def vault_sync_endpoint(db: Session = Depends(get_db)):
     """Manually trigger a vault clone/pull and re-index."""
     from vault_sync import sync_vault
-    return sync_vault(db)
+    return sync_vault(db, source="manual")
 
 
 @app.get("/vault/status")
@@ -2394,10 +2420,20 @@ def vault_status(db: Session = Depends(get_db)):
         .first()
     )
     last_synced = str(latest.last_synced) if latest and latest.last_synced else None
+    import integrations
+    row = integrations.get_or_create(db, "vault")
+    state = integrations.config(row)
     return {
         "last_synced": last_synced,
         "chunk_count": chunk_count,
         "file_count": file_count,
+        # When a sync last ran and succeeded (a push that changed nothing still counts),
+        # what started it, and whether pushes arrive on their own.
+        "last_sync_at": row.last_sync_at,
+        "last_source": state.get("last_source"),
+        "last_error": row.last_error if row.status == "error" else None,
+        "live": len(os.getenv("GITHUB_WEBHOOK_SECRET") or "") >= 16,
+        "export_configured": bool(os.getenv("VAULT_REPO") and os.getenv("VAULT_WRITE_TOKEN")),
     }
 
 
@@ -2735,6 +2771,10 @@ def add_revenue(payload: schemas.RevenueCreate, db: Session = Depends(get_db)):
     data["currency"] = _normalise_currency(data.get("currency"))
     record = Revenue(**data)
     db.add(record)
+    db.flush()
+    import finance
+    with _change_log.batch_scope(db, "ui"):
+        finance.on_revenue_logged(db, record)     # the same money, once, in the personal ledger
     db.commit()
     db.refresh(record)
     return {"id": record.id, "amount": record.amount, "currency": record.currency}

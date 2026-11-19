@@ -46,3 +46,19 @@ zero and nothing may require business verification or a platform review.
   webhook may take to respond before Telegram retries (dedupe by `update_id` if needed).
 - Hosting: the webhook URL is the Render service (HTTPS, public), which serves both the app
   (at `/app/`) and the API. There is no separate frontend host.
+
+## Amendment — 2026-11-19: Web Push first, Telegram paused (Phase 7)
+
+Web Push is now the first channel. It needs no account, no bot and no pairing: a device
+turns notifications on in Settings and the browser's own push service delivers them, also
+when the app is closed. On iPhone it works only from the app added to the Home Screen.
+
+- `notify.active_channel` picks the channel when a message is queued: push when a device is
+  subscribed, else Telegram when it is paired, else nothing (the message is recorded as not
+  sent). Telegram's code is unchanged and not extended; setting it up moved to Phase 8.
+- A push carries a title, a short body and the view to open (`notifications.target`). The
+  service worker (`frontend/sw.js`) shows it and opens the app at `/app/#go=<view>`.
+- `QUIET_HOURS`, when set, replaces the quiet window in Settings and holds everything,
+  reminders and replies included, until the window ends.
+- Only real push services are posted to (`push._PUSH_HOSTS`): a subscription endpoint is
+  somewhere the server sends requests, so it is checked, not trusted.

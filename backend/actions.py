@@ -57,6 +57,7 @@ DELETABLE = {
     "applications": (models.Application, "name"),
     "application_requirements": (models.ApplicationRequirement, "title"),
     "content_ideas": (models.ContentIdea, "title"),
+    "ledger_transactions": (models.LedgerTransaction, "note"),
 }
 
 
@@ -72,6 +73,26 @@ def _pending_dict(p: models.PendingAction) -> dict:
         "summary": p.summary, "status": p.status, "created_at": p.created_at,
         "expires_at": p.expires_at, "requires_confirmation": p.status == "pending",
     }
+
+
+def _send_detail(db: Session, p: models.PendingAction) -> dict | None:
+    """What a pending send would send, for the Confirm card: who it goes to and the whole
+    text, read from the message as it stands now. None when the message is gone."""
+    import outreach
+    import outreach_channels
+    message = db.query(models.OutreachMessage).filter(models.OutreachMessage.id == p.record_id).first()
+    if message is None:
+        return None
+    lead = outreach._lead_of(db, message)
+    try:
+        approved_to = json.loads(p.payload_json or "{}").get("to")
+    except (ValueError, TypeError):
+        approved_to = None
+    to = outreach_channels.recipient(lead, message.channel)
+    return {"message_id": message.id, "channel": message.channel, "to_name": lead.name if lead else None,
+            "to": to, "subject": message.subject, "body": message.body or "",
+            # The yes is for the address shown when the send was asked for: say so if it moved.
+            "recipient_changed": bool(approved_to and approved_to != to)}
 
 
 # ── Pending deletes ──────────────────────────────────────────
@@ -160,13 +181,21 @@ def confirm_action(db: Session, pending_id: int, *, human: bool = False) -> dict
     executor = _EXECUTORS.get(kind)
     if executor is None:
         return {**_pending_dict(p), "executed": False, "reason": f"unknown action kind '{kind}'"}
+    by_voice = db.info.get("voice") is not None and not human
+    if by_voice:
+        # A spoken yes only approves what was put to him before he said it: never in the
+        # spoken turn that proposed the action, whatever kind it is.
+        import voice_realtime
+        refusal = voice_realtime.spoken_refusal(db, p, needs_yes=kind in _NEEDS_LATER_MESSAGE)
+        if refusal:
+            return {**_pending_dict(p), "executed": False, "error": refusal}
     if kind in _NEEDS_LATER_MESSAGE and not human:
         import outreach
         if not outreach._is_newest_proposal(db, p):
             return {**_pending_dict(p), "executed": False,
                     "error": "something else was proposed after this send, so a yes is not about it. "
                              "Call request_send again and ask Bandile for a plain yes"}
-        if not outreach.confirmed_in_a_later_message(db, p):
+        if not by_voice and not outreach.confirmed_in_a_later_message(db, p):
             return {**_pending_dict(p), "executed": False,
                     "error": "confirmation must come in a later message, and that message must be a "
                              "plain yes from Bandile. Ask him; he can also tap Approve & send"}
@@ -187,10 +216,23 @@ def cancel_action(db: Session, pending_id: int) -> dict:
 
 
 def list_pending(db: Session) -> list[dict]:
+    """Everything waiting for a yes, newest first. A pending send carries who it goes to
+    and its whole text (``send``), so the screen can show exactly what a tap would send."""
+    now = datetime.utcnow()
     rows = db.query(models.PendingAction).filter(
         models.PendingAction.status == "pending"
     ).order_by(models.PendingAction.id.desc()).all()
-    return [_pending_dict(p) for p in rows]
+    out = []
+    for p in rows:
+        if p.expires_at and p.expires_at < now:
+            continue                                   # it can no longer be confirmed: not shown
+        item = _pending_dict(p)
+        if (p.kind or "delete") == "send_outreach":
+            item["send"] = _send_detail(db, p)
+            if item["send"] is None:
+                continue
+        out.append(item)
+    return out
 
 
 @router.get("/actions/pending")

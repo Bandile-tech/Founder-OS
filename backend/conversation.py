@@ -222,7 +222,7 @@ def _maybe_refresh_summary(db, thread_id, older, summary_row):
 
     covered = summary_row.covers_through_message_id if summary_row else None
     pending = [r for r in older if covered is None or r.id > covered]
-    if len(pending) < summary_batch() or not llm.is_configured():
+    if len(pending) < summary_batch() or not llm.is_configured("conversation_summary"):
         return summary_row
     try:
         text = summarise(summary_row.summary if summary_row else "", _transcript(pending), db=db)

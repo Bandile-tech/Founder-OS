@@ -1079,3 +1079,77 @@ hard-coded habit list); the briefing's business % of $10K; and the prompt's $10,
   prompt tells the model not to repeat figures it did not get from a tool this turn.
 - Legacy endpoints (`/subjects/progress`, `/kpis`, `/roadmap/*`, `/radar`, `/scoreboard/ten-k`) still
   exist for compatibility; nothing the assistant reads calls them.
+
+## 13. Phase 7 addendum — endpoints (branch `phase-7`)
+
+All need a session except `POST /vault/webhook`. Money amounts are whole minor units
+(`*_minor`) with a formatted twin (`"K1,250.50"`).
+
+### Models
+- `GET /models/routes` →
+  `{routes: [{task, label, provider, provider_label, model, params, openai_only, key_set,
+  fallback_model, fallback_ready, serving_model, month_to_date_usd, calls_this_month,
+  updated_at}], providers: [{name, label, key_env, configured}], models: [{model, provider,
+  provider_label, kind, input_per_mtok, cached_input_per_mtok, cache_write_per_mtok,
+  output_per_mtok, fallback_model, confirmed, note}], cap: {monthly_cap_usd,
+  month_to_date_usd, pct, over_threshold, cheapest_model, downgraded_tasks}}`
+- `PATCH /models/routes/{task}` body `{provider?, model?, params?}` (at least one) →
+  `{route, change, changed, summary, warning?}`. 404 unknown task; 400 for a model not on
+  file, a model on the wrong provider, a non-chat model, or Claude for an OpenAI-only task.
+  `provider` alone takes the counterpart of the current model.
+- `GET /usage/summary?days=90` (changed) → adds `by_provider: [{provider, calls, …}]`,
+  `by_task: [{task, label, calls, …}]`, `total.fallbacks`, and `cap` (as above).
+- `GET /health` (changed): `assistant_model` is the assistant route's model.
+
+### Finance
+- `GET /finance/summary?period=this_month` → `{period: {key, label, start, end}, buckets:
+  [{id, name, currency, balance_minor, balance, is_default, is_remainder, is_unallocated}],
+  money: [{currency, in_minor, out_minor, net_minor, in, out, net}], by_category: [{category,
+  currency, total_minor, total, count}], rules: {income_type: [{bucket_id, bucket, pct_bp,
+  pct}]}, has_rules, transactions_total}`. Periods: `this_month`, `last_month`, `today`,
+  `yesterday`, `this_week`, `last_7_days`, `last_30_days`, `this_year`, `all`, `YYYY-MM`.
+  400 for anything else.
+- `GET /finance/transactions?period=all&bucket_id=&category=&direction=&limit=100&offset=0` →
+  `[{id, entry_id, entry_amount_minor, entry_amount, occurred_at, direction, amount_minor,
+  amount, currency, bucket_id, bucket, category, note, income_type, payment_id, revenue_id,
+  batch_id, transfer, legs, created_at}]`, newest first.
+- `PATCH /finance/transactions/{id}` body `{bucket_id?, category?, note?, amount?,
+  occurred_at?}` → `{transaction, change, changes}`. 409 for the amount of a client payment or
+  of a split income, and for a move between buckets.
+- `DELETE /finance/transactions/{id}` → `{deleted, changes}`: removes every row of the entry.
+  409 for a client payment.
+- `POST /finance/buckets/{id}/default` → `{bucket: {id, name, is_default}, changes}`.
+
+### Vault
+- `POST /vault/webhook` (no session; headers `X-Hub-Signature-256`, `X-GitHub-Event`) →
+  ping: `{ok, pong}`; a push with nothing to read: `{ok, ignored}`; a push with work: 202
+  `{ok, accepted, full, changed, removed}`. 401 bad signature, 503 no usable secret, 400 not JSON.
+- `GET /vault/status` (changed) → adds `last_sync_at`, `last_source`, `last_error`, `live`,
+  `export_configured`.
+- `GET /integrations` (changed): a fifth provider, `vault`, with `actions: ["sync"]`.
+
+### Notifications and push
+- `GET /push/config` → `{configured, public_key, subscriptions}`.
+- `POST /push/subscribe` body `{endpoint, keys: {p256dh, auth}}` → `{subscribed: true,
+  configured, public_key, subscriptions}`. 400 for an endpoint that is not a push service,
+  503 with no VAPID keys.
+- `POST /push/unsubscribe` body `{endpoint}` → `{subscribed: false, …}`.
+- `GET /notifications/settings` (changed) → adds `channel` (`"push"`, `"telegram"` or null),
+  `push: {configured, public_key, subscriptions}`, `quiet_hours_env`, and `task_deadline_days`
+  (days before a task is due; `deadline_days` is for exams and applications).
+- `PATCH /notifications/settings` (changed) also takes `deadline_days` and `task_deadline_days`:
+  a list of numbers or text such as `"3, 1"`. 422 for anything that is not one to ten numbers
+  between 0 and 365.
+- `GET /notifications` (changed): each row has `target`; `channel` may be `"push"`.
+- `GET /briefing/today` (changed) → adds `scheduler: {last_run_at, label, hours_ago,
+  expected, stale}`; `delivery` gains `reachable`; `alerts` may hold `llm_cost_cap` and
+  `scheduler_stale`.
+- `GET /actions/pending` (changed): a `send_outreach` row has `send: {message_id, channel,
+  to_name, to, subject, body, recipient_changed}`; an expired request is not listed.
+- `POST /voice/realtime/tool` and `/voice/realtime/transcript` (changed): take `user_turn`.
+
+### Tools added
+`set_model_route(task, provider?, model?)`, `log_transactions(items[])`,
+`set_allocation_rules(rules[], income_type?, remainder_bucket?, default_bucket?,
+split_unallocated?)`, `get_finance(view, period?, category?, bucket?)`. `show_view` takes
+`budget`.
