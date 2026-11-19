@@ -11,6 +11,8 @@ The specification below separates the capabilities demonstrated or suggested by 
 
 # 1. The central AI assistant
 
+**Status: Partial.** Evidence: typed and real-time voice conversation, one server-side thread, long-term memory and 62 tools that act (`backend/orchestrator.py`, `orchestrator_tools.py`, `voice_realtime.py`, `conversation.py`, `memory_service.py`). Workspaces opened by voice or text exist for seven views only (syllabus, brief, deadlines, note, changes, progress, history: `show_view`); business metrics, the pipeline and the agents open as pages, not as workspaces beside the conversation. A live voice check with a real key is still open (`ROADMAP.md`, Phase 2).
+
 The heart of Founder OS
 
 This is the most important component.
@@ -69,6 +71,8 @@ Important: Opening a workspace should not interrupt the conversation. The assist
 
 # 2. Proactive intelligence and personal management
 
+**Status: Partial.** Evidence: the daily command centre and task extraction are built (`backend/briefing.py`, `apply_parse_updates` in `main.py`, `actions.py`). Proactive communication is built for Telegram (`notify.py`, `agents/briefing_courier.py`) but no account is set up and the external schedule ships switched off (`docs/adr/0001`, amendment), so nothing reaches Bandile while the app is closed. Weekly planning is not built (`ROADMAP.md`, Phase 3). Outbound voice calls are not built.
+
 Core functionality
 
 This is what separates Founder OS from an ordinary chatbot.
@@ -109,6 +113,8 @@ This is what separates Founder OS from an ordinary chatbot.
 This is directly inspired by the Jarvis-style interaction in your videos: the assistant shouldn't always wait for you to open the application.
 
 # 3. Business intelligence and commercial operations
+
+**Status: Partial.** Evidence: market intelligence, lead qualification, outreach behind an approval gate, the CRM and brand analytics are built (`backend/market_intel/`, `leads.py`, `outreach.py`, `crm.py`, `brand/`; `docs/phases/PROGRESS.md` S1 to S11). Leads arrive by CSV or conversation: nothing discovers prospects on its own. Profitability and revenue forecasts are not built. Brand data covers YouTube and a LinkedIn export only.
 
 Major functional department
 
@@ -194,6 +200,8 @@ Founder OS should analyse your actual performance data and give you an evidence-
 
 # 4. Project and strategic management
 
+**Status: Partial.** Evidence: the project portfolio with focus, maintain, pause and close recommendations, blockers and a weekly review is built (`backend/portfolio.py`; `PROGRESS.md` S8), and annual targets feed the briefing (`assistant_state.py`). Quarterly objectives, dependencies between projects and a check of daily work against long-term goals are not built.
+
 Core functionality
 
 Founder OS should understand everything you're working towards, not just the tasks you're doing today.
@@ -234,6 +242,8 @@ Founder OS should understand everything you're working towards, not just the tas
 The assistant should understand your greater mission and use it as context when recommending priorities.
 
 # 5. Academic and personal development
+
+**Status: Partial.** Evidence: the four-state syllabus tracker, exam dates and weakest topics are built (`backend/syllabus.py`), as are applications with a requirements checklist and gap review (`applications.py`; `PROGRESS.md` S20, S21), notes for books, Bible and journal (`notes.py`) and the daily non-negotiables. A notes screen and past-paper score trends are not built (`ROADMAP.md`, Phase 4).
 
 Core functionality
 
@@ -293,6 +303,8 @@ These should largely be managed through conversation and connected documents rat
 
 # 6. Knowledge and memory management
 
+**Status: Partial.** Evidence: vault search by meaning, notes, long-term memory and the conversation history are built (`backend/vault_sync.py`, `retrieval.py`, `memory_service.py`, `conversation.py`). The vault is only pulled at startup, every six hours while the app is awake, or by hand. Finding contradictions or outdated information is not built. See section 16.
+
 Founder OS needs a persistent understanding of your information.
 
 - Search your Obsidian vault.
@@ -309,6 +321,8 @@ Founder OS needs a persistent understanding of your information.
 For example, if you ask about a business decision, it should be able to retrieve the previous market research, the relevant client information and the decision you made.
 
 # 7. AI agent ecosystem
+
+**Status: Built.** Evidence: as jobs, not as chatbots: one registry, one runner, twelve agents, an activity log with Undo per run and the Agents page (`backend/agents/`; `PROGRESS.md` S13, S14 and the Agents UI). See "As built" below.
 
 Advanced capability
 
@@ -342,7 +356,26 @@ You should eventually have specialised agents working under a central orchestrat
 
 The important distinction: agents should be able to work together, not operate as eight disconnected chatbots.
 
+### As built
+
+The agents are not eight chatbots. They are jobs. One conversational assistant (the orchestrator) is the
+only thing Bandile talks to. Each agent is a plain function with a declaration of when it runs, which tools
+and tables it may touch, whether it may notify, and how many model calls it may make. One runner starts the
+agents that are due, one after another, records each run, checks afterwards that the run only wrote to the
+tables it declared, and undoes the run if it did not. Agents pass work to each other through events
+(a payment falls overdue, a lead replies), not through conversation.
+
+Twelve agents ship: market intelligence, lead qualifier, follow-up sentinel, CRM housekeeper, portfolio
+reviewer, brand sync, application watch, calendar sync, email sync, and three couriers (briefing, alerts,
+reminders). The departments in the table above map onto them and onto the assistant's tools: the Executive
+role is the assistant itself with the daily briefing; Research is the market intelligence agent; Business is
+the lead qualifier, the follow-up sentinel and the CRM housekeeper; Brand is brand sync; Projects is the
+portfolio reviewer; Applications is application watch. The Academic and Knowledge roles have no agent: they
+are tools the assistant calls (`update_syllabus`, vault and notes search, `remember`).
+
 # 8. Visual reporting and dynamic workspaces
+
+**Status: Partial.** Evidence: the full-screen stage shows seven views as KPI cards, a list and next actions (`frontend/index.html`, `renderStageView`), and the Business page has Pipeline, Clients, Portfolio and Brand tabs. Interactive charts, drill-down and a report workspace are not built.
 
 This is where the Rose-style experience from your references becomes important.
 
@@ -378,6 +411,8 @@ The assistant opens a proper visual report, explains the findings and lets you i
 
 # 9. Integrations and infrastructure
 
+**Status: Partial.** Evidence: Google Calendar, email over IMAP and SMTP, Telegram and YouTube are built in code (`backend/integrations_google.py`, `integrations_email.py`, `integrations_telegram.py`, `brand/adapters.py`; `PROGRESS.md` S15 to S19) but none has been set up or checked against the live service (`PROGRESS.md`, "External setup" and "VERIFY items"). WhatsApp is a link Bandile taps, not a connection. Supabase and OpenAI Realtime are in use.
+
 For the system to become genuinely proactive, it needs connections to external services.
 
 | Integration         | Purpose                                 |
@@ -392,9 +427,22 @@ For the system to become genuinely proactive, it needs connections to external s
 | Research services   | Market intelligence                     |
 | External automation | Scheduled and event-triggered actions   |
 
+### Proactive channels
+
+How Founder OS reaches Bandile when the app is closed, in the order they are built:
+
+| Channel        | State   | Notes                                                                              |
+| -------------- | ------- | ---------------------------------------------------------------------------------- |
+| Web Push       | First   | Notifications from the installed web app. No account to set up, no cost            |
+| Telegram       | Paused  | Built in Phase 6 (pairing, briefing, replies). Not set up; resumes in Phase 8      |
+| WhatsApp       | Later   | Needs a business account and a paid provider                                       |
+| Outbound calls | Later   | Needs a telephony provider; only ever where explicitly authorised                  |
+
 Security, authentication, permissions, audit logs, backups and reliable error handling are foundational requirements.
 
 # 10. Testing Founder OS against the videos
+
+**Status: Partial.** Evidence: of the acceptance tests below, groups 1, 4 and 5 are met in code; group 2 waits on a schedule that runs while the app is closed and on a delivery channel; group 3 is met for the seven stage views only; group 6 is met except that agents do not hand work to one another beyond events (`backend/agents/runner.py`).
 
 This is the most important part of the specification. We need to test whether we're recreating the capabilities and experience demonstrated, rather than simply building a futuristic-looking interface.
 
@@ -479,6 +527,8 @@ Agents can share relevant information and coordinate work.
 
 # 11. The minimal-friction operating principle
 
+**Status: Partial.** Evidence: conversation and one-tap controls are the way in everywhere (`CLAUDE.md`, product principles 1 and 2). Automation is limited by the schedule being switched off (`docs/adr/0001`, amendment).
+
 This is the most important design constraint of the entire project.
 
 | Old approach                          | Founder OS 2.0                                 |
@@ -503,6 +553,8 @@ There should be three ways to interact with the system:
 The assistant should intelligently decide when to use each.
 
 # 12. Final product hierarchy
+
+**Status: Partial.** Evidence: seven of the eight departments have a page or a tab (`frontend/index.html`: Command Centre, Business, Syllabus and Health, Portfolio, Brand, Applications, Agents). Knowledge has search and a Conversations page but no workspace of its own (`ROADMAP.md`, Phase 8).
 
 FOUNDER OS INTELLIGENCE
 
@@ -562,6 +614,68 @@ Database · Integrations · Permissions · Scheduling · Notifications · Audit 
 
 # 13. Governing rule
 
+**Status: Built.** Evidence: adopted as product principle 1 (`CLAUDE.md`, "Founder OS must never need maintaining").
+
 If a feature requires more effort to maintain than the value it creates, redesign it or remove it.
 
 Founder OS should give more time to study, build Aether AI, develop the personal brand and pursue long-term ambitions. It must never become another project competing for that time.
+
+# 14. Model routing and cost
+
+**Status: Missing.** Evidence: every call goes to OpenAI through `backend/llm.py`, with one model for all
+tasks. Planned as Phase 7, Stage 1 (`ROADMAP.md`).
+
+Founder OS should not be tied to one model provider or one model.
+
+- Every model call goes through one gateway, which looks up the route for the task: which provider, which
+  model, which parameters.
+- Two providers, OpenAI and Claude, each behind a small adapter the project owns. Each works with only its
+  own key set. With no key, everything that is not AI keeps working.
+- Routes are changed by conversation ("use Claude for chat") or from Settings, and every change can be undone.
+- When a provider fails, times out or refuses, the call is retried once on the other provider at the
+  matching tier.
+- Every call is logged with its provider, task and estimated cost. A monthly cap moves the expensive routes
+  to the cheapest model at 80 percent and says so once in the briefing.
+- Real-time voice stays on OpenAI.
+
+# 15. Personal finance ledger
+
+**Status: Missing.** Evidence: the only money Founder OS knows is business revenue and client payments
+(`backend/crm.py`). Planned as Phase 7, Stage 2 (`ROADMAP.md`).
+
+Bandile says what he spent or received, and every balance is up to date.
+
+- Money sits in buckets (tithe, business, invest, save, personal, or whatever he names).
+- "Spent K50 on lunch and K120 on data, got K800 from Bel" is one entry in the conversation and one Undo.
+- Income is split across the buckets by rules he sets in conversation. Spending comes out of the bucket he
+  names, or the default one.
+- A client payment recorded in the CRM is the same money, recorded once.
+- Balances are always worked out from the transactions. Amounts are whole ngwee. The model never does the
+  arithmetic.
+- A Budget view shows the buckets, the month's money in and out, spending by category and the transactions.
+
+# 16. Second brain sync
+
+**Status: Missing.** Evidence: the vault is pulled at startup, every six hours while the app is awake, or by
+hand (`backend/vault_sync.py`, `main.start_vault_scheduler`). Planned as Phase 7, Stage 3 (`ROADMAP.md`).
+
+The Obsidian vault and Founder OS should agree within minutes, in both directions.
+
+- Obsidian commits and pushes on its own every ten minutes. GitHub tells Founder OS about each push, and
+  only the files that changed are read and indexed again.
+- Once a day, the notes the assistant created or changed are written into one vault folder, `Founder OS/`.
+  Only the assistant writes there, so nothing conflicts.
+- Settings shows when the vault was last synced. The manual sync stays as a fallback.
+
+# 17. Claude connector (MCP)
+
+**Status: Missing.** Evidence: nothing in `backend/` serves the Model Context Protocol. Planned as Phase 7,
+Stage 5, and only after Bandile approves the authentication design; otherwise Phase 8 (`ROADMAP.md`).
+
+Founder OS becomes a connector. Bandile's Claude projects ask it directly instead of him uploading
+documents to them.
+
+- Tools: search the brain (vault, notes and memory), get the briefing, get tasks, get the finance summary,
+  append a note.
+- Reads only by default. Anything that writes goes through the change log and stays behind a switch that is
+  off until he turns it on.
