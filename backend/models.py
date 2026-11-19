@@ -1486,3 +1486,18 @@ class AllocationRule(Base):
     pct         = Column(Integer, nullable=False)               # basis points
     created_at  = Column(DateTime, default=datetime.utcnow)
 
+
+# ── PHASE 7, STAGE 3: LIVE VAULT ─────────────────────────────
+
+class VaultExport(Base):
+    """What the daily export last wrote to the vault folder ``Founder OS/`` for one note.
+    Bookkeeping, like a cache: it is not change-logged."""
+    __tablename__ = "vault_exports"
+
+    id           = Column(Integer, primary_key=True, index=True)
+    note_id      = Column(Integer, nullable=False, unique=True)
+    path         = Column(String, nullable=False)
+    content_hash = Column(String, nullable=False)
+    sha          = Column(String, nullable=True)          # the file's blob sha on GitHub
+    exported_at  = Column(DateTime, nullable=True)
+

@@ -60,6 +60,7 @@ app.include_router(_auth.router)
 import usage as _usage
 import model_routes as _model_routes
 import finance as _finance
+import vault_webhook as _vault_webhook
 import change_log as _change_log
 import actions as _actions
 import notes as _notes
@@ -69,6 +70,7 @@ import voice_realtime as _voice_realtime
 app.include_router(_usage.router)
 app.include_router(_model_routes.router)
 app.include_router(_finance.router)
+app.include_router(_vault_webhook.router)
 app.include_router(_change_log.router)
 app.include_router(_actions.router)
 app.include_router(_notes.router)
@@ -167,6 +169,9 @@ async def startup():
     if os.getenv("JOBS_TOKEN") and len(os.getenv("JOBS_TOKEN")) < 32:
         print("[startup] WARNING: JOBS_TOKEN is shorter than 32 characters. Use a longer random value "
               "(under 16, POST /jobs/tick answers 503).")
+    if os.getenv("GITHUB_WEBHOOK_SECRET") and len(os.getenv("GITHUB_WEBHOOK_SECRET")) < 32:
+        print("[startup] WARNING: GITHUB_WEBHOOK_SECRET is shorter than 32 characters. Use a longer random value "
+              "(under 16, the vault webhook refuses every push).")
     if os.getenv("TELEGRAM_WEBHOOK_SECRET") and len(os.getenv("TELEGRAM_WEBHOOK_SECRET")) < 32:
         print("[startup] WARNING: TELEGRAM_WEBHOOK_SECRET is shorter than 32 characters. Use a longer random "
               "value (under 16, the webhook refuses every update).")
@@ -227,6 +232,8 @@ async def startup():
         llm.reset_routes()  # read the routes the migration just seeded, not an earlier copy
         from migrations.m027_finance_ledger import run as run_m027
         run_m027(db)        # m027 — buckets, ledger_transactions, allocation_rules
+        from migrations.m028_vault_live import run as run_m028
+        run_m028(db)        # m028 — vault_exports
         _validate_schema(engine)   # raises if any ORM column is absent from the live DB
         _seed_non_negotiables_if_empty(db)
         _verify_seed_integrity(db)
@@ -327,11 +334,11 @@ async def run_freeze_on_startup():
 
 # ── VAULT SYNC — startup (non-blocking) + APScheduler ────────
 
-def _vault_sync_job():
+def _vault_sync_job(source: str = "scheduled"):
     from vault_sync import sync_vault as _sync, redact_credentials
     db = SessionLocal()
     try:
-        result = _sync(db)
+        result = _sync(db, source=source)
         print(f"[vault_scheduler] sync complete: {redact_credentials(result)}")
     except Exception as exc:
         print(f"[vault_scheduler] sync error: {redact_credentials(exc)}")
@@ -343,7 +350,7 @@ def _vault_sync_job():
 async def start_vault_scheduler():
     import threading
     # Non-blocking startup sync
-    t = threading.Thread(target=_vault_sync_job, daemon=True, name="vault-startup-sync")
+    t = threading.Thread(target=_vault_sync_job, args=("startup",), daemon=True, name="vault-startup-sync")
     t.start()
 
     # Scheduled recurring sync via APScheduler
@@ -2388,7 +2395,7 @@ def search_context(q: str, db: Session = Depends(get_db)):
 def vault_sync_endpoint(db: Session = Depends(get_db)):
     """Manually trigger a vault clone/pull and re-index."""
     from vault_sync import sync_vault
-    return sync_vault(db)
+    return sync_vault(db, source="manual")
 
 
 @app.get("/vault/status")
@@ -2409,10 +2416,20 @@ def vault_status(db: Session = Depends(get_db)):
         .first()
     )
     last_synced = str(latest.last_synced) if latest and latest.last_synced else None
+    import integrations
+    row = integrations.get_or_create(db, "vault")
+    state = integrations.config(row)
     return {
         "last_synced": last_synced,
         "chunk_count": chunk_count,
         "file_count": file_count,
+        # When a sync last ran and succeeded (a push that changed nothing still counts),
+        # what started it, and whether pushes arrive on their own.
+        "last_sync_at": row.last_sync_at,
+        "last_source": state.get("last_source"),
+        "last_error": row.last_error if row.status == "error" else None,
+        "live": len(os.getenv("GITHUB_WEBHOOK_SECRET") or "") >= 16,
+        "export_configured": bool(os.getenv("VAULT_REPO") and os.getenv("VAULT_WRITE_TOKEN")),
     }
 
 

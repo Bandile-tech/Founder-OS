@@ -112,14 +112,18 @@ def test_integrations_lists_four_providers_as_disconnected_with_nothing_set():
     r = client.get("/integrations")
     assert r.status_code == 200
     items = r.json()
-    assert [i["provider"] for i in items] == ["google_calendar", "email", "telegram", "youtube"]
-    for item in items:
+    assert [i["provider"] for i in items] == ["google_calendar", "email", "telegram", "youtube", "vault"]
+    for item in items[:4]:
         assert item["status"] == "disconnected" and item["configured"] is False and item["actions"] == []
         assert "secret_json" not in item and "config_json" not in item
+    # The vault (Phase 7) needs no key of its own: it waits for its first sync, and can be synced by hand.
+    vault = items[4]
+    assert (vault["status"], vault["actions"], vault["last_sync_at"]) == ("pending", ["sync"], None)
+    assert vault["account_label"] == "manual sync only · daily export off"
     # One row per provider, however often the list is read.
     client.get("/integrations")
     db = _db()
-    assert db.query(models.Integration).count() == 4
+    assert db.query(models.Integration).count() == 5
     db.close()
 
 

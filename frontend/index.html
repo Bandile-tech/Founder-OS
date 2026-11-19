@@ -3220,6 +3220,7 @@ function mdHtml(text){
 const SET={integrations:[],notif:null,recent:[],pairOpen:false,models:null};
 const INTEG_NEEDS={google_calendar:"Needs GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and FOUNDER_OS_API_URL on the server.",
   email:"Needs EMAIL_ADDRESS and EMAIL_APP_PASSWORD on the server.",telegram:"Needs TELEGRAM_BOT_TOKEN on the server.",
+  vault:"The vault repository is not set on the server.",
   youtube:"Needs YOUTUBE_API_KEY on the server."};
 const INTEG_ACTIONS={connect:"Connect",sync:"Sync",disconnect:"Disconnect",pair:"Pair",set_webhook:"Set webhook"};
 
@@ -3403,6 +3404,7 @@ function _integBadge(status){
 function _integSub(i){
   if(i.status==="error")return i.last_error||"Needs attention.";
   if(i.status==="connected")return [i.account_label,i.last_sync_at?`synced ${_ago(i.last_sync_at)}`:null].filter(Boolean).join(" · ")||"Connected.";
+  if(i.provider==="vault"&&i.status!=="error")return i.last_sync_at?`Vault synced ${_ago(i.last_sync_at)} · ${i.account_label||""}`:`Not synced yet · ${i.account_label||""}`;
   if(i.status==="pending"){
     if(i.provider==="telegram")return "Send the code below to the bot to pair your phone.";
     if(i.provider==="email")return `${i.account_label||"Email"} · not checked yet. Tap Sync.`;
@@ -3465,6 +3467,15 @@ async function integAction(btn){
     return;
   }
   if(action==="sync"){
+    if(provider==="vault"){
+      const v=await _setTap(btn,"POST","/vault/sync");
+      if(v){
+        if((v.errors||[]).length)showToast("The vault could not be synced: "+v.errors[0],"error");
+        else showToast(`Vault synced: ${v.files_processed} note${v.files_processed===1?"":"s"} read`,"success");
+        loadSettingsCards();
+      }
+      return;
+    }
     const d=await _setTap(btn,"POST",provider==="email"?"/integrations/email/sync":"/integrations/google/sync");
     if(d){
       if(d.ok===false)showToast(d.error||"Sync failed","error");
