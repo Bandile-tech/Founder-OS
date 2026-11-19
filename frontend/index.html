@@ -687,6 +687,9 @@ button.home-tile:active{transform:scale(0.98)}
 .chg-text,.sug-text,.sug-reason{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .chg-text,.sug-text{color:var(--text)}
 .sug-reason{font-size:var(--fs-2xs);color:var(--muted);margin-top:1px}
+.sug-row--send{align-items:flex-start;background:rgba(167,235,242,0.06);border-color:rgba(167,235,242,0.28)}
+.sug-row--send .sug-reason{white-space:normal}
+.sug-body{margin:var(--sp-2) 0;padding:var(--sp-2) var(--sp-3);border-radius:var(--r-md);background:var(--well);color:var(--text);white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.5;max-height:26vh;overflow:auto}
 .chg-undo,.sug-btn{flex:none;height:28px;padding:0 var(--sp-3);border-radius:var(--r-pill);background:none;border:1px solid var(--line-2);color:var(--glow);cursor:pointer;
   font-size:var(--fs-2xs);letter-spacing:0.1em;text-transform:uppercase;transition:border-color var(--t-fast),background var(--t-fast)}
 .chg-undo:hover,.sug-btn:hover{border-color:var(--glow);background:rgba(167,235,242,0.08)}
@@ -3018,21 +3021,70 @@ async function undoBatch(batchId,btn){
 
 let _suggestions=[];
 let _suggOpen=false;
+// Sends waiting for a yes. Each gets a card that shows who it goes to and the whole text,
+// with Confirm (the tap is the approval) and a way to drop it.
+let _pendingSends=[];
 function toggleSuggestions(force){
   _suggOpen=force!==undefined?force:!_suggOpen;
   const host=document.getElementById("ucmd-pending"), chip=document.getElementById("sugg-chip");
-  if(host)host.classList.toggle("show",_suggOpen&&_suggestions.length>0);
+  if(host)host.classList.toggle("show",_suggOpen&&(_suggestions.length+_pendingSends.length)>0);
   if(chip)chip.setAttribute("aria-expanded",String(_suggOpen));
+}
+async function loadPendingActions(open){
+  try{
+    const r=await fetch(`${API_BASE}/actions/pending`);
+    if(!r.ok)return;
+    const d=await r.json();
+    const had=_pendingSends.length;
+    _pendingSends=(Array.isArray(d)?d:[]).filter(a=>a.kind==="send_outreach"&&a.send);
+    if(_pendingSends.length&&(open||_pendingSends.length>had))_suggOpen=true;     // a new one opens itself
+    renderSuggestions();
+  }catch(_){}
+}
+function _sendCard(a){
+  const sd=a.send, channel={whatsapp:"WhatsApp",email:"Email",linkedin:"LinkedIn message"}[sd.channel]||_cap(sd.channel||"message");
+  const who=`${sd.to_name||"the lead"}${sd.to?` <${sd.to}>`:""}`;
+  return `<div class="sug-row sug-row--send" id="pend-${Number(a.id)}">
+      <span class="chg-act">Send</span>
+      <div class="sug-main"><div class="sug-text">${escHtml(channel)} to ${escHtml(who)}</div>
+        ${sd.subject?`<div class="sug-reason">Subject: ${escHtml(sd.subject)}</div>`:""}
+        <div class="sug-body">${escHtml(sd.body||"")}</div>
+        ${sd.recipient_changed?`<div class="sug-reason">The address changed after this was asked for. Ask for the send again.</div>`:`<div class="sug-reason">Nothing has been sent. A sent message cannot be undone.</div>`}</div>
+      <button class="sug-btn accept" onclick="confirmPending(${Number(a.id)},this)"${sd.recipient_changed?" disabled":""}>Confirm</button>
+      <button class="sug-btn dismiss" onclick="cancelPending(${Number(a.id)},this)" aria-label="Do not send">✕</button>
+    </div>`;
+}
+async function confirmPending(id,btn){
+  if(btn){btn.disabled=true;btn.textContent="…";}
+  try{
+    const r=await fetch(`${API_BASE}/actions/${id}/confirm`,{method:"POST"});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok)throw new Error(d.detail||("HTTP "+r.status));
+    if(d.executed){
+      if(d.open_url){window.open(d.open_url,"_blank","noopener");showToast("WhatsApp is open: press send there","success");}
+      else showToast("Sent","success");
+    }else showToast(d.reason||d.error||"Not sent","error");
+  }catch(e){showToast("Could not send: "+e.message,"error");}
+  await loadPendingActions();
+  _afterWriteRefresh();
+}
+async function cancelPending(id,btn){
+  if(btn)btn.disabled=true;
+  try{await fetch(`${API_BASE}/actions/${id}/cancel`,{method:"POST"});showToast("Not sent. The draft is kept.","info");}catch(_){}
+  await loadPendingActions();
+  _afterWriteRefresh();
 }
 function renderSuggestions(){
   const host=document.getElementById("ucmd-pending"), chip=document.getElementById("sugg-chip"), chipText=document.getElementById("sugg-chip-text");
   if(!host)return;
-  if(!_suggestions.length){host.classList.remove("show");host.innerHTML="";if(chip)chip.style.display="none";_suggOpen=false;return;}
-  if(chip){chip.style.display="inline-flex";if(chipText)chipText.textContent=`${_suggestions.length} suggestion${_suggestions.length>1?"s":""}`;}
+  const sends=_pendingSends.length, sugg=_suggestions.length;
+  if(!sugg&&!sends){host.classList.remove("show");host.innerHTML="";if(chip)chip.style.display="none";_suggOpen=false;return;}
+  const waiting=[sends?`${sends} send${sends>1?"s":""} to confirm`:null,sugg?`${sugg} suggestion${sugg>1?"s":""}`:null].filter(Boolean).join(" · ");
+  if(chip){chip.style.display="inline-flex";if(chipText)chipText.textContent=waiting;chip.setAttribute("aria-expanded",String(_suggOpen));}
   host.classList.toggle("show",_suggOpen);
   const kindLabel=k=>k==="todo_add"?"Add task":k==="todo_complete"?"Complete":k==="inbox_add"?"Inbox idea":k==="project_pause"?"Pause project":k==="lead_reply"?"Mark replied":k==="client_add"?"Add client":k;
-  host.innerHTML=`<div class="chg-head"><span>${_suggestions.length} suggestion${_suggestions.length>1?"s":""} waiting</span><button class="sug-btn dismiss" onclick="toggleSuggestions(false)" aria-label="Hide">✕</button></div>
-    <div class="sug-strip">${_suggestions.map(sg=>`
+  host.innerHTML=`<div class="chg-head"><span>${escHtml(waiting)} waiting</span><button class="sug-btn dismiss" onclick="toggleSuggestions(false)" aria-label="Hide">✕</button></div>
+    <div class="sug-strip">${_pendingSends.map(_sendCard).join("")}${_suggestions.map(sg=>`
       <div class="sug-row" id="sug-${Number(sg.id)}">
         <span class="chg-act">${escHtml(kindLabel(sg.kind))}</span>
         <div class="sug-main"><div class="sug-text">${escHtml(sg.text||"")}</div><div class="sug-reason">${escHtml(sg.reason||"")}${sg.confidence!=null?` · ${Math.round(sg.confidence*100)}%`:""}</div></div>
@@ -3174,7 +3226,7 @@ async function submitUnifiedInput(){
     result.insertAdjacentHTML("beforeend",`<div id="ucmd-changes"></div>`);
     setOrbState("speaking",(finalText||loggedSummary||"").replace(/[*_#`>]/g,"").slice(0,140),6000);
     renderChangesStrip(finalChanges);
-    loadSuggestions();
+    loadSuggestions();loadPendingActions();
     saveState();
 
     // Voice loop: speak the reply if this input came from the mic.
@@ -3975,10 +4027,16 @@ function _liveSend(event){
   if(LIVE.dc&&LIVE.dc.readyState==="open")LIVE.dc.send(JSON.stringify(event));
 }
 
-async function _liveSaveTranscript(role,text,changes){
+// The server needs to know which of his spoken turns a tool call follows, and which turn a
+// transcript line is the words of: a spoken yes only approves what was put to him before he
+// said it. A turn starts when he starts speaking; a response belongs to the turn that was
+// current when it was created (so a call from a response he has since talked over keeps its
+// own, earlier, turn).
+async function _liveSaveTranscript(role,text,changes,userTurn){
   try{
     await fetch(`${API_BASE}/voice/realtime/transcript`,{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({role,text,voice_session_id:LIVE.session?.voice_session_id,changes:changes&&changes.length?changes:null})});
+      body:JSON.stringify({role,text,voice_session_id:LIVE.session?.voice_session_id,changes:changes&&changes.length?changes:null,
+        user_turn:role==="user"?(userTurn??LIVE.userTurn??0):null})});
   }catch(_){}
 }
 
@@ -3988,9 +4046,11 @@ async function _liveRunTool(call){
   let payload={call_id:call.call_id,name:call.name,result:{error:"tool bridge failed"},output:JSON.stringify({error:"tool bridge failed"}),changes:[]};
   try{
     const r=await fetch(`${API_BASE}/voice/realtime/tool`,{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({name:call.name,arguments:call.arguments,call_id:call.call_id,voice_session_id:LIVE.session?.voice_session_id})});
+      body:JSON.stringify({name:call.name,arguments:call.arguments,call_id:call.call_id,voice_session_id:LIVE.session?.voice_session_id,
+        user_turn:call.userTurn??LIVE.userTurn??0})});
     if(r.ok)payload=await r.json();
   }catch(_){}
+  if(call.name==="request_send"||call.name==="confirm_action"||call.name==="cancel_action"||call.name==="propose_delete"){try{loadPendingActions(call.name==="request_send");}catch(_){}}
   _liveLine("act",`${call.name}: ${payload.summary||payload.result?.error||"done"}`);
   if(payload.ui_directive)handleUiDirective(payload.ui_directive);
   if(payload.changes&&payload.changes.length)LIVE.pendingChanges.push(...payload.changes);
@@ -4004,7 +4064,12 @@ function _liveHandleEvent(ev){
   const t=ev.type||"";
   if(t==="session.started"||t==="session.created"){
     _liveTouch();_liveSetState("listening","listening");
+    LIVE.userTurn=0;LIVE.respTurn=null;LIVE.turnOf={};
+  }else if(t==="response.created"){
+    LIVE.respTurn=LIVE.userTurn||0;
   }else if(t==="input_audio_buffer.speech_started"){
+    LIVE.userTurn=(LIVE.userTurn||0)+1;
+    if(ev.item_id){LIVE.turnOf=LIVE.turnOf||{};LIVE.turnOf[ev.item_id]=LIVE.userTurn;}
     _liveTouch();
     // Barge-in: server VAD cancels the response; the remote audio stops on its own.
     if(LIVE.partialEl){LIVE.partialEl.remove();LIVE.partialEl=null;LIVE.partial="";}
@@ -4013,7 +4078,7 @@ function _liveHandleEvent(ev){
     _liveTouch();_liveSetState("thinking","thinking");
   }else if(t==="conversation.item.input_audio_transcription.completed"){
     const text=(ev.transcript||"").trim();
-    if(text){_liveLine("you",text);_liveSaveTranscript("user",text);}
+    if(text){_liveLine("you",text);_liveSaveTranscript("user",text,null,(LIVE.turnOf||{})[ev.item_id]);}
   }else if(t==="response.output_audio_transcript.delta"||t==="response.audio_transcript.delta"){
     _liveTouch();
     if(LIVE.state!=="speaking")_liveSetState("speaking","speaking");
@@ -4027,7 +4092,7 @@ function _liveHandleEvent(ev){
     if(text)setOrbState("speaking",text.slice(0,140));   // the bubble shows what was said
     if(text){const ch=LIVE.pendingChanges.splice(0);_liveSaveTranscript("assistant",text,ch);}
   }else if(t==="response.function_call_arguments.done"){
-    _liveRunTool({call_id:ev.call_id,name:ev.name,arguments:ev.arguments});
+    _liveRunTool({call_id:ev.call_id,name:ev.name,arguments:ev.arguments,userTurn:LIVE.respTurn??LIVE.userTurn??0});
   }else if(t==="response.done"){
     _liveTouch();
     if(LIVE.state!=="acting")_liveSetState("listening","listening");
@@ -4976,7 +5041,7 @@ function renderGuide(){
    INIT
 ═══════════════════════════════════════════════════ */
 function initialRender(){
-  document.body.dataset.page=getActivePageName();placeDock();renderHome();loadBriefing();refreshAiPill();loadSuggestions();
+  document.body.dataset.page=getActivePageName();placeDock();renderHome();loadBriefing();refreshAiPill();loadSuggestions();loadPendingActions();
 }
 
 let _lastPingSuccess=0;
