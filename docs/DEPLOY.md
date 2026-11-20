@@ -123,21 +123,39 @@ Postgres.
 
 Nothing here is needed for the app to start. Each block switches one thing on.
 
-**Migrations.** m026 to m029 only add tables and columns. On the Render log after the deploy,
+**What to set on Render, in one place.** Each is explained in its block below. The first two
+were the ones missed or easy to miss in the live check (20 November 2026).
+
+| Var | Needed for | If it is missing |
+|---|---|---|
+| `JOBS_TOKEN` | The schedule. 32 or more random characters, the same value on Render and as the repository secret | `POST /jobs/tick` answers 503: the workflow fails and nothing is sent while the app is closed |
+| `VAULT_REPO` | The live vault. The vault repository as `owner/name` | A push from any repository that knows the secret is accepted, and the daily export is skipped |
+| `GITHUB_WEBHOOK_SECRET` | The live vault. 32 or more random characters, the same value in the GitHub webhook | `POST /vault/webhook` answers 503 |
+| `VAULT_WRITE_TOKEN` | The daily export into `Founder OS/` | The export is skipped |
+| `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | Notifications | No device can subscribe |
+| `ANTHROPIC_API_KEY`, `MONTHLY_LLM_CAP_USD`, `QUIET_HOURS`, `VAULT_MIN_SCORE` | Optional | Defaults apply |
+
+**Migrations.** m026 to m030 only add tables and columns. On the Render log after the deploy,
 look for `[m026] Model router ready on postgresql: 10 model(s) and 12 route(s) seeded.`,
 `[m027] Finance ledger tables ready`, `[m028] Vault export table ready`, `[m029] Web Push
-migration complete` and `Schema OK`. m026 fills `llm_usage.provider` with `openai` for rows
+migration complete`, `[m030] Vault changes table ready` and `Schema OK`. m026 fills `llm_usage.provider` with `openai` for rows
 that have none, once. m029 moves the notification settings to the three daily wakes, once,
 and only where a value is still the one it shipped with.
 
 **Models (optional).** `ANTHROPIC_API_KEY` to use Claude or to fall back to it.
 `MONTHLY_LLM_CAP_USD` for a monthly cap. `FALLBACK_MAP` only to change the seeded pairs.
 
-**The schedule.** In the repository: Settings → Secrets and variables → Actions → add
-`FOUNDER_OS_URL` (the Render URL, no trailing slash) and `JOBS_TOKEN` (the same value as on
-Render). The workflow `Founder OS jobs tick` then runs at 05:45, 12:30 and 19:45 Lusaka time.
+**The schedule.** `JOBS_TOKEN` has to be set in two places with the same value (32 or more
+random characters, for example `openssl rand -hex 32`):
+1. On Render, as the environment variable `JOBS_TOKEN`. Without it, or with fewer than 16
+   characters, `POST /jobs/tick` answers 503 whatever the workflow sends.
+2. In the repository: Settings → Secrets and variables → Actions → add `JOBS_TOKEN`, and
+   `FOUNDER_OS_URL` (the Render URL, no trailing slash).
+
+The workflow `Founder OS jobs tick` then runs at 05:45, 12:30 and 19:45 Lusaka time.
 Run it once by hand (Actions → Founder OS jobs tick → Run workflow) and check that the home
-screen shows "Last scheduled run".
+screen shows "Last scheduled run". A run that fails with 503 means the Render side is missing;
+401 means the two values differ.
 
 **Notifications on your phone.**
 1. On any machine with the backend's Python environment: `python tools/vapid_keys.py`. Set the
@@ -152,8 +170,19 @@ screen shows "Last scheduled run".
 1. In Obsidian: install the community plugin "Git" (Obsidian Git). In its settings set
    "Auto commit-and-sync interval" to 10 minutes and turn on "Pull on startup". The vault then
    commits and pushes on its own every ten minutes.
+
+   Obsidian Git pushes with the Git installed on that machine, so Git there needs a working
+   GitHub sign-in. Use Git Credential Manager (it ships with Git for Windows: the first push
+   opens a browser sign-in and the credential is kept by Windows). Do not put a token in the
+   remote URL: the remote should read `https://github.com/<owner>/<vault>.git` and nothing
+   more (`git remote -v` in the vault folder shows it). To check, run `git push` once in the
+   vault folder from a terminal: it must finish without asking for anything. If the sign-in
+   is broken, Obsidian keeps committing but nothing is pushed, GitHub has nothing to send,
+   and Founder OS never hears of the edits; this is what failed the first live vault test.
 2. On Render set `GITHUB_WEBHOOK_SECRET` to 32 or more random characters, and `VAULT_REPO` to
-   the vault repository as `owner/name`.
+   the vault repository as `owner/name` (for example `Bandile-tech/bandile-vault`). `VAULT_REPO`
+   is what makes the webhook ignore pushes from any other repository, and the daily export
+   needs it too.
 3. On GitHub, in the vault repository: Settings → Webhooks → Add webhook. Payload URL:
    `https://<your Render host>/vault/webhook`. Content type: `application/json`. Secret: the
    same value as `GITHUB_WEBHOOK_SECRET`. Events: "Just the push event". Save; GitHub sends a
@@ -164,6 +193,16 @@ screen shows "Last scheduled run".
    else. Set it on Render as `VAULT_WRITE_TOKEN`.
 5. Settings → Integrations → Obsidian vault should read "Vault synced … · updates on every
    push". The Sync button is the manual fallback.
+6. To check the whole chain: edit a note, wait for Obsidian's next push (or run "Git: Commit
+   and sync" from its command palette), then ask the assistant "what did I add to my vault
+   today". If the note is not listed, look in this order: the vault repository on GitHub (is
+   the commit there? if not, it is the sign-in in step 1); the webhook's Recent Deliveries on
+   GitHub (a red delivery shows the status Founder OS answered); Settings → Integrations for
+   the last sync and its error.
+
+`VAULT_MIN_SCORE` (optional, default `0.35`) is the weakest meaning match a vault search still
+counts. Lower it if the assistant says "nothing relevant" about notes that are there; raise it
+if unrelated notes come back.
 
 **Rollback.** Redeploying the previous commit is safe: the new tables and columns are left in
 place and the old code does not read them. The notification times m029 changed stay changed;

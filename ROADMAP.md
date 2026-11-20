@@ -1,7 +1,8 @@
 # Founder OS — Roadmap
 
 Eight phases. Phases 1–4 have their core built (the intelligence-layer rebuild, Stages 1–6),
-and so do Phases 5 and 6. Phase 7 is in progress; Phase 8 is planned. The product vision, with
+and so do Phases 5 and 6. Phase 7 is merged and live, except the Claude connector (Stage 5),
+which is not started; Phase 8 is planned. The product vision, with
 what is built and what is missing in each area, is `docs/FOUNDER_OS_2_SPEC.md`.
 
 ## Phase 1 — Foundation and security · core built
@@ -85,9 +86,12 @@ what was built and every decision: `docs/phases/PROGRESS.md`.
 Specification: `docs/phases/PHASE_6_SPEC.md`; decisions: `docs/adr/`; build sequence:
 `docs/phases/BUILD_ORDER.md`. Patterns both phases follow: `docs/CONVENTIONS.md`.
 
-## Phase 7 — Model switching, money ledger, live second brain, proactive delivery · in progress
-Four things and nothing else. Not merged: nothing below is done until the `phase-7` pull
-request is.
+## Phase 7 — Model switching, money ledger, live second brain, proactive delivery · merged and live
+Four things and nothing else. Merged to `main` on 19 November 2026 (pull request #10) and
+deployed. The live check passed on 20 November 2026: the deploy log, the jobs tick run by hand,
+push notifications on an iPhone, the ledger split with a client payment recorded once, a model
+switch with undo, and the vault webhook re-indexing a push (`docs/phases/PROGRESS.md`, "Phase
+7 — merged and live").
 - **Model router.** Every model call through one gateway that looks up a route per task
   (provider, model, parameters). OpenAI and Claude behind two small adapters. Routes changed by
   conversation or from Settings, with undo. One retry on the other provider when a call fails.
@@ -98,12 +102,14 @@ request is.
   the same money, recorded once. A Budget view.
 - **Live vault.** A GitHub push webhook that re-reads only the files that changed, the time of
   the last sync in Settings, and a daily export of the assistant's notes into the vault folder
-  `Founder OS/`.
+  `Founder OS/`. After the live check: a search with only weak matches says nothing relevant
+  was found, a question about a note is answered from the note's own text, and `vault_recent`
+  lists the files added, changed or removed in the last N days.
 - **Proactive delivery.** The GitHub Actions tick three times a day (05:45, 12:30, 19:45
   Lusaka), Web Push as the first channel, the briefing, an evening check, deadline, exam and
   payment reminders, quiet hours. The two open approval-gate items closed first.
-- **Claude connector (Stage 5).** Only after Bandile approves the authentication design;
-  otherwise it moves to Phase 8.
+- **Claude connector (Stage 5).** Not started. Only after Bandile approves the authentication
+  design; otherwise it moves to Phase 8.
 Specification: sections 14 to 17 of `docs/FOUNDER_OS_2_SPEC.md`.
 
 ## Phase 8 — Connector, Brain workspace, Telegram · planned
