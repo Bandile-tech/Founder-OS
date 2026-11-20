@@ -1581,3 +1581,82 @@ Repository secrets for the schedule: `FOUNDER_OS_URL`, `JOBS_TOKEN`. Setup steps
 - A payment recorded before Phase 7 and marked paid afterwards enters the ledger at that
   moment, as it should; payments already paid before the deploy never do.
 - The `revenue` form (`POST /revenue`) now also writes ledger income, in a batch of its own.
+
+# Phase 7 — merged and live (20 November 2026)
+
+`phase-7` was merged to `main` on 19 November 2026 (pull request #10, merge commit `6d055e9`)
+and deployed to Render. Stage 5 (the Claude connector) is not started.
+
+## Live check, on the deployed app (reported by Bandile, 20 November 2026)
+
+Every check passed:
+
+| Check | Result |
+|---|---|
+| Deploy log | Clean |
+| Jobs tick, run by hand | Passed |
+| Push notifications on the iPhone | Passed |
+| Ledger: income split across buckets, the Bel payment recorded once | Passed |
+| Model switch, then undo | Passed |
+| Vault webhook: a push re-indexed | Passed |
+
+Two things came up in setup, neither a fault in the code:
+- `JOBS_TOKEN` was missing on Render, so `POST /jobs/tick` answered 503. It is now set in both
+  places: on Render and as the repository secret the workflow sends.
+- The first vault test failed because Obsidian Git on the laptop had a broken GitHub sign-in:
+  edits were committed but never pushed, so GitHub had nothing to tell Founder OS about. Fixed
+  on the laptop (Git Credential Manager; no token in the remote URL). `docs/DEPLOY.md` now
+  says both.
+
+Of the "VERIFY after deploy" items above: Web Push on iPhone is checked, and so is the webhook
+re-indexing a push. Not covered by this check: GitHub's cron delay (the tick was run by hand),
+a push that arrives while the Render instance is asleep, and the real-time API's
+`response.created` and `input_audio_buffer.speech_started` events.
+
+## Live-check fixes — how the assistant answers from the vault
+
+Three things the live test showed, fixed on the branch `vault-fixes-phase7-docs`.
+989 backend tests on SQLite.
+
+- **Weak matches are not answers.** `query_cold_archive` used to hand the model the five
+  nearest chunks whatever their distance, with the score hidden, so unrelated notes were
+  presented as answers. A meaning match under 0.35 cosine similarity (`VAULT_MIN_SCORE`) is
+  now dropped. With nothing left, the exact words are tried; with nothing again, the result
+  holds no note at all and says nothing relevant was found.
+- **A question about a note is answered.** The result now carries the best match's whole text
+  (`best_match`, up to 6,000 characters, put back together from its chunks), so the model
+  answers in the same turn. Before, it had a 400-character excerpt and no way to read more,
+  which is why it offered to.
+- **`vault_recent`.** m030 `vault_changes`: each sync notes the files it found added, modified
+  or removed. The tool lists them for the last N days (today is 1), each file once, with when
+  Founder OS saw the change, and says when the vault was last synced.
+- The prompt's vault section says all three in four lines.
+
+Decisions:
+- 0.35 is a starting point, not a measurement: it could not be tuned against the real vault
+  from here. Unrelated text scores about 0.2 to 0.3 with `text-embedding-3-small`; the floor in
+  `retrieval.search` stays 0.2 for notes and memory. If real questions come back "nothing
+  relevant" too often, lower `VAULT_MIN_SCORE` on Render; no deploy is needed.
+- The best match's text rides along with every vault search rather than being a second tool
+  call: one model round trip instead of two. It costs up to about 1,500 tokens per search.
+- Changes are recorded by every sync, not only by the webhook. A push lists its files; a sync
+  that reads the whole vault (startup, the six-hourly sync, the Sync button, a forced push)
+  compares each file's text with what was indexed. This matters because a push that arrives
+  while Render is asleep is often picked up by the startup sync instead of the webhook; with
+  webhook-only recording those notes would be missing from "what did I add today".
+- The time recorded is when Founder OS saw the change, not when the note was written. For a
+  push that is minutes; for a change picked up by a startup sync it is when the server woke.
+- The first index of an empty table records nothing: that is the vault arriving. The same text
+  read again is not a change (so a push that only changes spacing is not listed).
+- A file new in the window is "added" however often it was edited since; a file added and
+  removed inside the window is left out. Renaming a note shows as one removed and one added.
+- `vault_changes` is bookkeeping, like `vault_exports`: not change-logged, and rows older than
+  90 days are dropped by the next sync. `vault_recent` looks back 90 days at most.
+- Tool count is 67; the ceiling in `CONVENTIONS.md` §7 is now 67.
+
+Environment variable added: `VAULT_MIN_SCORE` (default `0.35`), the weakest meaning match a
+vault search still counts.
+
+Not verified: the three fixes are tested with the model and the embeddings mocked
+(`tests/test_phase7_vault_answers.py`); none has been tried on the deployed app with the real
+vault. The suite was not run on PostgreSQL here (the workflow runs it).

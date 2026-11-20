@@ -378,16 +378,32 @@ def add_todos(db, items: list, category: str = "personal", priority: int = 5):
 # Tool 8 — query_cold_archive
 # ════════════════════════════════════════════════════════════════
 
+VAULT_BEST_MATCH_CHARS = 6000      # how much of the best-matching note the model is handed
+
+
 def query_cold_archive(db, query: str, limit: int = 5):
-    """Search Bandile's Obsidian vault (cold archive) by meaning, falling back to
-    keywords when embeddings are unavailable. Called whenever the vault is relevant."""
-    from vault_sync import search_vault, search_vault_semantic
+    """Search Bandile's Obsidian vault (cold archive) by meaning, then by exact words.
+
+    A meaning match weaker than ``vault_sync.min_score()`` is not a match: when nothing is
+    strong enough and the words appear nowhere, the result says nothing relevant was found
+    and carries no note at all. Otherwise the best match comes back as its whole text, so
+    the question is answered from the note in the same turn."""
+    import vault_sync
 
     if not query or len(query) < 2:
         return {"query": query, "results": []}, "query too short"
 
-    semantic = search_vault_semantic(query, db, limit)
-    raw = semantic if semantic else search_vault(query, db, limit=limit)
+    floor = vault_sync.min_score()
+    semantic = [r for r in (vault_sync.search_vault_semantic(query, db, limit) or [])
+                if (r.get("score") or 0) >= floor]
+    raw = semantic or vault_sync.search_vault_keyword(query, db, limit)
+    mode = "semantic" if semantic else "keyword"
+    if not raw:
+        return ({"query": query, "mode": mode, "results": [],
+                 "found": f"Nothing relevant to '{query}' was found in the vault.",
+                 "next_step": "Tell Bandile nothing relevant was found. Do not present other notes as an answer."},
+                f"nothing relevant in the vault for '{query}'")
+
     results = []
     for r in raw:
         results.append({
@@ -397,10 +413,13 @@ def query_cold_archive(db, query: str, limit: int = 5):
             "chunk_index": r["chunk_index"],
             "score": r.get("score"),
         })
-
-    mode = "semantic" if semantic else "keyword"
+    text = vault_sync.note_text(db, raw[0]["file_path"])
+    best = {"file_title": raw[0]["file_title"], "file_path": raw[0]["file_path"],
+            "text": text[:VAULT_BEST_MATCH_CHARS], "truncated": len(text) > VAULT_BEST_MATCH_CHARS}
     summary = f"{len(results)} vault match(es) for '{query}' ({mode})"
-    return {"query": query, "mode": mode, "results": results}, summary
+    return ({"query": query, "mode": mode, "best_match": best, "results": results,
+             "next_step": "You have the best match's text: answer from it now. Do not offer to read it."},
+            summary)
 
 
 # ════════════════════════════════════════════════════════════════
@@ -3417,4 +3436,42 @@ _register(
                     "this_year, all, or a month like 2026-11."),
      "category": _str("One spending category, e.g. food."),
      "bucket": _str("One bucket (transactions view).")},
+)
+
+
+# ── Phase 7 live check: what changed in the vault ────────────
+
+def vault_recent(db, days: int = 1):
+    """The vault files that syncs found added, changed or removed in the last N days."""
+    import assistant_state as st
+    import vault_sync
+
+    def when(naive_utc) -> str:
+        local = user_clock.to_local(naive_utc)
+        return f"{st.day_label(local.date())} at {local:%H:%M}"
+
+    found = vault_sync.recent_changes(db, days)
+    result = {"days": found["days"], "since": found["since"]}
+    for kind in ("added", "changed", "removed"):
+        result[kind] = [{"file_title": f["file_title"], "file_path": f["file_path"], "when": when(f["changed_at"])}
+                        for f in found[kind]]
+    result["count"] = sum(len(result[kind]) for kind in ("added", "changed", "removed"))
+    row = db.query(models.Integration).filter(models.Integration.provider == "vault").first()
+    synced = row.last_sync_at if row is not None else None
+    result["vault_last_synced"] = when(synced) if synced else "never"
+    period = "today" if found["days"] == 1 else f"in the last {found['days']} days"
+    if not result["count"]:
+        result["found"] = f"No vault files were added, changed or removed {period}."
+    return result, f"{result['count']} vault file(s) changed {period}"
+
+
+_register(
+    "vault_recent",
+    lambda db, a: vault_recent(db, days=int(a.get("days") or 1)),
+    "List the files in Bandile's Obsidian vault that were added, changed or removed in the "
+    "last N days, newest first, with when Founder OS saw each change. Use it for 'what did I "
+    "add to my vault today', 'what have I written this week', 'what changed in my vault'. "
+    "It lists files only: to say what a note contains, search for it with "
+    "query_cold_archive. Read-only.",
+    {"days": _int("How many days back, counting today as 1 (default 1; 7 for this week; at most 90).")},
 )

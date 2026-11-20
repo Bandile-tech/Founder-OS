@@ -416,9 +416,11 @@ def list_leads(status: str | None = None, db: Session = Depends(get_db)): ...
 - The realtime voice path converts `TOOL_SCHEMAS` automatically
   (`voice_realtime.realtime_tools`) and runs tools through `/voice/realtime/tool` with
   the same `run_tool`. Nothing extra to do for voice.
-- Tool count today: 66. The ceiling is 66: Phase 7 added four (`set_model_route`,
+- Tool count today: 67. The ceiling is 67: Phase 7 added four (`set_model_route`,
   `log_transactions`, `set_allocation_rules`, `get_finance`), each for a job no existing tool
-  did, and folded the two finance reads into one. Do not go above it without retiring a
+  did, and folded the two finance reads into one; the Phase 7 live check added `vault_recent`
+  at Bandile's request (no tool could say which vault files changed, and a search cannot
+  answer it). Do not go above it without retiring a
   tool: fold near-identical verbs into one tool (e.g. `draft_outreach` also revises when
   given a `message_id`, `get_finance` takes a `view`), and never add a tool whose job an
   existing tool already does.

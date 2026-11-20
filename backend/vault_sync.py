@@ -8,18 +8,24 @@ Public functions:
                             (the GitHub webhook, ``vault_webhook.py``).
   index_vault(db)         — walk the local clone and upsert chunks.
   search_vault(...)       — case-insensitive keyword search across chunks.
+  recent_changes(db, …)   — the files added, changed or removed in the last N days.
+  note_text(db, path)     — one file's whole text, put back together from its chunks.
   redact_credentials(...) — strip tokens from text before it is logged or returned.
 
 Every sync records when it ran and how it went on the ``vault`` integration row, which is
 what Settings shows as "synced X ago". The folder ``Founder OS/`` is never indexed: the
 assistant writes it (``vault_export.py``) from notes it already has.
+
+Every sync also notes which files it found different (``vault_changes``): a push lists them,
+and a sync that reads the whole vault compares each file's text with what was indexed. The
+first index of an empty table is the vault arriving, not a change, and records nothing.
 """
 
 import os
 import re
 import subprocess
 import threading
-from datetime import datetime
+from datetime import datetime, time, timedelta
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -35,6 +41,10 @@ VAULT_REPO_URL = os.environ.get(
 VAULT_LOCAL_PATH = os.environ.get("VAULT_LOCAL_PATH", "/tmp/bandile-vault")
 VAULT_SYNC_INTERVAL_HOURS = int(os.environ.get("VAULT_SYNC_INTERVAL_HOURS", "6"))
 EXPORT_FOLDER = "Founder OS"        # written by the assistant; never read back into the index
+CHANGES_KEPT_DAYS = 90              # how far back vault_recent can look; older rows are dropped
+# A meaning match below this cosine similarity is not an answer. Unrelated text still scores
+# 0.2 to 0.3 against most questions, so those matches are dropped rather than shown.
+DEFAULT_MIN_SCORE = 0.35
 
 # One git operation at a time: a push webhook, the scheduled sync and a manual sync can
 # arrive together, and two pulls in one clone corrupt each other.
@@ -43,6 +53,14 @@ _git_lock = threading.Lock()
 
 def vault_branch() -> str:
     return os.environ.get("VAULT_BRANCH") or "main"
+
+
+def min_score() -> float:
+    """The weakest meaning match that still counts (``VAULT_MIN_SCORE``, default 0.35)."""
+    try:
+        return float(os.environ.get("VAULT_MIN_SCORE") or DEFAULT_MIN_SCORE)
+    except ValueError:
+        return DEFAULT_MIN_SCORE
 
 # ── REDACTION ────────────────────────────────────────────────
 # In production VAULT_REPO_URL embeds a GitHub token
@@ -169,7 +187,7 @@ def sync_vault(db: Session, source: str = "manual") -> dict:
         counts = {"files_processed": 0, "chunks_created": 0, "chunks_updated": 0, "errors": [error]}
         record_sync(db, source, counts)
         return counts
-    counts = index_vault(db)
+    counts = index_vault(db, source=source)
     counts["errors"] = []
     _embed(db, counts)
     record_sync(db, source, counts)
@@ -188,7 +206,7 @@ def sync_paths(db: Session, changed: list[str], removed: list[str], source: str 
         record_sync(db, source, counts)
         return counts
     if cloned:
-        counts = index_vault(db)
+        counts = index_vault(db, source=source)
         counts["files_removed"] = 0
     else:
         local = Path(VAULT_LOCAL_PATH).resolve()
@@ -202,13 +220,16 @@ def sync_paths(db: Session, changed: list[str], removed: list[str], source: str 
             if local not in target.parents:               # a path that climbs out of the clone
                 continue
             if target.is_file():
-                created, replaced = _index_file(db, target, rel_path, now)
+                created, replaced = _index_file(db, target, rel_path, now, source,
+                                                before=_indexed_text(db, rel_path).get(rel_path, []))
                 counts["files_processed"] += 1
                 counts["chunks_created"] += created
                 counts["chunks_updated"] += replaced
             else:
                 if _remove_file(db, rel_path):
+                    _note_change(db, rel_path, "removed", now, source)
                     counts["files_removed"] += 1
+        _drop_old_changes(db, now)
         db.commit()
         print(f"[vault_sync] Push: {counts['files_processed']} file(s) re-read, "
               f"{counts['files_removed']} removed.")
@@ -235,15 +256,42 @@ def _remove_file(db: Session, rel_path: str) -> int:
     return db.query(models.ColdArchiveChunk).filter(models.ColdArchiveChunk.file_path == rel_path).delete()
 
 
-def _index_file(db: Session, md_path: Path, rel_path: str, now: datetime) -> tuple[int, int]:
-    """Replace one file's chunks with its current text. ``(chunks created, chunks replaced)``."""
+def _note_change(db: Session, rel_path: str, change: str, now: datetime, source: str | None) -> None:
+    db.add(models.VaultChange(file_path=rel_path, file_title=Path(rel_path).stem, change=change,
+                              changed_at=now, source=source))
+
+
+def _drop_old_changes(db: Session, now: datetime) -> None:
+    db.query(models.VaultChange).filter(
+        models.VaultChange.changed_at < now - timedelta(days=CHANGES_KEPT_DAYS)).delete()
+
+
+def _indexed_text(db: Session, rel_path: str | None = None) -> dict[str, list[str]]:
+    """The chunk texts in the index, in order, by file: every file, or just one."""
+    query = db.query(models.ColdArchiveChunk.file_path, models.ColdArchiveChunk.content)
+    if rel_path is not None:
+        query = query.filter(models.ColdArchiveChunk.file_path == rel_path)
+    out: dict[str, list[str]] = {}
+    for path, text in query.order_by(models.ColdArchiveChunk.file_path, models.ColdArchiveChunk.chunk_index).all():
+        out.setdefault(path, []).append(text)
+    return out
+
+
+def _index_file(db: Session, md_path: Path, rel_path: str, now: datetime,
+                source: str | None = None, before: list[str] | None = None) -> tuple[int, int]:
+    """Replace one file's chunks with its current text. ``(chunks created, chunks replaced)``.
+    ``before`` is the file's text in the index until now (empty for a file that is new to
+    it): a new file, or one whose text is different, is noted in ``vault_changes``; the same
+    text read again is not a change. ``None`` notes nothing."""
     try:
         content = md_path.read_text(encoding="utf-8", errors="replace")
     except Exception as exc:
         print(f"[vault_sync] Cannot read {rel_path}: {exc}")
         return 0, 0
-    replaced = _remove_file(db, rel_path)
     chunks = _chunk_text(content)
+    if before is not None and before != chunks:
+        _note_change(db, rel_path, "modified" if before else "added", now, source)
+    replaced = _remove_file(db, rel_path)
     for i, chunk in enumerate(chunks):
         db.add(models.ColdArchiveChunk(
             file_path=rel_path,
@@ -257,12 +305,14 @@ def _index_file(db: Session, md_path: Path, rel_path: str, now: datetime) -> tup
     return len(chunks), replaced
 
 
-def index_vault(db: Session) -> dict:
+def index_vault(db: Session, source: str | None = None) -> dict:
     """Walk all .md files in VAULT_LOCAL_PATH and upsert chunks. Chunks of a file that is no
-    longer in the vault are removed."""
+    longer in the vault are removed. Files whose text is different from what was indexed are
+    noted as changes, unless nothing was indexed before (the first index is not a change)."""
     local = Path(VAULT_LOCAL_PATH)
     if not local.exists():
         return {"files_processed": 0, "chunks_created": 0, "chunks_updated": 0}
+    indexed = _indexed_text(db)
 
     files_processed = 0
     chunks_created = 0
@@ -274,7 +324,8 @@ def index_vault(db: Session) -> dict:
         rel_path = str(md_path.relative_to(local)).replace("\\", "/")
         if not indexable(rel_path):
             continue
-        created, replaced = _index_file(db, md_path, rel_path, now)
+        created, replaced = _index_file(db, md_path, rel_path, now, source,
+                                        before=indexed.get(rel_path, []) if indexed else None)
         seen.add(rel_path)
         chunks_created += created
         chunks_updated += replaced
@@ -283,6 +334,8 @@ def index_vault(db: Session) -> dict:
     stale = [path for (path,) in db.query(models.ColdArchiveChunk.file_path).distinct().all() if path not in seen]
     for path in stale:
         _remove_file(db, path)
+        _note_change(db, path, "removed", now, source)
+    _drop_old_changes(db, now)
 
     db.commit()
     print(
@@ -295,6 +348,50 @@ def index_vault(db: Session) -> dict:
         "chunks_updated": chunks_updated,
         "files_removed": len(stale),
     }
+
+
+# ── WHAT CHANGED ─────────────────────────────────────────────
+
+def recent_changes(db: Session, days: int = 1) -> dict:
+    """The files syncs found added, changed or removed in the last ``days`` days, where a day
+    is the user's own (``days=1`` is today since midnight in ``FOUNDER_OS_TZ``). Each file is
+    listed once: new to the vault in that time is ``added`` however often it was edited
+    since, a file that came and went is left out, and the time is its latest change (naive
+    UTC). ``{"days", "since", "added", "changed", "removed"}``."""
+    import user_clock
+    days = max(1, min(int(days or 1), CHANGES_KEPT_DAYS))
+    first_day = user_clock.today() - timedelta(days=days - 1)
+    since = user_clock.to_utc(datetime.combine(first_day, time.min).replace(tzinfo=user_clock.tz()))
+    rows = (db.query(models.VaultChange).filter(models.VaultChange.changed_at >= since)
+            .order_by(models.VaultChange.changed_at, models.VaultChange.id).all())
+    history: dict[str, list] = {}
+    for row in rows:
+        history.setdefault(row.file_path, []).append(row)
+    out = {"days": days, "since": first_day, "added": [], "changed": [], "removed": []}
+    for path, events in history.items():
+        first, last = events[0], events[-1]
+        if first.change == "added" and last.change == "removed":
+            continue
+        kind = "removed" if last.change == "removed" else "added" if first.change == "added" else "changed"
+        out[kind].append({"file_path": path, "file_title": last.file_title, "changed_at": last.changed_at})
+    for kind in ("added", "changed", "removed"):
+        out[kind].sort(key=lambda f: f["changed_at"], reverse=True)
+    return out
+
+
+def note_text(db: Session, file_path: str) -> str:
+    """One file's text, put back together from its chunks. Each chunk after the first opens
+    with the last tenth of the one before it (``_chunk_text``); those words appear once."""
+    chunks = (db.query(models.ColdArchiveChunk).filter(models.ColdArchiveChunk.file_path == file_path)
+              .order_by(models.ColdArchiveChunk.chunk_index).all())
+    words: list[str] = []
+    previous = 0
+    for chunk in chunks:
+        these = chunk.content.split()
+        overlap = max(1, int(previous * _OVERLAP_RATIO)) if previous else 0
+        words += these[overlap:]
+        previous = len(these)
+    return " ".join(words)
 
 
 # ── SEARCH ───────────────────────────────────────────────────

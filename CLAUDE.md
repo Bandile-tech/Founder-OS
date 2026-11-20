@@ -1,8 +1,8 @@
 # CLAUDE.md
 
 Guidance for Claude Code (claude.ai/code) when working in this repository. It describes the
-system as it is after the intelligence-layer rebuild, Phases 5 and 6, and Phase 7 (branch
-`phase-7`: model routing, the personal finance ledger, the live vault, Web Push).
+system as it is after the intelligence-layer rebuild, Phases 5 and 6, and Phase 7 (merged to
+`main` and live: model routing, the personal finance ledger, the live vault, Web Push).
 `docs/FOUNDER_OS_2_SPEC.md` is the product vision with what is built and what is missing;
 `docs/REBUILD_SPEC.md` is the spec that produced the rebuild; `docs/phases/` holds the Phase 5
 and 6 specs, the build order and `PROGRESS.md` (what was built and every decision, Phase 7 included);
@@ -70,6 +70,7 @@ Environment (`backend/.env` locally, Render env vars in production):
 | `GITHUB_WEBHOOK_SECRET` | unset | Secret of the vault repository's push webhook. 32+ random characters; under 16 the webhook refuses every push |
 | `VAULT_REPO` / `VAULT_WRITE_TOKEN` | unset | The vault repository (`owner/name`) and a fine-grained token with Contents read and write on it only. Both needed for the daily export to `Founder OS/`; unset means the export is skipped |
 | `VAULT_BRANCH` | `main` | The vault branch that is pulled, watched and written |
+| `VAULT_MIN_SCORE` | `0.35` | The weakest meaning match a vault search still counts. Below it the assistant is told nothing relevant was found |
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | unset | Web Push keys (`python tools/vapid_keys.py`). Unset: no device can subscribe and nothing is pushed |
 | `VAPID_SUBJECT` | `FOUNDER_OS_API_URL`, else a noreply address | The contact a push service may use (`mailto:` or `https:`) |
 | `QUIET_HOURS` | unset | e.g. `22:00-05:30`. When set it replaces the quiet window in Settings and nothing at all is sent inside it |
@@ -160,7 +161,7 @@ before markdown runs.
 | `model_routes.py` | `set_route` (the tool, Settings and undo all go through it), `GET /models/routes`, `PATCH /models/routes/{task}` |
 | `openai_client.py` | Prompts: parser schema, orchestrator loop (`get_orchestrator_response`). Provider-neutral despite the name |
 | `orchestrator.py` | `POST /orchestrator` SSE bridge: history budget, memory, persistence of tool calls |
-| `orchestrator_tools.py` | The tool registry (66 tools, incl. `show_view` UI directives; newer ones are added with `_register`), `run_tool` (never raises) and `for_model` (plain-language tool output) |
+| `orchestrator_tools.py` | The tool registry (67 tools, incl. `show_view` UI directives; newer ones are added with `_register`), `run_tool` (never raises) and `for_model` (plain-language tool output) |
 | `conversation.py` | One default thread, verbatim window + rolling summary, replay of tool results, `GET /conversation/history` |
 | `assistant_state.py` | Everything the assistant knows about Bandile's state, from the current sources only (see below) |
 | `memory_service.py` | Long-term memory (`remember` tool, recall) |
@@ -173,13 +174,13 @@ before markdown runs.
 | `auth.py` | Password login, HMAC session tokens, route protection, CORS origins |
 | `voice_realtime.py` | Client secret for WebRTC voice, server-side tool bridge, transcript save |
 | `usage.py` | `GET /usage/summary` from `llm_usage` |
-| `vault_sync.py` | Obsidian vault clone/index (full, or only the files a push changed); semantic search when embedded |
+| `vault_sync.py` | Obsidian vault clone/index (full, or only the files a push changed); semantic search when embedded; which files each sync found added, changed or removed (`vault_changes`, read by `vault_recent`) |
 | `vault_webhook.py` / `vault_export.py` | `POST /vault/webhook` (GitHub push, HMAC-checked); the daily export of the assistant's notes into the vault folder `Founder OS/` |
 | `finance.py` | The personal ledger: buckets, transactions in whole ngwee, allocation rules, `log_transactions` / `set_allocation_rules` / `get_finance`, `/finance/*` |
 | `push.py` | Web Push: device subscriptions, VAPID, `send` (called only by `notify.dispatch`) |
 | `user_clock.py` | The user's clock: `today()` and `now()` in `FOUNDER_OS_TZ`. No app code calls `date.today()` or `datetime.now()` |
 | `models.py` / `schemas.py` / `database.py` | ORM, Pydantic, engine (SQLite locally, Postgres on Supabase) |
-| `migrations/` | Hand-written, re-runnable, wired into startup (`m010`–`m013` are the rebuild, `m014`–`m022` Phases 5 and 6, `m023` the review round, `m025` milestone triggers on payments and recurring revenue, `m026` model routes and prices, `m027` the ledger, `m028` vault exports, `m029` Web Push). A data backfill that must run once uses `_helpers.claim_once` (`migration_marks`) |
+| `migrations/` | Hand-written, re-runnable, wired into startup (`m010`–`m013` are the rebuild, `m014`–`m022` Phases 5 and 6, `m023` the review round, `m025` milestone triggers on payments and recurring revenue, `m026` model routes and prices, `m027` the ledger, `m028` vault exports, `m029` Web Push, `m030` vault changes). A data backfill that must run once uses `_helpers.claim_once` (`migration_marks`) |
 | `market_intel/` | Research agent: roles, weighted scoring (`scoring.py`), standing objectives (`objectives.py`) |
 | `business_common.py` | Shared helpers: fuzzy matching, money, `parse_day`, `parse_when` |
 | `leads.py` / `outreach.py` / `outreach_channels.py` | Leads, qualification, drafted messages, the approval gate, the channels (WhatsApp link, email, manual) |
@@ -294,3 +295,7 @@ on new tables. No destructive migrations.
   shows when the schedule last ran and raises an alert past 26 hours.
 - **Live vault**: a push to the vault repository re-reads only the changed files; once a day
   the assistant's notes are written to the vault folder `Founder OS/`, which is never indexed.
+  A vault search (`query_cold_archive`) drops meaning matches under `VAULT_MIN_SCORE`, says
+  nothing relevant was found when none is left, and otherwise hands the model the best
+  match's whole text. Every sync records the files whose text changed; `vault_recent` lists
+  them for the last N days.

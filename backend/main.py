@@ -238,6 +238,8 @@ async def startup():
         run_m028(db)        # m028 — vault_exports
         from migrations.m029_web_push import run as run_m029
         run_m029(db)        # m029 — push_subscriptions, notifications.target, notification defaults
+        from migrations.m030_vault_changes import run as run_m030
+        run_m030(db)        # m030 — vault_changes
         _validate_schema(engine)   # raises if any ORM column is absent from the live DB
         _seed_non_negotiables_if_empty(db)
         _verify_seed_integrity(db)

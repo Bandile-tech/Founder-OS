@@ -73,7 +73,7 @@ Important: Opening a workspace should not interrupt the conversation. The assist
 
 **Status: Partial.** Evidence: the daily command centre and task extraction are built (`backend/briefing.py`, `apply_parse_updates` in `main.py`, `actions.py`). Proactive communication is built for Telegram (`notify.py`, `agents/briefing_courier.py`) but no account is set up and the external schedule ships switched off (`docs/adr/0001`, amendment), so nothing reaches Bandile while the app is closed. Weekly planning is not built (`ROADMAP.md`, Phase 3). Outbound voice calls are not built.
 
-**Phase 7 (branch `phase-7`):** the schedule now runs three times a day and Web Push is the first channel: the morning briefing, an evening check, reminders before exams and applications (30, 14, 7, 3 and 1 days out) and before tasks (3 and 1), payments due and the cost-cap alert reach Bandile with the app closed (`backend/push.py`, `notify.py`, `.github/workflows/jobs-tick.yml`, `tests/test_phase7_push.py`). The VAPID keys and the two repository secrets still have to be set.
+**Phase 7 (merged to `main` and live):** the schedule now runs three times a day and Web Push is the first channel: the morning briefing, an evening check, reminders before exams and applications (30, 14, 7, 3 and 1 days out) and before tasks (3 and 1), payments due and the cost-cap alert reach Bandile with the app closed (`backend/push.py`, `notify.py`, `.github/workflows/jobs-tick.yml`, `tests/test_phase7_push.py`). Checked on the deployed app on 20 November 2026: the tick run by hand, and notifications arriving on an iPhone (`docs/phases/PROGRESS.md`, "Phase 7 — merged and live").
 
 Core functionality
 
@@ -624,7 +624,7 @@ Founder OS should give more time to study, build Aether AI, develop the personal
 
 # 14. Model routing and cost
 
-**Status: Built.** Built on the `phase-7` branch; on `main` once its pull request is merged. Evidence: `backend/llm.py`, `backend/llm_adapters/`, `backend/model_routes.py`,
+**Status: Built.** Merged to `main` and live; a model switch and its undo were checked on the deployed app on 20 November 2026. Evidence: `backend/llm.py`, `backend/llm_adapters/`, `backend/model_routes.py`,
 migration `m026`, `tests/test_phase7_model_router.py`; `docs/phases/PROGRESS.md`, Phase 7, Stage 1.
 
 Founder OS should not be tied to one model provider or one model.
@@ -642,7 +642,7 @@ Founder OS should not be tied to one model provider or one model.
 
 # 15. Personal finance ledger
 
-**Status: Built.** Built on the `phase-7` branch; on `main` once its pull request is merged. Evidence: `backend/finance.py`, migration `m027`, the Budget page in
+**Status: Built.** Merged to `main` and live; a split income and a client payment recorded once were checked on the deployed app on 20 November 2026. Evidence: `backend/finance.py`, migration `m027`, the Budget page in
 `frontend/index.html`, `tests/test_phase7_finance.py`; `docs/phases/PROGRESS.md`, Phase 7, Stage 2.
 
 Bandile says what he spent or received, and every balance is up to date.
@@ -658,9 +658,10 @@ Bandile says what he spent or received, and every balance is up to date.
 
 # 16. Second brain sync
 
-**Status: Built.** Built on the `phase-7` branch; on `main` once its pull request is merged. The webhook, the token and Obsidian's auto-push still have to be set up
-(`docs/DEPLOY.md`, Phase 7). Evidence: `backend/vault_webhook.py`, `vault_export.py`, `vault_sync.sync_paths`,
-migration `m028`, `tests/test_phase7_vault.py`; `docs/phases/PROGRESS.md`, Phase 7, Stage 3.
+**Status: Built.** Merged to `main` and live; the webhook re-indexing a push was checked on the deployed app on 20 November 2026
+(set-up steps: `docs/DEPLOY.md`, Phase 7). Evidence: `backend/vault_webhook.py`, `vault_export.py`, `vault_sync.sync_paths`,
+migrations `m028` and `m030`, `tests/test_phase7_vault.py`, `tests/test_phase7_vault_answers.py`; `docs/phases/PROGRESS.md`,
+Phase 7, Stage 3 and "Live-check fixes".
 
 The Obsidian vault and Founder OS should agree within minutes, in both directions.
 
@@ -669,10 +670,13 @@ The Obsidian vault and Founder OS should agree within minutes, in both direction
 - Once a day, the notes the assistant created or changed are written into one vault folder, `Founder OS/`.
   Only the assistant writes there, so nothing conflicts.
 - Settings shows when the vault was last synced. The manual sync stays as a fallback.
+- The assistant answers from the vault honestly. When nothing in it is close to the question, it says nothing
+  relevant was found. When Bandile asks about a note, it answers from the note's own text and does not offer
+  to read it. When he asks what he added or changed ("what did I add to my vault today"), it lists the files.
 
 # 17. Claude connector (MCP)
 
-**Status: Missing.** Evidence: nothing in `backend/` serves the Model Context Protocol. Planned as Phase 7,
+**Status: Missing.** Not started. Evidence: nothing in `backend/` serves the Model Context Protocol. Planned as Phase 7,
 Stage 5, and only after Bandile approves the authentication design; otherwise Phase 8 (`ROADMAP.md`).
 
 Founder OS becomes a connector. Bandile's Claude projects ask it directly instead of him uploading

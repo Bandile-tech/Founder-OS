@@ -142,6 +142,7 @@ def _run_every_tool(db) -> dict:
             ("add_todos", {"items": ["Call the bank", "Book the dentist"]}),
             ("complete_task", {"query": "Call the bank"}),
             ("query_cold_archive", {"query": "pricing"}),
+            ("vault_recent", {"days": 7}),
             ("run_market_research_agent", {"objective": "find painful problems"}),
             ("promote_research_opportunity", {"finding_id": 999}),
             ("remember", {"text": "Prefers evening study blocks", "kind": "preference"}),

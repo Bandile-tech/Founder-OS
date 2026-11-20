@@ -1504,6 +1504,20 @@ class VaultExport(Base):
     exported_at  = Column(DateTime, nullable=True)
 
 
+class VaultChange(Base):
+    """A vault file a sync found added, modified or removed, and when Founder OS saw it.
+    What ``vault_recent`` reads. Bookkeeping, like a cache: it is not change-logged, and rows
+    older than ninety days are dropped by the next sync."""
+    __tablename__ = "vault_changes"
+
+    id         = Column(Integer, primary_key=True, index=True)
+    file_path  = Column(String, nullable=False)           # relative path, as in cold_archive_chunks
+    file_title = Column(String, nullable=False)
+    change     = Column(String, nullable=False)           # added | modified | removed
+    changed_at = Column(DateTime, nullable=False, index=True)   # naive UTC: when the sync ran
+    source     = Column(String, nullable=True)            # webhook | startup | scheduled | manual
+
+
 # ── PHASE 7, STAGE 4: WEB PUSH ───────────────────────────────
 
 class PushSubscription(Base):
