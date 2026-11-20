@@ -106,10 +106,11 @@ jobs:
               SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
               WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relrowsecurity
                 AND c.relname IN ('model_routes', 'model_prices', 'buckets', 'ledger_transactions',
-                                  'allocation_rules', 'vault_exports', 'push_subscriptions')")
-            if [ "$found" != "7" ]; then echo "$database: row-level security is on for $found of 7 Phase 7 tables"; exit 1; fi
+                                  'allocation_rules', 'vault_exports', 'push_subscriptions',
+                                  'vault_changes')")
+            if [ "$found" != "8" ]; then echo "$database: row-level security is on for $found of 8 Phase 7 tables"; exit 1; fi
           done
-          echo "Row-level security is on for all seven Phase 7 tables on both databases."
+          echo "Row-level security is on for all eight Phase 7 tables on both databases."
       - name: The upgrade seeded the routes, moved the briefing times, kept the exam reminder days and set the task ones
         env:
           PGPASSWORD: founder
